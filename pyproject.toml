@@ -1,0 +1,76 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "a3"
+authors = [
+  { name="Romain Sacchi", email="romain.sacchi@psi.ch" },
+]
+maintainers = [
+  { name="Romain Sacchi", email="romain.sacchi@psi.ch" }
+]
+description = "Country-specific characterization factors for the Brightway LCA framework"
+readme = "README.md"
+dynamic = ["dependencies", "version"]
+classifiers = [
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: BSD License",
+    "Natural Language :: English",
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+    "Topic :: Scientific/Engineering",
+]
+requires-python = ">=3.10, <3.13"
+
+[project.urls]
+source = "https://github.com/Laboratory-for-Energy-Systems-Analysis/a3"
+homepage = "https://github.com/Laboratory-for-Energy-Systems-Analysis/a3"
+tracker = "https://github.com/Laboratory-for-Energy-Systems-Analysis/a3/issues"
+
+[project.optional-dependencies]
+testing = [
+    "setuptools",
+    "pytest",
+]
+
+docs = [
+    "sphinx-rtd-theme"
+]
+
+[tool.setuptools]
+license-files = ["LICENSE"]
+include-package-data = true
+packages = ["a3"]
+
+[tool.setuptools.package-data]
+a3 = ["data/**/*"]
+
+[tool.setuptools.dynamic]
+dependencies = {file = ["requirements.txt"]}
+version = {attr = "a3.__version__"}
+
+[tool.pytest.ini_options]
+markers = [
+    # marks tests that require ecoinvent (to be disabled on Travis)
+    "ecoinvent",
+    "serial"
+]
+norecursedirs = [
+    "dist",
+    "build",
+    ".tox"
+]
+testpaths = ["tests/*.py"]
+
+[tool.flake8]
+# Some sane defaults for the code style checker flake8
+max_line_length = 88
+extend_ignore = ["E203", "W503"]
+exclude = [
+    ".tox",
+    "build",
+    "dist",
+    ".eggs",
+    "docs/conf.py",
+]

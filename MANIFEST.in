@@ -1,0 +1,7 @@
+include a3/data/*.txt
+include a3/data/*.csv
+include a3/data/*.json
+include a3/data/*.yml
+include a3/data/*.yaml
+include a3/data/metadata/*.yaml
+

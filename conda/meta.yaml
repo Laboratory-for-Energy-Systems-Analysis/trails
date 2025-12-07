@@ -1,0 +1,49 @@
+package:
+  name: a3
+  version: {{ environ['VERSION'] }}
+
+source:
+  path: ..
+
+build:
+  noarch: python
+  number: 0
+  script: python -m pip install --no-deps --ignore-installed .
+  script_env:
+    - VERSION
+    - CONDA_BLD_PATH
+
+requirements:
+  host:
+    - python >=3.10, <3.13
+    - pip
+    - setuptools
+    - bw2calc
+    - bw2data
+
+  run:
+    - python >=3.10, <3.13
+    - numpy
+    - pandas
+    - scipy
+    - pyyaml
+    - country_converter>=1.3.1
+    - constructive_geometries>=1.0.0
+    - prettytable
+    - sparse >=0.13.0
+    - plotly
+    - highspy
+    - packaging
+    - bw2calc
+    - bw2data
+
+
+test:
+  imports:
+    - a3
+
+about:
+  home: https://github.com/Laboratory-for-Energy-Systems-Analysis/a3
+  license: MIT License
+  summary: 'Edge-specific characterization factors for the LCA framework Brightway2'
+license_family: MIT

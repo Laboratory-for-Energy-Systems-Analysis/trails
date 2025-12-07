@@ -1,0 +1,10 @@
+numpy
+pandas
+scipy
+pyyaml
+sparse >=0.13.0
+datapackage
+packaging
+bw2calc
+pyprind
+plotly

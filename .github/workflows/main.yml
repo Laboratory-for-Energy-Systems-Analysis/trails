@@ -1,0 +1,233 @@
+name: Github Action
+on: [push, pull_request]
+
+jobs:
+  clean:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Black formatting
+        uses: lgeiger/black-action@v1.0.1
+        with:
+          args: "./"
+
+      - name: Check for modified files
+        id: git-check
+        run: |
+          if git diff-index --quiet HEAD --; then
+            echo "modified=false" >> $GITHUB_OUTPUT
+          else
+            echo "modified=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Push changes
+        if: steps.git-check.outputs.modified == 'true'
+        run: |
+          git config --global user.email "r_s@me.com"
+          git config --global user.name "romainsacchi"
+          git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/$GITHUB_REPOSITORY
+          git checkout $GITHUB_HEAD_REF
+          git commit -am "Black reformating"
+          git push
+
+  # === CROSS-PLATFORM PYTEST ===
+  build:
+    name: tests (${{ matrix.os }}, py${{ matrix.python-version }})
+    needs: clean
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python-version: ["3.11", "3.12", ]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install -U pip
+          pip install brightway25
+          pip install -r requirements.txt
+          pip install pytest pytest-forked
+          pip install -e . --verbose
+
+      - name: Set up test database
+        env:
+          EI_USERNAME: ${{ secrets.EI_USERNAME }}
+          EI_PASSWORD: ${{ secrets.EI_PASSWORD }}
+        run: |
+          python tests/setup_testdb.py
+
+      # Create debug dir in a cross-platform way
+      - name: Create debug directory
+        run: python -c "import pathlib; p=pathlib.Path('pytest-debug'); p.mkdir(parents=True, exist_ok=True); print('Created', p.resolve())"
+
+      # POSIX: run everything with subprocess isolation
+      - name: Run tests (*nix, forked)
+        if: runner.os != 'Windows'
+        env:
+          EI_USERNAME: ${{ secrets.EI_USERNAME }}
+          EI_PASSWORD: ${{ secrets.EI_PASSWORD }}
+          PYTEST_DEBUG_DIR: pytest-debug
+        run: |
+          python -c "import platform; print('Platform:', platform.platform())"
+          pytest --forked -q
+
+      # Windows: run without forking (either skip forked-marked tests or run all if safe)
+      - name: Run tests (Windows, no fork)
+        if: runner.os == 'Windows'
+        env:
+          EI_USERNAME: ${{ secrets.EI_USERNAME }}
+          EI_PASSWORD: ${{ secrets.EI_PASSWORD }}
+          PYTEST_DEBUG_DIR: pytest-debug
+        run: |
+          python -c "import platform; print('Platform:', platform.platform())"
+          pytest -q -m "not forked"
+
+      # Linux + macOS
+      - name: List debug dir (diagnostics) — *nix
+        if: always() && runner.os != 'Windows'
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          for p in ["pytest-debug", "bw-work", "a3.log"]:
+              d = Path(p)
+              print(("[OK] " if d.exists() else "[MISS] ") + p)
+              if d.is_dir():
+                  for f in d.rglob("*"):
+                      if f.is_file():
+                          print("  -", f)
+          PY
+
+      # Windows
+      - name: List debug dir (diagnostics) — Windows
+        if: always() && runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $code = @"
+          from pathlib import Path
+          for p in ["pytest-debug", "bw-work", "a3.log"]:
+            d = Path(p)
+            print(("[OK] " if d.exists() else "[MISS] ") + p)
+            if d.is_dir():
+              for f in d.rglob("*"):
+                if f.is_file():
+                  print("  -", f)
+          "@
+          Set-Content -Path diag.py -Value $code -Encoding UTF8
+          python diag.py
+
+      - name: Upload pytest artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pytest-debug-${{ github.run_id }}-${{ matrix.os }}-py${{ matrix.python-version }}
+          path: |
+            pytest-debug/**
+            a3.log
+          include-hidden-files: true
+
+  Pypi:
+    runs-on: ubuntu-latest
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ "ubuntu-latest" ]
+        python-version: [ "3.11" ]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pypa/build
+        run: python -m pip install build
+      - name: Build a binary wheel and a source tarball
+        run: python -m build
+      - name: Publish distribution 📦 to PyPI if Release
+        if: startsWith(github.ref, 'refs/tags')
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          password: ${{ secrets.PYPI_API_TOKEN }}
+          skip-existing: true
+          verbose: true
+      - name: Publish distribution 📦 to Test PyPI if Push
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          password: ${{ secrets.TEST_PYPI_API_TOKEN }}
+          repository-url: https://test.pypi.org/legacy/
+          skip-existing: true
+          verbose: true
+
+  conda:
+    name: (conda build)
+    runs-on: ubuntu-latest
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ "ubuntu-latest" ]
+        python-version: [ "3.11" ]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: conda-incubator/setup-miniconda@v3
+        with:
+          python-version: ${{ matrix.python-version }}
+          channels: conda-forge,cmutel,konstantinstadler,haasad,pascallesage,romainsacchi
+          allow-softlinks: true
+          channel-priority: strict
+          auto-update-conda: true
+          activate-environment: test
+      - name: Conda info
+        shell: bash -l {0}
+        run: conda info
+      - name: Publish all variants 📦 to Anaconda if Push and if main branch
+        if: startsWith(github.ref, 'refs/heads/main')
+        shell: bash -l {0}
+        run: |
+          PKG_NAME=a3
+          USER=romainsacchi
+          conda install anaconda-client
+          conda install conda-build
+          mkdir ~/conda-bld
+          conda config --set anaconda_upload no
+          export CONDA_BLD_PATH=~/conda-bld
+          export VERSION=`date +%Y.%m.%d`
+          conda build conda/ --old-build-string
+          BUILT_PACKAGES=$(find $CONDA_BLD_PATH -type f \( -name "*.tar.bz2" -o -name "*.conda" \))
+          echo "Built packages:"
+          echo $BUILT_PACKAGES
+          for PACKAGE in $BUILT_PACKAGES; do
+            echo "Uploading $PACKAGE"
+            anaconda -t ${{ secrets.ANACONDA_CLOUD }} upload -u $USER $PACKAGE --force
+          done
+
+  testconda:
+    name: (conda test ${{ matrix.python-version }}, ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    needs: conda
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ["ubuntu-latest"]
+        python-version: ["3.11", "3.12",]
+        solver: ["classic"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: conda-incubator/setup-miniconda@v3
+        with:
+          python-version: ${{ matrix.python-version }}
+          channels: conda-forge,cmutel,konstantinstadler,haasad,pascallesage,romainsacchi
+          allow-softlinks: true
+          auto-update-conda: true
+          activate-environment: test
+          conda-solver: ${{ matrix.solver }}
+      - name: Pull distribution 📦 from Anaconda and test it if master branch
+        run: |
+          conda install -y "python==${{ matrix.python-version }}.*"
+          conda update a3
