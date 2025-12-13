@@ -1,7 +1,7 @@
 # `TRAILS`: Temporal Routing And Aggregation of Impacts across Life-cycle Systems
 
 <p align="center">
-  <img src="https://github.com/Laboratory-for-Energy-Systems-Analysis/trails/blob/main/assets/permanent/trails_logo_light_gray_bg_dark_frame.png" height="110"/>
+  <img src="https://raw.githubusercontent.com/romainsacchi/trails/refs/heads/main/assets/permanent/trails_logo_grey_on_white.png" height="110"/>
 </p>
 
 [![PyPI version](https://badge.fury.io/py/trails.svg)](https://badge.fury.io/py/trails)
