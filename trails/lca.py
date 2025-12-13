@@ -16,7 +16,7 @@ def _nearest_metadata_label_for_year(trails: Trails, year: int) -> str:
     Used only as a fallback if the exact label is not present.
     """
     if not trails.activity_indices:
-        raise ValueError("A3.activity_indices is empty – no metadata available.")
+        raise ValueError("Trails.activity_indices is empty – no metadata available.")
 
     labels = list(trails.activity_indices.keys())
     years = np.array([int(lbl) for lbl in labels])
@@ -31,10 +31,10 @@ def build_datapackage_for_year_from_trails(
 ):
     """
     Build a bw_processing.Datapackage for a given calendar year
-    directly from A3.A / A3.B.
+    directly from Trails.A / Trails.B.
 
     IMPORTANT:
-    - Matrix indices (rows/cols) are taken as-is from A3 (which already
+    - Matrix indices (rows/cols) are taken as-is from Trails (which already
       reflect the indices from A_matrix_index.csv / B_matrix_index.csv).
     - Metadata (technosphere_indices, biosphere_indices) is taken from the
       *corresponding* index CSV for that scenario/year if available.
@@ -78,8 +78,8 @@ def build_datapackage_for_year_from_trails(
     else:
         meta_label = _nearest_metadata_label_for_year(trails, int(label_for_matrix))
 
-    act_meta = a3.activity_indices.get(meta_label, {})
-    bio_meta = a3.biosphere_indices.get(meta_label, {})
+    act_meta = trails.activity_indices.get(meta_label, {})
+    bio_meta = trails.biosphere_indices.get(meta_label, {})
 
     # ------------------------------------------------------------------
     # 3) Build technosphere entries from A_t
@@ -98,7 +98,7 @@ def build_datapackage_for_year_from_trails(
     indices_A["row"] = prod_idx
     indices_A["col"] = act_idx
 
-    data_A = np.asarray(A_data, dtype=a3.value_dtype)
+    data_A = np.asarray(A_data, dtype=trails.value_dtype)
     flip_A = np.zeros(nnz_A, dtype=bool)
 
     dist_A = np.zeros(nnz_A, dtype=bwp.UNCERTAINTY_DTYPE)
@@ -125,7 +125,7 @@ def build_datapackage_for_year_from_trails(
     indices_B["row"] = flow_idx
     indices_B["col"] = act_idx_B
 
-    data_B = np.asarray(B_data, dtype=a3.value_dtype)
+    data_B = np.asarray(B_data, dtype=trails.value_dtype)
     flip_B = None
 
     dist_B = np.zeros(nnz_B, dtype=bwp.UNCERTAINTY_DTYPE)
@@ -230,7 +230,7 @@ def build_datapackage_for_year_from_trails(
     return dp, technosphere_indices, biosphere_indices, uncertain_parameters
 
 def lca(
-    a3: Trails,
+    trails: Trails,
     start_year: int,
     start_act_idx: int,
     methods: List[str],
@@ -251,7 +251,7 @@ def lca(
       1. Temporal traversal -> (year, activity) frontier + provenance.
       2. Frontier -> demand vector f_t.
       3. From provenance -> per-root (first-level child) demand vectors.
-      4. Build bw_processing datapackage from A3.A/B.
+      4. Build bw_processing datapackage from Trails.A/B.
       5. Run bw2calc LCI:
          - once for the total FU,
          - once per root FU to get scores_per_root.
@@ -274,7 +274,7 @@ def lca(
     # 1) Temporal traversal WITH provenance
     # ------------------------------------------------------------------
     # 1) Temporal traversal WITH provenance (path-based)
-    frontier, provenance = a3.temporal_traversal(
+    frontier, provenance = trails.temporal_traversal(
         start_year=start_year,
         start_act_idx=start_act_idx,
         amount=amount,
@@ -285,7 +285,7 @@ def lca(
     )
 
     # 2) Frontier -> per-year total demand vectors
-    f_by_year = a3.frontier_to_demand_vectors(frontier)
+    f_by_year = trails.frontier_to_demand_vectors(frontier)
 
     # 3) Build per-year, per-root demand from provenance
     #    fu_per_root_by_year[year][root_idx][act_idx] = amount
@@ -328,10 +328,10 @@ def lca(
                 f"nonzero activities={len(nonzero_indices)}"
             )
 
-        # 4) Build datapackage for this year (from A3)
+        # 4) Build datapackage for this year (from Trails)
         if year not in dp_cache:
-            dp, tech_idx, bio_idx, uncertain_params = build_datapackage_for_year_from_a3(
-                a3=a3,
+            dp, tech_idx, bio_idx, uncertain_params = build_datapackage_for_year_from_trails(
+                trails=trails,
                 year=year,
                 remove_uncertainty=remove_uncertainty,
             )
@@ -419,7 +419,7 @@ def lca(
     return results_by_year
 
 def compute_node_impact_intensities(
-        a3: Trails,
+        trails: Trails,
         nodes: List[Tuple[int, int]],
         methods: List[str],
         remove_uncertainty: bool = True,
@@ -433,15 +433,15 @@ def compute_node_impact_intensities(
 
     Parameters
     ----------
-    a3 : Trails
-        A3 wrapper with A/B matrices and scenario info.
+    trails : Trails
+        Trails wrapper with A/B matrices and scenario info.
     nodes : list[(year, act_idx)]
         Nodes for which we want impact intensities.
     methods : list[str]
         LCIA methods (as in fill_characterization_factors_matrices).
         For now, we assume a single method and return a scalar per node.
     remove_uncertainty : bool
-        Passed through to build_datapackage_for_year_from_a3.
+        Passed through to build_datapackage_for_year_from_trails.
     debug : bool
         Print debug info if True.
 
@@ -473,8 +473,8 @@ def compute_node_impact_intensities(
     for year, acts in sorted(nodes_by_year.items()):
         # 1) Datapackage for this year
         if year not in dp_cache:
-            dp, tech_idx, bio_idx, uncertain_params = build_datapackage_for_year_from_a3(
-                a3=a3,
+            dp, tech_idx, bio_idx, uncertain_params = build_datapackage_for_year_from_trails(
+                trails=trails,
                 year=year,
                 remove_uncertainty=remove_uncertainty,
             )
@@ -499,7 +499,7 @@ def compute_node_impact_intensities(
 
             # We can re-use the biosphere_indices built in dp helper,
             # but we only have bio_idx here if we return it from helper.
-            # However, build_datapackage_for_year_from_a3 already returned bio_idx:
+            # However, build_datapackage_for_year_from_trails already returned bio_idx:
             #   biosphere_indices: Dict[(name, comp, subcomp, unit), int]
             bio_idx = dp_cache[year][2]
 

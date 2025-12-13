@@ -10,8 +10,7 @@ import pyprind
 from .datapackage import (
     load_matrices_from_package,
     interpolate_to_annual,
-    load_indices_from_package,
-    load_temporal_distributions,
+    load_indices_from_package
 )
 
 from .temporal_distributions import TemporalDistribution
@@ -43,11 +42,6 @@ class Trails:
 
         self.A: Optional[sparse.COO] = None
         self.B: Optional[sparse.COO] = None
-
-        # Global classification-based temporal distributions (old design, maybe unused later)
-        self.temporal_distributions = load_temporal_distributions(
-            package, resource_name="temporal_distributions.csv"
-        )
 
         # --- NEW: this will hold per-exchange temporal info
         self.temporal_exchanges: Dict = {}

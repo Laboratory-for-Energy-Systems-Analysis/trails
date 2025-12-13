@@ -7,3 +7,5 @@ hydropower plant construction;hydropower plant;unit;RER;4
 natural gas electricity;electricity;kWh;RER;5
 natural gas plant construction;natural gas plant;unit;RER;6
 hydro electricity;electricity;kWh;RER;7
+wind turbine construction;wind turbine;unit;RER;8
+wind electricity;electricity;kWh;RER;9

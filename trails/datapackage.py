@@ -107,7 +107,6 @@ def load_matrices_from_package(
             if prod_idx > max_product_idx:
                 max_product_idx = prod_idx
 
-            # >>> NEW: parse temporal_* columns if present
             td_raw = row.get("temporal_distribution")
             if td_raw is not None and str(td_raw).strip() != "":
                 try:
@@ -344,46 +343,5 @@ def load_indices_from_package(package):
         biosphere_indices[scenario_label] = mapping
 
     return activity_indices, biosphere_indices
-
-
-def load_temporal_distributions(package, resource_name="temporal_distributions.csv"):
-    """Load temporal vintaging rules from a CSV resource, if present."""
-    temporal_rules = []
-
-    for res in package.resources:
-        desc = res.descriptor or {}
-        path_str = desc.get("path")
-        if not path_str:
-            continue
-        path = PurePosixPath(path_str)
-        if path.name != resource_name:
-            continue
-
-        rows = res.read(keyed=True)
-        for row in rows:
-
-            minimum = _parse_float_or_none(row.get("minimum"))
-            maximum = _parse_float_or_none(row.get("maximum"))
-            loc = _parse_float_or_none(row.get("loc"))
-            scale = _parse_float_or_none(row.get("scale"))
-            shape = _parse_float_or_none(row.get("shape"))
-
-            rule = {
-                "classification_system": row.get("classification_system"),
-                "classification_code": row.get("classification_code"),
-                "distribution_type": row.get("distribution_type"),
-                "loc": loc,
-                "scale": scale,
-                "shape": shape,
-                "min": minimum,
-                "max": maximum,
-            }
-
-            temporal_rules.append(rule)
-
-        break  # assumes only one such resource
-
-    return temporal_rules
-
 
 

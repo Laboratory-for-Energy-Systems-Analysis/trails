@@ -1,7 +1,7 @@
 # `TRAILS`: Temporal Routing And Aggregation of Impacts across Life-cycle Systems
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/romainsacchi/trails/refs/heads/main/assets/permanent/trails_logo_grey_on_white.png" height="110"/>
+  <img src="https://github.com/Laboratory-for-Energy-Systems-Analysis/trails/blob/main/assets/permanent/trails_logo_light_gray_bg_dark_frame.png" height="110"/>
 </p>
 
 [![PyPI version](https://badge.fury.io/py/trails.svg)](https://badge.fury.io/py/trails)
@@ -13,7 +13,7 @@ It provides a formal framework for **temporal graph traversal** of supply chains
 the routing, aggregation, and attribution of impacts across **multiple time horizons, scenarios, 
 and technological transitions**.
 
-`TRAILS` integrates natively data packages produced by `premise`.
+`TRAILS` integrates data packages produced by `premise`.
 
 ---
 
@@ -25,10 +25,9 @@ are considered.
 
 `TRAILS` addresses this limitation by introducing:
 
-* **Explicit temporal dimensions** in technosphere and biosphere matrices  
-* **Time-aware routing of flows** across supply chains  
+* Handling of **temporal dimensions** in technosphere and biosphere matrices  
+* **Time-aware routing of exchanges** across supply chains  
 * **Scenario-dependent inventories and impacts**  
-* **Depth- and horizon-resolved impact attribution**
 
 Instead of asking *“What is the impact of this system?”*, `TRAILS` allows you to ask:
 
@@ -60,10 +59,7 @@ Impacts can be aggregated or compared across:
 
 * Temporal LCA engine with explicit time handling  
 * Deep supply-chain traversal  
-* Scenario-aware computation  
-* Sparse, high-performance backend  
-* Brightway integration  
-* Composable workflows  
+* Scenario-aware computation
 
 ---
 

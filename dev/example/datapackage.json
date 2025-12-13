@@ -7,15 +7,17 @@
       "name": "classifications",
       "path": "classifications/classifications.csv"
     },
-    {
-      "name": "temporal_distributions",
-      "path": "temporal_distributions/temporal_distributions.csv"
-    },
 
     { "name": "A", "path": "inventories/2005/A.csv", "dialect": {"delimiter": ";"} },
     { "name": "B", "path": "inventories/2005/B.csv", "dialect": {"delimiter": ";"} },
     { "name": "A_indices", "path": "inventories/2005/A_matrix_index.csv", "dialect": {"delimiter": ";"} },
     { "name": "B_indices", "path": "inventories/2005/B_matrix_index.csv", "dialect": {"delimiter": ";"} },
+
+    { "name": "A", "path": "inventories/2020/A.csv", "dialect": {"delimiter": ";"} },
+    { "name": "B", "path": "inventories/2020/B.csv", "dialect": {"delimiter": ";"} },
+    { "name": "A_indices", "path": "inventories/2020/A_matrix_index.csv", "dialect": {"delimiter": ";"} },
+    { "name": "B_indices", "path": "inventories/2020/B_matrix_index.csv", "dialect": {"delimiter": ";"} },
+
 
     { "name": "A", "path": "inventories/2050/A.csv", "dialect": {"delimiter": ";"} },
     { "name": "B", "path": "inventories/2050/B.csv", "dialect": {"delimiter": ";"} },
@@ -29,8 +31,7 @@
   ],
 
   "custom": {
-    "time_slices": [2005, 2050, 2100],
-    "temporal_profiles_resource": "temporal_distributions",
+    "time_slices": [2005, 2020, 2050, 2100],
     "classification_resource": "classifications"
   }
 }

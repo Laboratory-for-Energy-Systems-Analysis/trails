@@ -183,7 +183,7 @@ def plot_top_paths_for_year(
     ----------
     provenance : dict[(year, act_idx) -> dict[path_tuple -> amount]]
         Returned by `lca(..., return_provenance=True)` via temporal_traversal.
-    a3 : Trails
+    trails : Trails
         To resolve activity indices to labels.
     year : int
         Scenario year to visualize.
@@ -214,7 +214,7 @@ def plot_top_paths_for_year(
         reverse=True,
     )[:top_n]
 
-    idx_to_label = _build_activity_label_map(a3)
+    idx_to_label = _build_activity_label_map(trails)
 
     labels = [_format_path_label(path, idx_to_label) for path, _ in sorted_paths]
     values = [amt for _, amt in sorted_paths]
@@ -247,7 +247,7 @@ def plot_top_paths_for_year(
 
 def plot_temporal_sankey(
     provenance,
-    a3: Trails,
+    trails: Trails,
     start_year: int,
     start_act_idx: int,
     methods: List[str],
@@ -281,8 +281,8 @@ def plot_temporal_sankey(
     provenance : dict[(int, int) -> dict[path_tuple -> amount]]
         Returned by lca(..., return_provenance=True).
         path_tuple is a tuple of (year, act_idx) pairs from first-level onward.
-    a3 : Trails
-        A3 wrapper.
+    trails : Trails
+        Trails wrapper.
     start_year : int
         Root demand year.
     start_act_idx : int
@@ -294,9 +294,9 @@ def plot_temporal_sankey(
     """
 
     # --- helper: minimal activity meta for labels and hover ---
-    def _collect_activity_meta(a3_local: Trails) -> Dict[int, Dict[str, Any]]:
+    def _collect_activity_meta(trails_local: Trails) -> Dict[int, Dict[str, Any]]:
         meta_by_idx: Dict[int, Dict[str, Any]] = {}
-        for scen_label, mapping in a3_local.activity_indices.items():
+        for scen_label, mapping in trails_local.activity_indices.items():
             for idx, meta in mapping.items():
                 if idx not in meta_by_idx:
                     meta_by_idx[idx] = meta
@@ -361,7 +361,7 @@ def plot_temporal_sankey(
     # ------------------------------------------------------------------
     nodes_for_intensity = list(node_keys)
     node_intensity = compute_node_impact_intensities(
-        a3=a3,
+        trails=trails,
         nodes=nodes_for_intensity,
         methods=methods,
         remove_uncertainty=remove_uncertainty,
@@ -369,7 +369,7 @@ def plot_temporal_sankey(
     )
 
     # activity metadata for hover labels
-    act_meta = _collect_activity_meta(a3)
+    act_meta = _collect_activity_meta(trails)
 
     # ------------------------------------------------------------------
     # 5. Aggregate link impacts between (depth, year) nodes,
@@ -559,7 +559,7 @@ def plot_temporal_sankey(
 
 def plot_traversal_grid_flow(
     edges_by_depth: dict[int, dict[tuple[tuple[int, int], tuple[int, int]], float]],
-    a3: Trails,
+    trails: Trails,
     depths: Optional[List[int]] = None,
     include_all_activities: bool = False,
     title: str = "Traversal flow grid (consumers & suppliers)",
@@ -601,7 +601,7 @@ def plot_traversal_grid_flow(
     # ------------------------------------------------------------------
     if include_all_activities:
         all_activities = set()
-        for scen_label, mapping in a3.activity_indices.items():
+        for scen_label, mapping in trails.activity_indices.items():
             all_activities.update(mapping.keys())
     else:
         all_activities = set()
@@ -616,7 +616,7 @@ def plot_traversal_grid_flow(
     if not acts:
         raise ValueError("No activities to plot for the selected depths.")
 
-    idx_to_label = _activity_label_map(a3)
+    idx_to_label = _activity_label_map(trails)
 
     act_to_row = {act: i for i, act in enumerate(acts)}
     y_tickvals = list(range(len(acts)))
