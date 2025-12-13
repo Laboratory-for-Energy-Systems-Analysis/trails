@@ -271,8 +271,6 @@ def lca(
             }
     """
     # ------------------------------------------------------------------
-    # 1) Temporal traversal WITH provenance
-    # ------------------------------------------------------------------
     # 1) Temporal traversal WITH provenance (path-based)
     frontier, provenance = trails.temporal_traversal(
         start_year=start_year,

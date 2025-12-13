@@ -77,7 +77,6 @@ def load_matrices_from_package(
             scenario_labels.append(label)
         return scenario_index[label]
 
-    # >>> NEW: container for per-exchange temporal info
     temporal_exchanges: Dict[Tuple[str, int, int], TemporalExchange] = {}
 
     # Collect triplets for A and B: (scenario, row, col, value)
@@ -89,7 +88,6 @@ def load_matrices_from_package(
     max_activity_idx_for_B = -1
     max_flow_idx = -1
 
-    # ---------- Load all A.csv ----------
     for scenario_label, res in _iter_inventory_resources(package, "A.csv"):
         t = get_scenario_idx(scenario_label)
         for row in res.iter(keyed=True):
@@ -110,7 +108,7 @@ def load_matrices_from_package(
             td_raw = row.get("temporal_distribution")
             if td_raw is not None and str(td_raw).strip() != "":
                 try:
-                    dist_code = int(td_raw)
+                    dist_code = int(float(td_raw))
                 except ValueError:
                     dist_code = None
             else:

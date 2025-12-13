@@ -43,10 +43,8 @@ class Trails:
         self.A: Optional[sparse.COO] = None
         self.B: Optional[sparse.COO] = None
 
-        # --- NEW: this will hold per-exchange temporal info
         self.temporal_exchanges: Dict = {}
 
-        # Load core matrices + scenarios + per-exchange temporal metadata
         (
             self.A,
             self.B,

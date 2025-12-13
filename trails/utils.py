@@ -15,7 +15,7 @@ def _parse_int_or_none(value):
     s = str(value).strip()
     if s == "":
         return None
-    return int(s)
+    return int(float(s))
 
 
 def _format_path_label(path, idx_to_label):
