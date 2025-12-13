@@ -1,5 +1,5 @@
 package:
-  name: a3
+  name: trails
   version: {{ environ['VERSION'] }}
 
 source:
@@ -40,10 +40,10 @@ requirements:
 
 test:
   imports:
-    - a3
+    - trails
 
 about:
-  home: https://github.com/Laboratory-for-Energy-Systems-Analysis/a3
+  home: https://github.com/Laboratory-for-Energy-Systems-Analysis/trails
   license: MIT License
   summary: 'Edge-specific characterization factors for the LCA framework Brightway2'
 license_family: MIT

@@ -4,7 +4,7 @@ applying characterization factors conditioned by the context of exchanges.
 """
 
 __all__ = (
-    "A3",
+    "Trails",
     "lca",
     "get_lcia_method_names",
     "plot_temporal_scores"
@@ -12,7 +12,7 @@ __all__ = (
 
 __version__ = "1.0.0"
 
-from .a3 import A3
+from .trails import Trails
 from .lca import lca
 from .lcia import get_lcia_method_names
 from .plotting import plot_temporal_scores

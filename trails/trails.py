@@ -1,4 +1,4 @@
-# a3.py
+# trails.py
 
 from typing import Dict, List, Optional
 from collections import defaultdict, deque
@@ -17,7 +17,7 @@ from .datapackage import (
 from .temporal_distributions import TemporalDistribution
 
 
-class A3:
+class Trails:
     """
     Wrapper around 3D sparse matrices A and B loaded from a Frictionless
     data package, with optional temporal interpolation.
@@ -99,6 +99,7 @@ class A3:
     # ------------------------------------------------------------------
     # Convenience accessors
     # ------------------------------------------------------------------
+
     def _map_year_to_scenario_year(self, year: int) -> int:
         """
         Map an arbitrary year to the closest available scenario year (where A/B exist),
@@ -282,61 +283,87 @@ class A3:
             max_depth: int = 3,
             min_amount: float = 1e-12,
             return_provenance: bool = False,
+            show_progress: bool = False,
     ):
         """
         Traverse the temporal-technosphere graph starting from
-        (start_year, start_act_idx) following direct exchanges up to
-        `max_depth` layers.
+        (start_year, start_act_idx).
 
-        Parameters
-        ----------
-        start_year : int
-        start_act_idx : int
-        amount : float
-        max_depth : int
-        min_amount : float
-        return_provenance : bool
-            If True, also return a provenance mapping that tells,
-            for each frontier node, which first-level exchange
-            (direct child of the root activity) it came from.
+        Nodes with direct biosphere flows (non-zero B row) are always kept
+        in the frontier, even if they have temporal technosphere children.
 
-        Returns
-        -------
-        If return_provenance is False:
-            demand : dict[(year, act_idx), amount]
+        Provenance tracks full *time-stamped* paths:
 
-        If return_provenance is True:
-            demand : dict[(year, act_idx), amount]
-            provenance : dict[(year, act_idx),
-                              {root_child_act_idx: amount_contribution}]
+            provenance[(year, act)][path_tuple] = amount
+
+        where path_tuple is a tuple of (year, act) pairs from the
+        *first-level child* down to this node, e.g.:
+
+            ((y1, act_child1), (y2, act_child2), ..., (yk, act_here))
         """
 
-        # queue entries: (year, act, amount, depth, root_child)
-        #   root_child is:
-        #     - None for the root node itself
-        #     - act_idx of the first-level supplier for all descendants
         from collections import deque, defaultdict
 
+        # --------------------------------------------------------------
+        # Optional: pre-count nodes to size the progress bar
+        # --------------------------------------------------------------
+        bar = None
+        if show_progress:
+            total_nodes = self._count_traversal_nodes(
+                start_year=start_year,
+                start_act_idx=start_act_idx,
+                amount=amount,
+                max_depth=max_depth,
+                min_amount=min_amount,
+            )
+            if total_nodes <= 0:
+                total_nodes = 1
+            bar = pyprind.ProgBar(total_nodes, title='Temporal traversal')
+
         queue = deque()
-        queue.append((start_year, start_act_idx, float(amount), 0, None))
+        # path: tuple[(year, act), ...] from first-level child onward
+        queue.append((start_year, start_act_idx, float(amount), 0, ()))
 
         # Final demand at cutoff (year, act)
         demand = defaultdict(float)
 
-        # provenance[(year, act)][root_child_act] = amount
+        # provenance[(year, act)][path_tuple] = amount
         provenance = defaultdict(lambda: defaultdict(float))
 
+        # Cache: (scenario_year, act_idx) -> bool(has_direct_bio)
+        bio_cache: dict[tuple[int, int], bool] = {}
+
         while queue:
-            year, act, amt, depth, root_child = queue.popleft()
+            year, act, amt, depth, path = queue.popleft()
 
             if abs(amt) < min_amount:
                 continue
 
-            # If we've reached max_depth, we stop expanding and store demand here
+            if bar is not None:
+                bar.update()
+
+            # Map to scenario year for looking into B
+            scenario_year = self._map_year_to_scenario_year(year)
+            label = str(scenario_year)
+
+            if label in self.scenario_index:
+                t = self.scenario_index[label]
+                key = (scenario_year, act)
+                if key in bio_cache:
+                    has_direct_bio = bio_cache[key]
+                else:
+                    # B[t, act, :] is a 1D sparse row (flows)
+                    B_row = self.B[t, act, :]
+                    has_direct_bio = B_row.nnz > 0
+                    bio_cache[key] = has_direct_bio
+            else:
+                has_direct_bio = False
+
+            # If we've reached max_depth, stop expanding and store demand here
             if depth >= max_depth:
                 demand[(year, act)] += amt
-                if root_child is not None:
-                    provenance[(year, act)][root_child] += amt
+                if path:
+                    provenance[(year, act)][path] += amt
                 continue
 
             # Expand this node one step
@@ -345,11 +372,19 @@ class A3:
             )
 
             if not child_demands:
-                # No outgoing exchanges → treat as a final demand node
+                # No outgoing exchanges → final node
                 demand[(year, act)] += amt
-                if root_child is not None:
-                    provenance[(year, act)][root_child] += amt
+                if path:
+                    provenance[(year, act)][path] += amt
                 continue
+
+            # IMPORTANT:
+            # If this activity has direct biosphere flows, keep it in the frontier
+            # *as well as* expanding its children.
+            if has_direct_bio:
+                demand[(year, act)] += amt
+                if path:
+                    provenance[(year, act)][path] += amt
 
             # Enqueue children
             for child_year, mapping in child_demands.items():
@@ -357,22 +392,21 @@ class A3:
                     if abs(child_amt) < min_amount:
                         continue
 
-                    # At depth 0 we are expanding the root activity;
-                    # the first-level children define the root_child.
+                    # Build child path:
+                    # - at depth 0 (root → first level): start the path with the child node
+                    # - otherwise: extend the existing path
+                    child_node = (child_year, child_act)
                     if depth == 0:
-                        child_root = child_act
+                        child_path = (child_node,)
                     else:
-                        child_root = root_child
+                        child_path = path + (child_node,)
 
                     queue.append(
-                        (child_year, child_act, child_amt, depth + 1, child_root)
+                        (child_year, child_act, child_amt, depth + 1, child_path)
                     )
 
-        # Return provenance if requested
         if return_provenance:
-            provenance = {
-                key: dict(inner) for key, inner in provenance.items()
-            }
+            provenance = {key: dict(inner) for key, inner in provenance.items()}
             return dict(demand), provenance
 
         return dict(demand)
@@ -413,3 +447,122 @@ class A3:
             f_by_year[y_eff][act_idx] += dtype(amt)
 
         return f_by_year
+
+    def collect_traversal_nodes(
+            self,
+            start_year: int,
+            start_act_idx: int,
+            amount: float = 1.0,
+            max_depth: int = 3,
+            min_amount: float = 1e-12,
+    ) -> dict[int, dict[tuple[int, int], float]]:
+        """
+        Traverse the temporal-technosphere graph starting from
+        (start_year, start_act_idx), and record visited nodes by depth.
+
+        Returns
+        -------
+        nodes_by_depth : dict[int, dict[(int, int), float]]
+            {depth: {(year, act_idx): cumulative_amount, ...}, ...}
+
+        Here, 'amount' is the total flow of the functional unit that
+        reaches that node (year, act) at that depth.
+        """
+        queue = deque()
+        queue.append((start_year, start_act_idx, float(amount), 0))
+
+        # nodes_by_depth[depth][(year, act)] = amount
+        nodes_by_depth: dict[int, dict[tuple[int, int], float]] = defaultdict(
+            lambda: defaultdict(float)
+        )
+
+        while queue:
+            year, act, amt, depth = queue.popleft()
+
+            if abs(amt) < min_amount:
+                continue
+
+            # record this node at this depth
+            nodes_by_depth[depth][(year, act)] += amt
+
+            if depth >= max_depth:
+                continue
+
+            # Expand this node one step in time + technosphere
+            child_demands = self.expand_temporal_exchanges(
+                year=year, act_idx=act, amount=amt
+            )
+
+            if not child_demands:
+                continue
+
+            for child_year, mapping in child_demands.items():
+                for child_act, child_amt in mapping.items():
+                    if abs(child_amt) < min_amount:
+                        continue
+                    queue.append((child_year, child_act, child_amt, depth + 1))
+
+        return nodes_by_depth
+
+    def collect_traversal_edges(
+            self,
+            start_year: int,
+            start_act_idx: int,
+            amount: float = 1.0,
+            max_depth: int = 3,
+            min_amount: float = 1e-12,
+    ) -> dict[int, dict[tuple[tuple[int, int], tuple[int, int]], float]]:
+        """
+        Traverse the temporal-technosphere graph starting from
+        (start_year, start_act_idx) and record edges by depth.
+
+        Returns
+        -------
+        edges_by_depth : dict[int, dict[((int, int), (int, int)), float]]
+            {depth: {((year_from, act_from), (year_to, act_to)): amount, ...}, ...}
+
+        - 'depth' is the depth of the *parent* node.
+        - 'amount' is the flow leaving (year_from, act_from) towards (year_to, act_to)
+          at that depth, starting from a functional unit of `amount` at the root.
+        """
+        queue = deque()
+        queue.append((start_year, start_act_idx, float(amount), 0))
+
+        edges_by_depth: dict[int, dict[tuple[tuple[int, int], tuple[int, int]], float]] = (
+            defaultdict(lambda: defaultdict(float))
+        )
+
+        while queue:
+            year, act, amt, depth = queue.popleft()
+
+            if abs(amt) < min_amount:
+                continue
+
+            if depth >= max_depth:
+                # We still record the node as existing at this depth,
+                # but we don't expand children anymore.
+                continue
+
+            # Expand this node
+            child_demands = self.expand_temporal_exchanges(
+                year=year, act_idx=act, amount=amt
+            )
+
+            if not child_demands:
+                continue
+
+            parent_node = (year, act)
+
+            for child_year, mapping in child_demands.items():
+                for child_act, child_amt in mapping.items():
+                    if abs(child_amt) < min_amount:
+                        continue
+                    child_node = (child_year, int(child_act))
+                    # edge stored at depth of the parent
+                    edges_by_depth[depth][(parent_node, child_node)] += float(child_amt)
+
+                    # enqueue child at next depth
+                    queue.append((child_year, child_act, child_amt, depth + 1))
+
+        # make inner dicts plain dicts
+        return {d: dict(edges) for d, edges in edges_by_depth.items()}

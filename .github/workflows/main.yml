@@ -98,7 +98,7 @@ jobs:
         run: |
           python - <<'PY'
           from pathlib import Path
-          for p in ["pytest-debug", "bw-work", "a3.log"]:
+          for p in ["pytest-debug", "bw-work", "trails.log"]:
               d = Path(p)
               print(("[OK] " if d.exists() else "[MISS] ") + p)
               if d.is_dir():
@@ -114,7 +114,7 @@ jobs:
         run: |
           $code = @"
           from pathlib import Path
-          for p in ["pytest-debug", "bw-work", "a3.log"]:
+          for p in ["pytest-debug", "bw-work", "trails.log"]:
             d = Path(p)
             print(("[OK] " if d.exists() else "[MISS] ") + p)
             if d.is_dir():
@@ -132,7 +132,7 @@ jobs:
           name: pytest-debug-${{ github.run_id }}-${{ matrix.os }}-py${{ matrix.python-version }}
           path: |
             pytest-debug/**
-            a3.log
+            trails.log
           include-hidden-files: true
 
   Pypi:
@@ -190,7 +190,7 @@ jobs:
         if: startsWith(github.ref, 'refs/heads/main')
         shell: bash -l {0}
         run: |
-          PKG_NAME=a3
+          PKG_NAME=trails
           USER=romainsacchi
           conda install anaconda-client
           conda install conda-build
@@ -230,4 +230,4 @@ jobs:
       - name: Pull distribution 📦 from Anaconda and test it if master branch
         run: |
           conda install -y "python==${{ matrix.python-version }}.*"
-          conda update a3
+          conda update trails

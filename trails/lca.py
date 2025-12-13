@@ -6,26 +6,26 @@ from collections import defaultdict
 import bw2calc as bc
 import pyprind
 
-from .a3 import A3
+from .trails import Trails
 from .lcia import fill_characterization_factors_matrices
 
 
-def _nearest_metadata_label_for_year(a3: A3, year: int) -> str:
+def _nearest_metadata_label_for_year(trails: Trails, year: int) -> str:
     """
     Pick the metadata scenario_label whose numeric year is closest to `year`.
     Used only as a fallback if the exact label is not present.
     """
-    if not a3.activity_indices:
+    if not trails.activity_indices:
         raise ValueError("A3.activity_indices is empty – no metadata available.")
 
-    labels = list(a3.activity_indices.keys())
+    labels = list(trails.activity_indices.keys())
     years = np.array([int(lbl) for lbl in labels])
     idx = int(np.argmin(np.abs(years - year)))
     return labels[idx]
 
 
-def build_datapackage_for_year_from_a3(
-    a3: A3,
+def build_datapackage_for_year_from_trails(
+    trails: Trails,
     year: int,
     remove_uncertainty: bool = True,
 ):
@@ -54,29 +54,29 @@ def build_datapackage_for_year_from_a3(
     # 1) Map `year` to the matrix slice we actually use
     # ------------------------------------------------------------------
     label_for_matrix = str(year)
-    if label_for_matrix not in a3.scenario_index:
+    if label_for_matrix not in trails.scenario_index:
         # If you used interpolation, this might be rare; still, handle safely.
-        years = np.array([int(lbl) for lbl in a3.scenario_labels])
+        years = np.array([int(lbl) for lbl in trails.scenario_labels])
         idx = int(np.argmin(np.abs(years - year)))
-        label_for_matrix = a3.scenario_labels[idx]
+        label_for_matrix = trails.scenario_labels[idx]
         print(
             f"⚠️ Matrix slice for year {year} not found in A/B; "
             f"using nearest available matrix year {label_for_matrix}."
         )
 
-    t = a3.scenario_index[label_for_matrix]
+    t = trails.scenario_index[label_for_matrix]
 
     # Extract 2D slices
-    A_t = a3.A[t, :, :]  # sparse.COO (activities x products)
-    B_t = a3.B[t, :, :]  # sparse.COO (activities x flows)
+    A_t = trails.A[t, :, :]  # sparse.COO (activities x products)
+    B_t = trails.B[t, :, :]  # sparse.COO (activities x flows)
 
     # ------------------------------------------------------------------
     # 2) Choose metadata year: prefer exact, else nearest with warning
     # ------------------------------------------------------------------
-    if label_for_matrix in a3.activity_indices:
+    if label_for_matrix in trails.activity_indices:
         meta_label = label_for_matrix
     else:
-        meta_label = _nearest_metadata_label_for_year(a3, int(label_for_matrix))
+        meta_label = _nearest_metadata_label_for_year(trails, int(label_for_matrix))
 
     act_meta = a3.activity_indices.get(meta_label, {})
     bio_meta = a3.biosphere_indices.get(meta_label, {})
@@ -230,16 +230,19 @@ def build_datapackage_for_year_from_a3(
     return dp, technosphere_indices, biosphere_indices, uncertain_parameters
 
 def lca(
-    a3: A3,
+    a3: Trails,
     start_year: int,
     start_act_idx: int,
     methods: List[str],
     amount: float = 1.0,
     max_depth: int = 2,
-    min_amount: float = 1e-12,
+    min_amount: float = 1e-16,
     remove_uncertainty: bool = True,
+    show_progress: bool = True,
     debug: bool = False,
+    return_provenance: bool = False,
 ) -> Dict[int, Dict[str, Any]]:
+
     """
     Temporal LCA + LCIA for one starting activity, with attribution of
     impacts to *first-level* suppliers.
@@ -270,6 +273,7 @@ def lca(
     # ------------------------------------------------------------------
     # 1) Temporal traversal WITH provenance
     # ------------------------------------------------------------------
+    # 1) Temporal traversal WITH provenance (path-based)
     frontier, provenance = a3.temporal_traversal(
         start_year=start_year,
         start_act_idx=start_act_idx,
@@ -277,37 +281,29 @@ def lca(
         max_depth=max_depth,
         min_amount=min_amount,
         return_provenance=True,
+        show_progress=show_progress,
     )
-
 
     # 2) Frontier -> per-year total demand vectors
     f_by_year = a3.frontier_to_demand_vectors(frontier)
 
-    print("Years in f_by_year:", sorted(f_by_year.keys()))
-
-    year = start_year
-    f = f_by_year.get(year)
-    if f is None:
-        print(f"No demand for year {year}")
-    else:
-        nz = np.where(f != 0)[0]
-        print(f"Nonzero activities in year {year}:", nz)
-
-        if elec_idx in nz:
-            print("Electricity activity IS demanded in this year")
-        else:
-            print("Electricity activity IS NOT demanded in this year")
-
     # 3) Build per-year, per-root demand from provenance
     #    fu_per_root_by_year[year][root_idx][act_idx] = amount
+    # 3) Build per-year, per-root demand from provenance
+    #    fu_per_root_by_year[year][root_act][act_idx] = amount
     fu_per_root_by_year: Dict[int, Dict[int, Dict[int, float]]] = defaultdict(
         lambda: defaultdict(lambda: defaultdict(float))
     )
 
-    for (year, act_idx), root_map in provenance.items():
-        for root_idx, amt in root_map.items():
-            # All years here are already scenario years from expand_temporal_exchanges
-            fu_per_root_by_year[year][root_idx][act_idx] += float(amt)
+    for (year, act_idx), path_map in provenance.items():
+        for path, amt in path_map.items():
+            if not path:
+                # No first-level supplier (root itself); skip to keep semantics
+                continue
+
+            # path[0] is (root_year, root_act)
+            root_year, root_act = path[0]
+            fu_per_root_by_year[year][root_act][act_idx] += float(amt)
 
     results_by_year: Dict[int, Dict[str, Any]] = {}
 
@@ -417,4 +413,126 @@ def lca(
 
         bar.update()
 
+    if return_provenance:
+        return results_by_year, provenance
+
     return results_by_year
+
+def compute_node_impact_intensities(
+        a3: Trails,
+        nodes: List[Tuple[int, int]],
+        methods: List[str],
+        remove_uncertainty: bool = True,
+        debug: bool = False,
+) -> Dict[Tuple[int, int], float]:
+    """
+    Compute LCIA impact intensity for a set of (year, act_idx) nodes.
+
+    Impact intensity = LCIA score for 1 unit of that activity in that year,
+    including upstream supply chain (i.e., full LCA for {act_idx: 1}).
+
+    Parameters
+    ----------
+    a3 : Trails
+        A3 wrapper with A/B matrices and scenario info.
+    nodes : list[(year, act_idx)]
+        Nodes for which we want impact intensities.
+    methods : list[str]
+        LCIA methods (as in fill_characterization_factors_matrices).
+        For now, we assume a single method and return a scalar per node.
+    remove_uncertainty : bool
+        Passed through to build_datapackage_for_year_from_a3.
+    debug : bool
+        Print debug info if True.
+
+    Returns
+    -------
+    node_intensity : dict[(year, act_idx), impact_score]
+    """
+    if not nodes:
+        return {}
+
+    if len(methods) != 1:
+        raise ValueError(
+            "compute_node_impact_intensities currently assumes a single LCIA "
+            "method. Got methods=%r" % (methods,)
+        )
+
+    # Group nodes by year
+    nodes_by_year: Dict[int, set[int]] = {}
+    for year, act in nodes:
+        year = int(year)
+        nodes_by_year.setdefault(year, set()).add(int(act))
+
+    node_intensity: Dict[Tuple[int, int], float] = {}
+
+    # Simple caches for datapackage and C matrix per year
+    dp_cache: Dict[int, Any] = {}
+    char_cache: Dict[int, Any] = {}
+
+    for year, acts in sorted(nodes_by_year.items()):
+        # 1) Datapackage for this year
+        if year not in dp_cache:
+            dp, tech_idx, bio_idx, uncertain_params = build_datapackage_for_year_from_a3(
+                a3=a3,
+                year=year,
+                remove_uncertainty=remove_uncertainty,
+            )
+            dp_cache[year] = (dp, tech_idx, bio_idx, uncertain_params)
+        else:
+            dp, tech_idx, bio_idx, uncertain_params = dp_cache[year]
+
+        # 2) Temporary LCA to get biosphere mapping and C matrix
+        if year not in char_cache:
+            # Use a dummy FU: all activities at 0 except maybe one,
+            # we just need biosphere_matrix_dict from bw2calc.
+            # Here we pick an arbitrary activity id if available.
+            any_act = next(iter(acts))
+            dummy_lca = bc.LCA(demand={any_act: 1.0}, data_objs=[dp])
+            dummy_lca.lci()  # build technosphere & biosphere matrices
+
+            biosphere_matrix_dict = dummy_lca.dicts.biosphere
+
+            # bio_idx keys: (name, compartment, subcompartment, unit) -> idx
+            # We need a simplified mapping (name, comp, subcomp) -> idx
+            _, _, bio_meta = None, None, None
+
+            # We can re-use the biosphere_indices built in dp helper,
+            # but we only have bio_idx here if we return it from helper.
+            # However, build_datapackage_for_year_from_a3 already returned bio_idx:
+            #   biosphere_indices: Dict[(name, comp, subcomp, unit), int]
+            bio_idx = dp_cache[year][2]
+
+            biosphere_dict_simple = {
+                (name, comp, subcomp): idx
+                for (name, comp, subcomp, unit), idx in bio_idx.items()
+            }
+
+            C = fill_characterization_factors_matrices(
+                methods=methods,
+                biosphere_matrix_dict=biosphere_matrix_dict,
+                biosphere_dict=biosphere_dict_simple,
+                debug=debug,
+            )
+            char_cache[year] = C
+        else:
+            C = char_cache[year]
+
+        # 3) For each activity in this year, run a 1-unit LCA
+        for act in sorted(acts):
+            lca_node = bc.LCA(demand={act: 1.0}, data_objs=[dp])
+            lca_node.lci()
+            inv = lca_node.inventory  # biosphere vector
+
+            scores_vec = C.dot(inv)
+            # Single method -> scalar
+            score_scalar = float(np.sum(scores_vec))
+
+            node_intensity[(year, act)] = score_scalar
+
+            if debug:
+                print(f"Impact intensity year={year}, act={act}: {score_scalar:g}")
+
+    return node_intensity
+
+

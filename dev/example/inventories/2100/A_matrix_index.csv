@@ -1,6 +1,9 @@
 name;reference product;unit;location;index
 battery electric vehicle, production;battery electric vehicle;unit;GLO;0
-electricity, medium voltage;electricity, medium voltage;kWh;RER;1
+electricity, medium voltage;electricity;kWh;RER;1
 transport, passenger car, BEV;transport, passenger car, BEV;vkm;GLO;2
 battery electric vehicle, end-of-life;treatment of BEV, EoL;unit;GLO;3
 hydropower plant construction;hydropower plant;unit;RER;4
+natural gas electricity;electricity;kWh;RER;5
+natural gas plant construction;natural gas plant;unit;RER;6
+hydro electricity;electricity;kWh;RER;7
