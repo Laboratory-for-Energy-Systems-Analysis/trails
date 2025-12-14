@@ -32,3 +32,7 @@ def _format_path_label_with_years(path, idx_to_label):
         base = idx_to_label.get(act, f"Activity {act}")
         parts.append(f"{year}: {base}")
     return " → ".join(parts)
+
+def _parse_intish_or_none(v):
+    f = _parse_float_or_none(v)
+    return None if f is None else int(f)

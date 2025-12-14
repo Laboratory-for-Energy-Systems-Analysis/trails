@@ -657,6 +657,41 @@ def plot_traversal_grid_flow(
         vertical_spacing=0.12,
     )
 
+    # ------------------------------------------------------------------
+    # 4b. Force every subplot to show ALL activity rows (even if empty)
+    # ------------------------------------------------------------------
+    n_acts = len(acts)
+
+    # y positions are row indices 0..n_acts-1
+    all_row_idx = list(range(n_acts))
+
+    for i in range(n_panels):
+        r = i // ncols + 1
+        c = i % ncols + 1
+
+        fig.update_yaxes(
+            row=r,
+            col=c,
+            tickmode="array",
+            tickvals=all_row_idx,
+            ticktext=[str(a) for a in acts],  # indices only (as you want)
+            range=[-0.5, n_acts - 0.5],  # prevents autoscale cropping
+            showgrid=True,  # show horizontal lines
+            tick0=0,
+            dtick=1,
+            automargin=True,
+            zeroline=False,
+        )
+
+        fig.update_xaxes(
+            row=r,
+            col=c,
+            range=[year_min - 0.5, year_max + 0.5],  # consistent across panels
+            tickangle=-90,
+            showgrid=True,
+            zeroline=False,
+        )
+
     # Pre-build merged edges for "All depths"
     merged_edges_all: dict[tuple[tuple[int, int], tuple[int, int]], float] = defaultdict(float)
     for d in depths_list:
@@ -744,58 +779,61 @@ def plot_traversal_grid_flow(
             col=col,
         )
 
-        # Arrows: supplier -> consumer
-        xref = f"x{axis_id}" if axis_id > 1 else "x"
-        yref = f"y{axis_id}" if axis_id > 1 else "y"
+        # Edges as batched segments (FAST)
+        edge_x = []
+        edge_y = []
+        head_x = []
+        head_y = []
 
         for (parent, child), amt in edges.items():
             (y_cons, a_cons) = parent
             (y_sup, a_sup) = child
 
             x0 = int(y_sup)
-            y0 = act_to_row.get(int(a_sup), -1)    # supplier
+            y0 = act_to_row.get(int(a_sup), -1)
             x1 = int(y_cons)
-            y1 = act_to_row.get(int(a_cons), -1)   # consumer
+            y1 = act_to_row.get(int(a_cons), -1)
 
-            fig.add_annotation(
-                x=x1,
-                y=y1,
-                ax=x0,
-                ay=y0,
-                xref=xref,
-                yref=yref,
-                axref=xref,
-                ayref=yref,
-                showarrow=True,
-                arrowhead=2,
-                arrowsize=1,
-                arrowwidth=1,
-                arrowcolor="rgba(100,100,100,0.7)",
-                opacity=0.7,
-            )
+            if y0 < 0 or y1 < 0:
+                continue
 
-        # Axes for this subplot
-        fig.update_xaxes(
+            edge_x.extend([x0, x1, None])
+            edge_y.extend([y0, y1, None])
+
+            # direction cue at the target (consumer)
+            head_x.append(x1)
+            head_y.append(y1)
+
+        # Use WebGL for speed
+        fig.add_trace(
+            go.Scattergl(
+                x=edge_x,
+                y=edge_y,
+                mode="lines",
+                line=dict(width=1, color="rgba(100,100,100,0.35)"),
+                hoverinfo="skip",
+                showlegend=False,
+            ),
             row=row,
             col=col,
-            type="linear",
-            tickmode="array",
-            tickvals=years_global,
-            ticktext=[str(y) for y in years_global],
-            tickangle=-90,  # vertical labels
-            range=[year_min - 0.5, year_max + 0.5],
-            showgrid=True,
-            zeroline=False,
         )
-        fig.update_yaxes(
+
+        # Arrowheads as markers at consumer end
+        fig.add_trace(
+            go.Scattergl(
+                x=head_x,
+                y=head_y,
+                mode="markers",
+                marker=dict(
+                    symbol="triangle-left",  # see note below
+                    size=6,
+                    color="rgba(100,100,100,0.7)",
+                ),
+                hoverinfo="skip",
+                showlegend=False,
+            ),
             row=row,
             col=col,
-            tickmode="array",
-            tickvals=y_tickvals,
-            ticktext=y_ticktext,
-            range=[-0.5, len(acts) - 0.5],
-            showgrid=True,
-            zeroline=False,
         )
 
     # ------------------------------------------------------------------

@@ -44,18 +44,41 @@ class Trails:
         self.B: Optional[sparse.COO] = None
 
         self.temporal_exchanges: Dict = {}
+        self.temporal_biosphere_exchanges: Dict = {}
 
         (
             self.A,
             self.B,
             self.scenario_labels,
             self.scenario_index,
-            self.temporal_exchanges,   # <<< NEW
+            self.temporal_exchanges,
+            self.temporal_biosphere_exchanges,
         ) = load_matrices_from_package(
             package=self.package,
             value_dtype=self.value_dtype,
             index_dtype=self.index_dtype,
         )
+
+
+        # Backward-compatible support for tagged temporal exchange keys.
+        # If a single dict contains ('tech', ...) and ('bio', ...) keys, split them.
+        if self.temporal_biosphere_exchanges is None:
+            self.temporal_biosphere_exchanges = {}
+        if self.temporal_exchanges:
+            sample_key = next(iter(self.temporal_exchanges.keys()))
+            if isinstance(sample_key, tuple) and len(sample_key) >= 1 and sample_key[0] in ("tech", "bio"):
+                tagged = self.temporal_exchanges
+                self.temporal_exchanges = {}
+                for k, v in tagged.items():
+                    if not (isinstance(k, tuple) and len(k) == 4):
+                        continue
+                    kind, label, act, idx = k
+                    if kind == "bio":
+                        self.temporal_biosphere_exchanges[(label, act, idx)] = v
+                    else:
+                        self.temporal_exchanges[(label, act, idx)] = v
+
+
 
         self.template_labels = list(self.scenario_labels)
         self.template_years_int = np.array([int(lbl) for lbl in self.template_labels], dtype=int)
@@ -203,6 +226,72 @@ class Trails:
                     )
 
         return demand
+
+    def accumulate_temporalized_biosphere_inventory(
+            self,
+            base_year: int,
+            supply_by_activity: Dict[int, float],
+            inventory_by_year: Dict[int, np.ndarray],
+            *,
+            min_amount: float = 0.0,
+    ) -> None:
+        """
+        Accumulate temporally shifted biosphere emissions resulting from a
+        solved technosphere supply vector for a given calendar year.
+
+        supply_by_activity maps Trails activity indices -> supply.
+        """
+        if self.B is None:
+            return
+
+        # Choose which B slice to read (scenario coefficients)
+        scenario_year = self._map_year_to_scenario_year(base_year)
+        scenario_label = str(scenario_year)
+        if scenario_label not in self.scenario_index:
+            return
+        t = self.scenario_index[scenario_label]
+
+        # Choose which temporal metadata year to use
+        template_year = self._map_year_to_template_year(base_year)
+        template_label = str(template_year)
+
+        B_t = self.B[t, :, :]
+        if getattr(B_t, "nnz", 0) == 0:
+            return
+
+        n_flows = int(self.B.shape[2])
+
+        act_indices = B_t.coords[0].astype(int)
+        flow_indices = B_t.coords[1].astype(int)
+        values = B_t.data
+
+        for act_idx, flow_idx, value in zip(act_indices, flow_indices, values):
+            act_idx = int(act_idx)
+            flow_idx = int(flow_idx)
+
+            supply_amt = float(supply_by_activity.get(act_idx, 0.0))
+            if supply_amt == 0.0:
+                continue
+
+            scaled = supply_amt * float(value)
+            if min_amount and abs(scaled) < min_amount:
+                continue
+
+            tex = self.temporal_biosphere_exchanges.get((template_label, act_idx, flow_idx))
+
+            if tex is None:
+                # No temporal shift -> assign to the base calendar year
+                y_eff = int(base_year)
+                inventory_by_year.setdefault(y_eff, np.zeros(n_flows, dtype=self.value_dtype))
+                inventory_by_year[y_eff][flow_idx] += scaled
+            else:
+                td = TemporalDistribution(tex)
+
+                # IMPORTANT: distribute the *scaled* amount; do not add scaled again at base_year
+                for offset, weight in td.iter_offsets_and_weights():
+                    y_eff = int(base_year + offset)  # raw calendar year
+                    inventory_by_year.setdefault(y_eff, np.zeros(n_flows, dtype=self.value_dtype))
+                    inventory_by_year[y_eff][flow_idx] += scaled * float(weight)
 
     def _map_year_to_available(self, year: int) -> int:
         """

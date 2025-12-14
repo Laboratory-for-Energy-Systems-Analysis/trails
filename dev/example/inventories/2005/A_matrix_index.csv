@@ -9,3 +9,7 @@ natural gas plant construction;natural gas plant;unit;RER;6
 hydro electricity;electricity;kWh;RER;7
 wind turbine construction;wind turbine;unit;RER;8
 wind electricity;electricity;kWh;RER;9
+gasoline vehicle, production;gasoline vehicle;unit;GLO;10
+gasoline production;gasoline;kilogram;GLO;11
+gasoline vehicle, end-of-life;treatment of ICEV, EoL;unit;GLO;12
+transport, passenger car, ICEV;transport, passenger car, ICE;vkm;GLO;13

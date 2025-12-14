@@ -9,6 +9,19 @@ import sparse
 from .utils import _parse_float_or_none, _parse_int_or_none
 from .temporal_distributions import TemporalExchange
 
+def _parse_intish_or_none(value):
+    """Parse an integer from values that may be given as '3', '3.0', 3.0, etc."""
+    if value is None:
+        return None
+    s = str(value).strip()
+    if s == "":
+        return None
+    try:
+        return int(float(s))
+    except ValueError:
+        return None
+
+
 
 # ----------------------------------------------------------------------
 # Internal helpers
@@ -55,7 +68,7 @@ def load_matrices_from_package(
     package,
     value_dtype=np.float32,
     index_dtype=np.int32,
-) -> Tuple[sparse.COO, sparse.COO, List[str], Dict[str, int], Dict[Tuple[str, int, int], TemporalExchange]]:
+) -> Tuple[sparse.COO, sparse.COO, List[str], Dict[str, int], Dict[Tuple[str, int, int], TemporalExchange], Dict[Tuple[str, int, int], TemporalExchange]]:
     """
     Collect all technosphere and biosphere exchanges across scenarios and
     build sparse 3D matrices A and B.
@@ -67,6 +80,7 @@ def load_matrices_from_package(
     scenario_labels : List[str]
     scenario_index : Dict[str, int]
     temporal_exchanges : Dict[(scenario_label, act_idx, prod_idx), TemporalExchange]
+    temporal_biosphere_exchanges : Dict[(scenario_label, act_idx, bio_idx), TemporalExchange]
     """
     scenario_labels: List[str] = []
     scenario_index: Dict[str, int] = {}
@@ -78,6 +92,7 @@ def load_matrices_from_package(
         return scenario_index[label]
 
     temporal_exchanges: Dict[Tuple[str, int, int], TemporalExchange] = {}
+    temporal_biosphere_exchanges: Dict[Tuple[str, int, int], TemporalExchange] = {}
 
     # Collect triplets for A and B: (scenario, row, col, value)
     A_t, A_i, A_j, A_data = [], [], [], []
@@ -117,8 +132,8 @@ def load_matrices_from_package(
             if dist_code is not None:
                 loc = _parse_float_or_none(row.get("temporal_loc"))
                 scale = _parse_float_or_none(row.get("temporal_scale"))
-                off_min = _parse_int_or_none(row.get("temporal_min")) or 0
-                off_max = _parse_int_or_none(row.get("temporal_max")) or 0
+                off_min = _parse_intish_or_none(row.get("temporal_min")) or 0
+                off_max = _parse_intish_or_none(row.get("temporal_max")) or 0
 
                 temporal_exchanges[(scenario_label, act_idx, prod_idx)] = TemporalExchange(
                     distribution=dist_code,
@@ -145,6 +160,27 @@ def load_matrices_from_package(
                 max_activity_idx_for_B = act_idx
             if flow_idx > max_flow_idx:
                 max_flow_idx = flow_idx
+
+            # Optional temporal metadata for biosphere exchanges (same columns as A.csv)
+            td_raw = row.get("temporal_distribution")
+            if td_raw is not None and str(td_raw).strip() != "":
+                dist_code = _parse_intish_or_none(td_raw)
+            else:
+                dist_code = None
+
+            if dist_code is not None:
+                loc = _parse_float_or_none(row.get("temporal_loc"))
+                scale = _parse_float_or_none(row.get("temporal_scale"))
+                off_min = _parse_intish_or_none(row.get("temporal_min")) or 0
+                off_max = _parse_intish_or_none(row.get("temporal_max")) or 0
+
+                temporal_biosphere_exchanges[(scenario_label, act_idx, flow_idx)] = TemporalExchange(
+                    distribution=dist_code,
+                    loc=loc,
+                    scale=scale,
+                    offset_min=int(off_min),
+                    offset_max=int(off_max),
+                )
 
     # ---------- Deduce shapes ----------
     n_scenarios = len(scenario_labels)
@@ -198,7 +234,7 @@ def load_matrices_from_package(
             shape=(n_scenarios, n_activities, n_flows),
         )
 
-    return A, B, scenario_labels, scenario_index, temporal_exchanges
+    return A, B, scenario_labels, scenario_index, temporal_exchanges, temporal_biosphere_exchanges
 
 
 
