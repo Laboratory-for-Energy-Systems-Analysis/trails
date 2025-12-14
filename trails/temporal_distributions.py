@@ -42,6 +42,9 @@ class TemporalExchange:
     scale: Optional[float]
     offset_min: int
     offset_max: int
+    scale_mode: str | None = None
+    scale_base: float = 1.0
+    scale_rate: float = 0.0
 
 
 class TemporalDistribution:
@@ -53,24 +56,28 @@ class TemporalDistribution:
     def iter_offsets_and_weights(self) -> Iterable[Tuple[int, float]]:
         """
         Yield (offset_k, weight_k) for integer offsets k in
-        [offset_min, offset_max], with weights normalized to sum to 1.
+        [offset_min, offset_max].
+
+        Temporal weights are:
+          1) computed from the distribution shape
+          2) modified by an optional offset-dependent scaling law
+          3) renormalized to sum to 1
         """
         t = self.tex
         offsets = np.arange(t.offset_min, t.offset_max + 1, dtype=int)
         if offsets.size == 0:
-            return iter(())  # nothing to distribute
+            return iter(())
 
         dist = t.distribution
 
-        # Choose weighting scheme depending on 'distribution' code
+        # ------------------------------------------------------------
+        # 1) Base temporal distribution (unchanged logic)
+        # ------------------------------------------------------------
         if dist == 5:
-            # 5 = triangular
             weights = self._triangular_weights(offsets, t.loc)
         elif dist == 2:
-            # 2 = lognormal
             weights = self._lognormal_weights(offsets, t.loc, t.scale)
         elif dist == 3:
-            # 3 = normal
             weights = self._normal_weights(
                 offsets=offsets,
                 loc=t.loc if t.loc is not None else 0.0,
@@ -79,26 +86,76 @@ class TemporalDistribution:
                 offset_max=t.offset_max,
             )
         elif dist == 4:
-            # 4 = uniform
             weights = np.ones_like(offsets, dtype=float)
         elif dist == 1:
-            # 1 = discrete (single offset)
             weights = self._discrete_weights(offsets, t.loc)
         else:
-            # fallback: uniform distribution over all offsets
             weights = np.ones_like(offsets, dtype=float)
 
+        # Guard against degenerate distributions
+        if weights.sum() <= 0.0:
+            return iter(())
+
+        # ------------------------------------------------------------
+        # 2) Apply offset-dependent scaling (NEW)
+        # ------------------------------------------------------------
+        scale_mode = (getattr(t, "scale_mode", None) or "").lower()
+        scale_base = float(getattr(t, "scale_base", 1.0))
+        scale_rate = float(getattr(t, "scale_rate", 0.0))
+
+        if scale_mode:
+            scaled_weights = np.zeros_like(weights, dtype=float)
+
+            for i, k in enumerate(offsets):
+                if scale_mode == "linear":
+                    factor = scale_base + scale_rate * float(k)
+                elif scale_mode == "compound":
+                    factor = scale_base * ((1.0 + scale_rate) ** float(k))
+                else:
+                    raise ValueError(f"Unknown temporal_scale_mode: {scale_mode}")
+
+                # Prevent negative or NaN contributions
+                if factor > 0.0:
+                    scaled_weights[i] = weights[i] * factor
+
+            weights = scaled_weights
+
+        # ------------------------------------------------------------
+        # 3) Renormalize so total mass is preserved
+        # ------------------------------------------------------------
         total = float(weights.sum())
         if total <= 0.0:
-            # Degenerate case: nothing positive -> no contribution
             return iter(())
 
         weights /= total
 
-        # yield as Python ints/floats
+        # ------------------------------------------------------------
+        # 4) Yield results
+        # ------------------------------------------------------------
         for k, w in zip(offsets, weights):
             if w != 0.0:
                 yield int(k), float(w)
+
+    def scale_factor(self, offset: int, *, clip: Optional[Tuple[float, float]] = None) -> float:
+        t = self.tex
+        mode = (getattr(t, "scale_mode", None) or "").lower()
+        base = float(getattr(t, "scale_base", 1.0))
+        rate = float(getattr(t, "scale_rate", 0.0))
+
+        if not mode:
+            return 1.0
+        if mode == "linear":
+            f = base + rate * float(offset)
+        elif mode == "compound":
+            f = base * ((1.0 + rate) ** float(offset))
+        else:
+            raise ValueError(f"Unknown temporal_scale_mode: {mode}")
+
+        if clip is not None:
+            lo, hi = clip
+            f = max(lo, min(hi, f))
+        return f
+
 
     # ------------------------------------------------------------------
     # Individual distribution helpers

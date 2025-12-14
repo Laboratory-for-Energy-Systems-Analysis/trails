@@ -18,7 +18,7 @@ def get_lcia_method_names(ei_version="3.11"):
     :rtype: list[str]
     """
 
-    if ei_version != "3.11":
+    if ei_version == "3.11":
         filepath = LCIA_METHODS_EI311
     else:
         filepath = LCIA_METHODS_EI310
@@ -59,7 +59,7 @@ def get_lcia_methods(methods: list = None, ei_version="3.11"):
     :rtype: dict[str, dict[tuple[str, str, str], float]]
     """
 
-    if ei_version != "3.11":
+    if ei_version == "3.11":
         filepath = LCIA_METHODS_EI311
     else:
         filepath = LCIA_METHODS_EI310

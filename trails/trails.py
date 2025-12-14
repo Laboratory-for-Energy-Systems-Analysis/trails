@@ -167,28 +167,31 @@ class Trails:
             return None
         return TemporalDistribution(tex)
 
-    def expand_temporal_exchanges(self, year: int, act_idx: int, amount: float = 1.0):
+    def expand_temporal_exchanges(
+            self,
+            year: int,
+            act_idx: int,
+            amount: float = 1.0,
+            *,
+            use_temporal_distributions: bool = True,
+    ):
         """
         Expand one activity-year demand into temporally distributed multi-year
         demands for its *direct* exchanges.
 
-        - A/B rows are always taken from the nearest available scenario year.
-        - Temporal metadata (if any) is taken from the nearest original "template" year.
+        If use_temporal_distributions=False, treat all exchanges as occurring in
+        the (mapped) scenario year (i.e. no temporal shifting).
         """
         demand: dict[int, dict[int, float]] = {}
 
-        # Which A/B slice do we use for this node?
         scenario_year = self._map_year_to_scenario_year(year)
         scenario_label = str(scenario_year)
         t = self.scenario_index[scenario_label]
 
-        # And which year's temporal pattern should we use?
         template_year = self._map_year_to_template_year(year)
         template_label = str(template_year)
 
-        # A[slice, act_idx, :]
         A_row = self.A[t, act_idx, :]
-
         if A_row.nnz == 0:
             return demand
 
@@ -200,30 +203,30 @@ class Trails:
         for prod_idx, value in zip(prod_indices, values):
             prod_idx = int(prod_idx)
 
-            # Optional: skip self-production diagonal -1.0
             if prod_idx == act_idx and value == -1.0:
                 continue
 
-            # Temporal metadata is defined per (template_label, act_idx, prod_idx)
             tex = self.temporal_exchanges.get((template_label, act_idx, prod_idx))
 
-            if tex is None:
-                # No temporal shift → happens at the scenario_year
+            # NEW: bypass temporal shifting
+            if (tex is None) or (not use_temporal_distributions):
                 y_eff = scenario_year
                 demand.setdefault(y_eff, {})
                 demand[y_eff][prod_idx] = demand[y_eff].get(prod_idx, 0.0) + amount * float(value)
-            else:
-                td = TemporalDistribution(tex)
+                continue
 
-                for offset, weight in td.iter_offsets_and_weights():
-                    raw_year = year + offset  # conceptual calendar year
-                    y_eff = self._map_year_to_scenario_year(raw_year)  # nearest scenario year
+            td = TemporalDistribution(tex)
 
-                    demand.setdefault(y_eff, {})
-                    demand[y_eff][prod_idx] = (
-                            demand[y_eff].get(prod_idx, 0.0)
-                            + amount * float(value) * weight
-                    )
+            for offset, weight in td.iter_offsets_and_weights():
+                raw_year = year + offset
+                y_eff = self._map_year_to_scenario_year(raw_year)
+
+                factor = td.scale_factor(offset)
+                demand.setdefault(y_eff, {})
+                demand[y_eff][prod_idx] = (
+                        demand[y_eff].get(prod_idx, 0.0)
+                        + amount * float(value) * float(weight) * float(factor)
+                )
 
         return demand
 
@@ -234,6 +237,7 @@ class Trails:
             inventory_by_year: Dict[int, np.ndarray],
             *,
             min_amount: float = 0.0,
+            use_temporal_distributions: bool = True,
     ) -> None:
         """
         Accumulate temporally shifted biosphere emissions resulting from a
@@ -279,19 +283,29 @@ class Trails:
 
             tex = self.temporal_biosphere_exchanges.get((template_label, act_idx, flow_idx))
 
-            if tex is None:
+            if (tex is None) or (not use_temporal_distributions):
                 # No temporal shift -> assign to the base calendar year
                 y_eff = int(base_year)
-                inventory_by_year.setdefault(y_eff, np.zeros(n_flows, dtype=self.value_dtype))
+                inventory_by_year.setdefault(
+                    y_eff,
+                    np.zeros(n_flows, dtype=self.value_dtype),
+                )
                 inventory_by_year[y_eff][flow_idx] += scaled
+
             else:
                 td = TemporalDistribution(tex)
 
-                # IMPORTANT: distribute the *scaled* amount; do not add scaled again at base_year
                 for offset, weight in td.iter_offsets_and_weights():
-                    y_eff = int(base_year + offset)  # raw calendar year
-                    inventory_by_year.setdefault(y_eff, np.zeros(n_flows, dtype=self.value_dtype))
-                    inventory_by_year[y_eff][flow_idx] += scaled * float(weight)
+                    y_eff = int(base_year + offset)
+                    factor = td.scale_factor(offset)
+
+                    # Ensure the vector exists for this year
+                    inventory_by_year.setdefault(
+                        y_eff,
+                        np.zeros(n_flows, dtype=self.value_dtype),
+                    )
+
+                    inventory_by_year[y_eff][flow_idx] += scaled * float(weight) * float(factor)
 
     def _map_year_to_available(self, year: int) -> int:
         """
@@ -365,6 +379,7 @@ class Trails:
             min_amount: float = 1e-12,
             return_provenance: bool = False,
             show_progress: bool = False,
+            use_temporal_distributions: bool = True,
     ):
         """
         Traverse the temporal-technosphere graph starting from
@@ -449,7 +464,7 @@ class Trails:
 
             # Expand this node one step
             child_demands = self.expand_temporal_exchanges(
-                year=year, act_idx=act, amount=amt
+                year=year, act_idx=act, amount=amt, use_temporal_distributions=use_temporal_distributions,
             )
 
             if not child_demands:
@@ -459,9 +474,6 @@ class Trails:
                     provenance[(year, act)][path] += amt
                 continue
 
-            # IMPORTANT:
-            # If this activity has direct biosphere flows, keep it in the frontier
-            # *as well as* expanding its children.
             if has_direct_bio:
                 demand[(year, act)] += amt
                 if path:

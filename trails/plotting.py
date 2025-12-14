@@ -1,4 +1,7 @@
-from typing import Dict, Any, List, Tuple, Optional
+from typing import Dict, Any, List, Tuple, Optional, Literal
+
+import math
+
 from collections import defaultdict
 import numpy as np
 import plotly.graph_objects as go
@@ -45,125 +48,329 @@ def _activity_label_map(trails: Trails) -> dict[int, str]:
     return labels
 
 
+
 def plot_temporal_scores(
     results_by_year: Dict[int, Dict[str, Any]],
-    trails: Trails,
+    trails,
     title: str = "Temporal impacts by responsible activity",
     method_label: str = "Impact score",
     cumulative: bool = False,
     stacked: bool = True,
+    width: Optional[int] = None,
+    height: Optional[int] = None,
+    year_tick: int = 1,
+    year_range: Optional[Tuple[int, int]] = None,
+    show_year_grid: bool = True,
+    yaxis_type: Literal["linear", "log"] = "linear",
+    log_eps: float = 1e-30,
+    reference_year: Optional[int] = None,
+    show_cumulative_axis: bool = False,
+    cumulative_axis_label: str = "Cumulative impact",
+    legend_entrywidth: int = 260,
+    legend_row_height: int = 18,
+    legend_y: float = 1.02,
+    y2_headroom: float = 0.05,
+    show_cumulative_in_legend: bool = False,
+    static_score: Optional[float] = None,
+    static_score_label: str = "Static score",
+    static_score_dash: str = "dash",
+    static_score_color: str = "black",
+    y_max: Optional[float] = None,
+    y2_max: Optional[float] = None,
 ):
-    """
-    Plot LCIA scores over time, split by responsible first-level activity.
+    if year_tick < 1:
+        raise ValueError("year_tick must be >= 1")
 
-    Features:
-    - stacked or unstacked mode
-    - filled areas even when unstacked (semi-transparent)
-    - optional cumulative view
-    """
-    import numpy as np
-    import plotly.graph_objects as go
+    # ------------------------------------------------------------------
+    # 1. Years selection
+    # ------------------------------------------------------------------
+    years_all = sorted(results_by_year.keys())
+    if not years_all:
+        raise ValueError("results_by_year is empty.")
 
-    # --- 1. Collect years and root activities ---
-    years = sorted(results_by_year.keys())
+    if year_range is not None:
+        y0, y1 = year_range
+        years = [y for y in years_all if y0 <= y <= y1]
+    else:
+        years = years_all
+
+    if not years:
+        raise ValueError("No years available after applying year_range.")
+
+    # ------------------------------------------------------------------
+    # 2. Roots and score matrix
+    # ------------------------------------------------------------------
     all_roots = sorted({
         root
         for year in years
         for root in results_by_year[year].get("scores_per_root", {})
     })
-
     if not all_roots:
         raise ValueError("No scores_per_root found.")
 
-    # --- 2. Build score matrix (year × root) ---
     Y = np.zeros((len(years), len(all_roots)), dtype=float)
     for yi, year in enumerate(years):
         spr = results_by_year[year].get("scores_per_root", {})
         for ri, root in enumerate(all_roots):
             Y[yi, ri] = spr.get(root, 0.0)
 
-    # --- 3. Cumulative transform if requested ---
     if cumulative:
         Y = np.cumsum(Y, axis=0)
 
-    # --- 4. Lookup labels ---
+    total_raw = Y.sum(axis=1)
+
+    if yaxis_type == "log":
+        Y = np.where(Y > 0, Y, log_eps)
+        if static_score is not None:
+            static_score = max(static_score, log_eps)
+
+    # ------------------------------------------------------------------
+    # 3. Labels
+    # ------------------------------------------------------------------
     idx_to_label = _build_activity_label_map(trails)
-    label_for_root = lambda idx: idx_to_label.get(idx, f"Activity {idx}")
 
-    # --- 5. Create figure ---
+    def label_for_root(idx: int) -> str:
+        return idx_to_label.get(idx, f"Activity {idx}")
+
+    # ------------------------------------------------------------------
+    # 4. Figure + main traces
+    # ------------------------------------------------------------------
     fig = go.Figure()
-
-    # Precompute transparency for unstacked mode
     alpha = 0.4 if not stacked else 1.0
 
     for ri, root in enumerate(all_roots):
-        label = label_for_root(root)
-        y_vals = Y[:, ri]
-
-        trace_kwargs = dict(
-            x=years,
-            y=y_vals,
-            name=label,
-            mode="lines",
-            hovertemplate=(
-                "<b>%{fullData.name}</b><br>"
-                "Year: %{x}<br>"
-                f"{method_label}: %{{y:.6g}}<extra></extra>"
-            ),
-        )
-
-        if stacked:
-            # Normal stacked area
-            trace_kwargs.update(stackgroup="one")
-        else:
-            # Filled but NOT stacked: semi-transparent areas
-            trace_kwargs.update(
-                fill="tozeroy",
-                line=dict(width=2),
-                opacity=alpha,
-            )
-
-        fig.add_trace(go.Scatter(**trace_kwargs))
-
-    # --- 6. Total overlay (only for stacked mode) ---
-    if stacked:
-        total_scores = Y.sum(axis=1)
         fig.add_trace(
             go.Scatter(
                 x=years,
-                y=total_scores,
-                name="Total",
+                y=Y[:, ri],
+                name=label_for_root(root),
                 mode="lines",
-                line=dict(width=2, dash="dot"),
                 hovertemplate=(
-                    "<b>Total</b><br>"
+                    "<b>%{fullData.name}</b><br>"
                     "Year: %{x}<br>"
                     f"{method_label}: %{{y:.6g}}<extra></extra>"
                 ),
-                showlegend=True,
+                **({"stackgroup": "one"} if stacked else {
+                    "fill": "tozeroy",
+                    "line": dict(width=2),
+                    "opacity": alpha,
+                }),
             )
         )
 
-    # --- 7. Layout ---
+    # ------------------------------------------------------------------
+    # 5. Optional secondary cumulative axis
+    # ------------------------------------------------------------------
+    cum_vals = None
+    if show_cumulative_axis:
+        cum_vals = np.cumsum(total_raw)
+        if yaxis_type == "log":
+            cum_vals = np.where(cum_vals > 0, cum_vals, log_eps)
+
+        fig.add_trace(
+            go.Scatter(
+                x=years,
+                y=cum_vals,
+                name="Cumulative total",
+                showlegend=True,  # <-- force legend handle
+                mode="lines",
+                line=dict(width=2, color="black"),
+                yaxis="y2",
+                hovertemplate=(
+                    "<b>Cumulative total</b><br>"
+                    "Year: %{x}<br>"
+                    f"{cumulative_axis_label}: %{{y:.6g}}<extra></extra>"
+                ),
+            )
+        )
+
+    # ------------------------------------------------------------------
+    # 5b. NEW: static score horizontal line on y2
+    # ------------------------------------------------------------------
+    if static_score is not None:
+        fig.add_trace(
+            go.Scatter(
+                x=[years[0], years[-1]],
+                y=[static_score, static_score],
+                mode="lines",
+                name=static_score_label,
+                yaxis="y2",
+                line=dict(
+                    dash=static_score_dash,
+                    color=static_score_color,
+                    width=2,
+                ),
+                hovertemplate=(
+                    f"<b>{static_score_label}</b><br>"
+                    f"{method_label}: {static_score:.6g}<extra></extra>"
+                ),
+            )
+        )
+
+    # ------------------------------------------------------------------
+    # 6. Layout
+    # ------------------------------------------------------------------
+    fig_w = int(width) if (width is not None) else 800
+    entry_w = max(80, int(legend_entrywidth))
+    n_items = len(all_roots)
+    if show_cumulative_axis and show_cumulative_in_legend:
+        n_items += 1
+    if static_score is not None:
+        n_items += 1
+
+    n_cols = max(1, fig_w // entry_w)
+    n_rows = max(1, int(math.ceil(n_items / n_cols)))
+    top_margin = 55 + n_rows * int(legend_row_height) + 10
+
     fig.update_layout(
-        title=title,
-        xaxis_title="Year",
-        yaxis_title=method_label,
+        width=width,
+        height=height,
         template="plotly_white",
         hovermode="x unified",
+        title=dict(
+            text=title,
+            x=0.5,
+            xanchor="center",
+        ),
         legend=dict(
             orientation="h",
-            yanchor="bottom",
-            y=1.02,
-            xanchor="left",
             x=0,
+            xanchor="left",
+            y=float(legend_y),
+            yanchor="bottom",
             font=dict(size=10),
+            entrywidth=entry_w,
+            entrywidthmode="pixels",
         ),
-        margin=dict(l=60, r=20, t=60, b=40),
+        margin=dict(
+            l=60,
+            r=60 if show_cumulative_axis or static_score is not None else 20,
+            t=top_margin,
+            b=40,
+        ),
+        yaxis=dict(
+            title=method_label,
+            type=yaxis_type,
+            showgrid=True,
+        ),
     )
 
-    fig.update_xaxes(dtick=1, showgrid=True)
-    fig.update_yaxes(showgrid=True)
+    # Ensure y2 exists if we use it (cumulative and/or static score)
+    use_y2 = bool(show_cumulative_axis) or (static_score is not None)
+    if use_y2:
+        fig.update_layout(
+            yaxis2=dict(
+                title=cumulative_axis_label,
+                overlaying="y",
+                side="right",
+                showgrid=False,
+            )
+        )
+
+    # ------------------------------------------------------------------
+    # 6b. Optional fixed y maxima + zero alignment between y and y2 (linear)
+    # ------------------------------------------------------------------
+    if (show_cumulative_axis or (static_score is not None)) and yaxis_type == "linear":
+        # -------- y1 data-derived min/max (include 0)
+        y1_min = float(np.nanmin(Y))
+        y1_max_data = float(np.nanmax(Y))
+        y1_min = min(y1_min, 0.0)
+        y1_max_data = max(y1_max_data, 0.0)
+        if y1_max_data == y1_min:
+            y1_max_data = y1_min + 1.0
+
+        # Apply user-specified y_max if provided
+        y1_max = float(y_max) if (y_max is not None) else y1_max_data
+        y1_max = max(y1_max, 0.0)
+        if y1_max == y1_min:
+            y1_max = y1_min + 1.0
+
+        # -------- collect y2 data
+        y2_series = []
+        if show_cumulative_axis and (cum_vals is not None) and len(cum_vals) > 0:
+            y2_series.append(np.asarray(cum_vals, dtype=float))
+        if static_score is not None:
+            y2_series.append(np.asarray([float(static_score)], dtype=float))
+
+        if y2_series:
+            y2_all = np.concatenate(y2_series)
+
+            y2_min_data = float(np.nanmin(y2_all))
+            y2_max_data = float(np.nanmax(y2_all))
+            y2_min_data = min(y2_min_data, 0.0)
+            y2_max_data = max(y2_max_data, 0.0)
+            if y2_max_data == y2_min_data:
+                y2_max_data = y2_min_data + 1.0
+
+            # Apply user-specified y2_max if provided
+            y2_max_eff = float(y2_max) if (y2_max is not None) else y2_max_data
+            y2_max_eff = max(y2_max_eff, 0.0)
+            if y2_max_eff == y2_min_data:
+                y2_max_eff = y2_min_data + 1.0
+
+            # Relative position of 0 on y1
+            p = (0.0 - y1_min) / (y1_max - y1_min)
+
+            # Headroom guard (apply to y2 when auto-scaling; if user fixes y2_max, we respect it)
+            hr = max(0.0, float(y2_headroom))
+            if y2_max is None:
+                y2_max_eff = y2_max_eff * (1.0 + hr)
+
+            # Compute y2 min so that 0 aligns at fraction p, while respecting fixed y2_max if given
+            if p <= 0.0:
+                # 0 at/below bottom on y1 -> keep y2 starting at 0
+                y2_range = [0.0, y2_max_eff]
+            elif p >= 1.0:
+                # 0 at/above top on y1
+                y2_range = [y2_min_data, 0.0]
+            else:
+                # Require y2_min such that (0 - y2_min)/(y2_max - y2_min) = p
+                # => y2_min = - (p/(1-p)) * y2_max
+                y2_min_eff = - (p / (1.0 - p)) * y2_max_eff
+
+                # Ensure we don't clip actual y2 data below y2_min_eff unless user forced y2_max and data demands more span.
+                # If data has more negative values than y2_min_eff, extend downward to fit.
+                y2_min_eff = min(y2_min_eff, y2_min_data)
+
+                y2_range = [y2_min_eff, y2_max_eff]
+
+            fig.update_layout(
+                yaxis=dict(range=[y1_min, y1_max]),
+                yaxis2=dict(range=y2_range),
+            )
+
+    # If user provided y_max in non-linear mode, apply it directly.
+    if yaxis_type != "linear" and y_max is not None:
+        fig.update_layout(yaxis=dict(range=[None, float(y_max)]))
+
+    # If user provided y2_max in non-linear mode and y2 exists, apply it directly.
+    if yaxis_type != "linear" and y2_max is not None:
+        use_y2 = bool(show_cumulative_axis) or (static_score is not None)
+        if use_y2:
+            fig.update_layout(yaxis2=dict(range=[None, float(y2_max)]))
+
+    # ------------------------------------------------------------------
+    # 7. X-axis
+    # ------------------------------------------------------------------
+    fig.update_xaxes(
+        dtick=year_tick,
+        tickmode="linear",
+        showgrid=show_year_grid,
+        tick0=(year_range[0] if year_range else years[0]),
+        range=list(year_range) if year_range else None,
+    )
+
+    # ------------------------------------------------------------------
+    # 8. Reference year
+    # ------------------------------------------------------------------
+    if reference_year is not None:
+        fig.add_vline(
+            x=reference_year,
+            line_width=2,
+            line_dash="dash",
+            annotation_text="Reference year",
+            annotation_position="top",
+        )
 
     return fig
 

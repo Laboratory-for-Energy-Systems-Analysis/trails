@@ -135,12 +135,19 @@ def load_matrices_from_package(
                 off_min = _parse_intish_or_none(row.get("temporal_min")) or 0
                 off_max = _parse_intish_or_none(row.get("temporal_max")) or 0
 
+                scale_mode = row.get("temporal_scale_mode")
+                scale_base = _parse_float_or_none(row.get("temporal_scale_base", 1.0))
+                scale_rate = _parse_float_or_none(row.get("temporal_scale_rate", 0.0))
+
                 temporal_exchanges[(scenario_label, act_idx, prod_idx)] = TemporalExchange(
                     distribution=dist_code,
                     loc=loc,
                     scale=scale,
                     offset_min=int(off_min),
                     offset_max=int(off_max),
+                    scale_mode=scale_mode,
+                    scale_base=scale_base,
+                    scale_rate=scale_rate,
                 )
 
     # ---------- Load all B.csv ----------
@@ -174,12 +181,19 @@ def load_matrices_from_package(
                 off_min = _parse_intish_or_none(row.get("temporal_min")) or 0
                 off_max = _parse_intish_or_none(row.get("temporal_max")) or 0
 
+                scale_mode = row.get("temporal_scale_mode")
+                scale_base = _parse_float_or_none(row.get("temporal_scale_base", 1.0))
+                scale_rate = _parse_float_or_none(row.get("temporal_scale_rate", 0.0))
+
                 temporal_biosphere_exchanges[(scenario_label, act_idx, flow_idx)] = TemporalExchange(
                     distribution=dist_code,
                     loc=loc,
                     scale=scale,
                     offset_min=int(off_min),
                     offset_max=int(off_max),
+                    scale_mode=scale_mode,
+                    scale_base=scale_base,
+                    scale_rate=scale_rate,
                 )
 
     # ---------- Deduce shapes ----------
