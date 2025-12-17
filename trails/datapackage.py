@@ -28,37 +28,50 @@ def _parse_intish_or_none(value):
 # ----------------------------------------------------------------------
 def _iter_inventory_resources(package, filename: str):
     """
-    Yield (scenario_label, resource) for resources whose path matches:
+    Yield (year_label, resource) for resources whose path matches:
 
-        inventories/<scenario_label>/<filename>
+        inventories/<model>/<pathway>/<year>/<filename>
 
-    `filename` is typically "A.csv", "B.csv", "A_matrix_index.csv",
-    or "B_matrix_index.csv".
+    Because each datapackage contains exactly one model and one pathway,
+    we ignore them and use <year> as the scenario_label.
     """
     for res in package.resources:
         desc = res.descriptor or {}
         path_str = desc.get("path")
         if not path_str:
-            # inline or remote resources, skip
             continue
 
         path = PurePosixPath(path_str)
         parts = path.parts
 
+
         if (
-            len(parts) >= 3
+            len(parts) >= 5
             and parts[0] == "inventories"
             and parts[-1].lower() == filename.lower()
         ):
-            scenario_label = parts[1]  # e.g. "2005", "2050", "2100"
-            yield scenario_label, res
+            year_label = parts[3]  # inventories/<model>/<pathway>/<year>/...
+            yield year_label, res
 
+
+
+def _label_to_year(label: str) -> int:
+    """
+    Scenario labels may be:
+      - "2050"
+      - "model/pathway/2050"
+
+    This extracts the trailing year.
+    """
+    tail = str(label).split("/")[-1]
+    return int(tail)
 
 def _years_and_sorted_indices(scenario_labels: List[str]):
     """Return numeric years and indices that sort scenario_labels by year."""
-    years = np.array([int(lbl) for lbl in scenario_labels])
+    years = np.array([_label_to_year(lbl) for lbl in scenario_labels], dtype=int)
     order = np.argsort(years)
     return years[order], order
+
 
 
 # ----------------------------------------------------------------------
@@ -103,12 +116,18 @@ def load_matrices_from_package(
     max_activity_idx_for_B = -1
     max_flow_idx = -1
 
-    for scenario_label, res in _iter_inventory_resources(package, "A.csv"):
+    for scenario_label, res in _iter_inventory_resources(package, "A_matrix.csv"):
+
         t = get_scenario_idx(scenario_label)
         for row in res.iter(keyed=True):
             act_idx = int(row["index of activity"])
             prod_idx = int(row["index of product"])
             value = float(row["value"])
+
+            # Apply sign flip if requested by the datapackage row
+            flip_flag = _parse_intish_or_none(row.get("flip")) or 0
+            if flip_flag == 1:
+                value = -value
 
             A_t.append(t)
             A_i.append(act_idx)
@@ -150,8 +169,8 @@ def load_matrices_from_package(
                     scale_rate=scale_rate,
                 )
 
-    # ---------- Load all B.csv ----------
-    for scenario_label, res in _iter_inventory_resources(package, "B.csv"):
+    # ---------- Load all B_matrix.csv ----------
+    for scenario_label, res in _iter_inventory_resources(package, "B_matrix.csv"):
         t = get_scenario_idx(scenario_label)
         for row in res.iter(keyed=True):
             act_idx = int(row["index of activity"])
@@ -168,7 +187,7 @@ def load_matrices_from_package(
             if flow_idx > max_flow_idx:
                 max_flow_idx = flow_idx
 
-            # Optional temporal metadata for biosphere exchanges (same columns as A.csv)
+            # Optional temporal metadata for biosphere exchanges (same columns as A_matrix.csv)
             td_raw = row.get("temporal_distribution")
             if td_raw is not None and str(td_raw).strip() != "":
                 dist_code = _parse_intish_or_none(td_raw)
@@ -376,10 +395,7 @@ def load_indices_from_package(package):
         mapping = {}
         for row in rows:
             # headers: name;compartment;subcompartment;unit;index
-            try:
-                idx = int(row["index"])
-            except (KeyError, TypeError, ValueError):
-                continue
+            idx = int(row["index"])
 
             mapping[idx] = {
                 "name": row.get("name"),

@@ -7,6 +7,8 @@ import numpy as np
 import sparse
 import pyprind
 
+from tqdm import tqdm
+
 from .datapackage import (
     load_matrices_from_package,
     interpolate_to_annual,
@@ -46,6 +48,7 @@ class Trails:
         self.temporal_exchanges: Dict = {}
         self.temporal_biosphere_exchanges: Dict = {}
 
+        print("Loading matrices from data package          [1/3]")
         (
             self.A,
             self.B,
@@ -88,6 +91,7 @@ class Trails:
         self.max_year = int(self.years_int.max())
 
         # Load indices/metadata
+        print("Loading indices from data package           [2/3]")
         (
             self.activity_indices,
             self.biosphere_indices,
@@ -95,6 +99,7 @@ class Trails:
 
         # Optional temporal interpolation to annual resolution
         if interpolate_annual and self.scenario_labels:
+            print("Interpolating matrices to annual resolution [3/3]")
             (
                 self.A,
                 self.B,
@@ -201,18 +206,33 @@ class Trails:
         from .temporal_distributions import TemporalDistribution
 
         for prod_idx, value in zip(prod_indices, values):
+            value = float(value)
             prod_idx = int(prod_idx)
 
+            # Always skip the canonical production exchange, if present in your data
+            # (common convention: A[act, act] = -1)
             if prod_idx == act_idx and value == -1.0:
                 continue
 
+            # Ignore positive "output" entries only when they are on the diagonal-equivalent
+            # (activity index == product index indicates the activity's own output/reference product)
+            if value > 0.0 and prod_idx == act_idx:
+                continue
+
+            # Now compute the propagated requirement amount:
+            # - Inputs are negative -> convert to positive requirement magnitude
+            # - Off-diagonal positive entries (e.g., waste treatment services) are kept as-is
+            if value < 0.0:
+                child_amt = amount * (-value)  # positive requirement magnitude
+            else:
+                child_amt = amount * (value)  # keep positive sign (supply-driven service)
+
             tex = self.temporal_exchanges.get((template_label, act_idx, prod_idx))
 
-            # NEW: bypass temporal shifting
             if (tex is None) or (not use_temporal_distributions):
                 y_eff = scenario_year
                 demand.setdefault(y_eff, {})
-                demand[y_eff][prod_idx] = demand[y_eff].get(prod_idx, 0.0) + amount * float(value)
+                demand[y_eff][prod_idx] = demand[y_eff].get(prod_idx, 0.0) + child_amt
                 continue
 
             td = TemporalDistribution(tex)
@@ -225,7 +245,7 @@ class Trails:
                 demand.setdefault(y_eff, {})
                 demand[y_eff][prod_idx] = (
                         demand[y_eff].get(prod_idx, 0.0)
-                        + amount * float(value) * float(weight) * float(factor)
+                        + child_amt * float(weight) * float(factor)
                 )
 
         return demand
@@ -382,61 +402,123 @@ class Trails:
             use_temporal_distributions: bool = True,
     ):
         """
-        Traverse the temporal-technosphere graph starting from
-        (start_year, start_act_idx).
+        Traverse the temporal-technosphere graph starting from (start_year, start_act_idx).
 
-        Nodes with direct biosphere flows (non-zero B row) are always kept
-        in the frontier, even if they have temporal technosphere children.
-
-        Provenance tracks full *time-stamped* paths:
-
-            provenance[(year, act)][path_tuple] = amount
-
-        where path_tuple is a tuple of (year, act) pairs from the
-        *first-level child* down to this node, e.g.:
-
-            ((y1, act_child1), (y2, act_child2), ..., (yk, act_here))
+        Progress:
+          - Prefer an empirical total estimate based on max_depth (DEPTH_TOTALS).
+          - If not available, fall back to a short warm-up branching estimate.
         """
+        from collections import defaultdict, deque
 
-        from collections import deque, defaultdict
+        # ------------------------------------------------------------------
+        # 1) Empirical totals by depth (YOU populate these)
+        #    Values should represent the *typical nodes_processed* for that depth.
+        # ------------------------------------------------------------------
+        DEPTH_TOTALS = {
+            1: 10,
+            2: 50,
+            3: 400,
+            4: 4000,
+            5: 40000,
+            6: 400000,
+            7: 4000000,
+            8: 40000000,
+        }
 
-        # --------------------------------------------------------------
-        # Optional: pre-count nodes to size the progress bar
-        # --------------------------------------------------------------
-        bar = None
+        # Conservative multiplier so the bar doesn't finish early
+        EMPIRICAL_SAFETY_FACTOR = 1.05  # tune: 1.05–1.30
+
+        # ------------------------------------------------------------------
+        # 2) Warm-up fallback params (only used if DEPTH_TOTALS lacks max_depth)
+        # ------------------------------------------------------------------
+        WARMUP_LIMIT = 1000
+        BRANCHING_PERCENTILE = 95.0
+        BRANCHING_SAFETY_FACTOR = 1.2
+
+        def estimate_total_from_branching(branching_samples):
+            if not branching_samples:
+                return 1
+            s = sorted(branching_samples)
+            k = int((BRANCHING_PERCENTILE / 100.0) * (len(s) - 1))
+            b = max(1.0, float(s[k]) * BRANCHING_SAFETY_FACTOR)
+            if abs(b - 1.0) < 1e-9:
+                return max_depth + 1
+            return int((b ** (max_depth + 1) - 1.0) / (b - 1.0))
+
+        def estimate_total_from_depth():
+            # Exact depth available
+            if max_depth in DEPTH_TOTALS:
+                return int(max(1, DEPTH_TOTALS[max_depth] * EMPIRICAL_SAFETY_FACTOR))
+
+            # If you have surrounding depths, interpolate in log-space (often more stable)
+            depths = sorted(DEPTH_TOTALS.keys())
+            if len(depths) >= 2:
+                lo = max([d for d in depths if d < max_depth], default=None)
+                hi = min([d for d in depths if d > max_depth], default=None)
+                if lo is not None and hi is not None and DEPTH_TOTALS[lo] > 0 and DEPTH_TOTALS[hi] > 0:
+                    import math
+                    y0 = math.log(DEPTH_TOTALS[lo])
+                    y1 = math.log(DEPTH_TOTALS[hi])
+                    t = (max_depth - lo) / (hi - lo)
+                    est = math.exp(y0 + t * (y1 - y0))
+                    return int(max(1, est * EMPIRICAL_SAFETY_FACTOR))
+
+            # Otherwise, no empirical estimate
+            return None
+
+        # ------------------------------------------------------------------
+        # Progress bar setup
+        # ------------------------------------------------------------------
+        pbar = None
+        branching_samples = []
+        nodes_processed = 0
+
+        total_est = None
         if show_progress:
-            total_nodes = self._count_traversal_nodes(
-                start_year=start_year,
-                start_act_idx=start_act_idx,
-                amount=amount,
-                max_depth=max_depth,
-                min_amount=min_amount,
-            )
-            if total_nodes <= 0:
-                total_nodes = 1
-            bar = pyprind.ProgBar(total_nodes, title='Temporal traversal')
+            total_est = estimate_total_from_depth()
+            try:
+                if total_est is None:
+                    # Indeterminate until warm-up can estimate
+                    pbar = tqdm(total=None, desc="Temporal traversal", unit="node", dynamic_ncols=True)
+                else:
+                    pbar = tqdm(total=total_est, desc="Temporal traversal", unit="node", dynamic_ncols=True)
+            except Exception:
+                pbar = None
 
+        # ------------------------------------------------------------------
+        # Traversal state
+        # ------------------------------------------------------------------
         queue = deque()
-        # path: tuple[(year, act), ...] from first-level child onward
         queue.append((start_year, start_act_idx, float(amount), 0, ()))
 
-        # Final demand at cutoff (year, act)
         demand = defaultdict(float)
-
-        # provenance[(year, act)][path_tuple] = amount
         provenance = defaultdict(lambda: defaultdict(float))
-
-        # Cache: (scenario_year, act_idx) -> bool(has_direct_bio)
         bio_cache: dict[tuple[int, int], bool] = {}
 
+        # ------------------------------------------------------------------
+        # Main traversal loop
+        # ------------------------------------------------------------------
         while queue:
             year, act, amt, depth, path = queue.popleft()
 
             if abs(amt) < min_amount:
                 continue
 
-            if bar is not None:
-                bar.update()
+            nodes_processed += 1
+            if pbar is not None:
+                pbar.update(1)
+
+            # If we didn't have an empirical total, switch to an estimated total after warm-up
+            if (
+                    show_progress
+                    and pbar is not None
+                    and pbar.total is None
+                    and nodes_processed >= WARMUP_LIMIT
+            ):
+                total_est = estimate_total_from_branching(branching_samples)
+                total_est = max(total_est, nodes_processed + 1)
+                pbar.total = total_est
+                pbar.refresh()
 
             # Map to scenario year for looking into B
             scenario_year = self._map_year_to_scenario_year(year)
@@ -448,14 +530,12 @@ class Trails:
                 if key in bio_cache:
                     has_direct_bio = bio_cache[key]
                 else:
-                    # B[t, act, :] is a 1D sparse row (flows)
-                    B_row = self.B[t, act, :]
-                    has_direct_bio = B_row.nnz > 0
+                    has_direct_bio = self.B[t, act, :].nnz > 0
                     bio_cache[key] = has_direct_bio
             else:
                 has_direct_bio = False
 
-            # If we've reached max_depth, stop expanding and store demand here
+            # Cutoff at max_depth
             if depth >= max_depth:
                 demand[(year, act)] += amt
                 if path:
@@ -464,11 +544,13 @@ class Trails:
 
             # Expand this node one step
             child_demands = self.expand_temporal_exchanges(
-                year=year, act_idx=act, amount=amt, use_temporal_distributions=use_temporal_distributions,
+                year=year,
+                act_idx=act,
+                amount=amt,
+                use_temporal_distributions=use_temporal_distributions,
             )
 
             if not child_demands:
-                # No outgoing exchanges → final node
                 demand[(year, act)] += amt
                 if path:
                     provenance[(year, act)][path] += amt
@@ -479,27 +561,30 @@ class Trails:
                 if path:
                     provenance[(year, act)][path] += amt
 
-            # Enqueue children
+            # Enqueue children (+ warm-up branching sample if needed)
+            children_enqueued = 0
             for child_year, mapping in child_demands.items():
                 for child_act, child_amt in mapping.items():
                     if abs(child_amt) < min_amount:
                         continue
 
-                    # Build child path:
-                    # - at depth 0 (root → first level): start the path with the child node
-                    # - otherwise: extend the existing path
                     child_node = (child_year, child_act)
                     if depth == 0:
                         child_path = (child_node,)
                     else:
                         child_path = path + (child_node,)
 
-                    queue.append(
-                        (child_year, child_act, child_amt, depth + 1, child_path)
-                    )
+                    queue.append((child_year, child_act, child_amt, depth + 1, child_path))
+                    children_enqueued += 1
+
+            if show_progress and (pbar is not None) and (pbar.total is None) and nodes_processed <= WARMUP_LIMIT:
+                branching_samples.append(children_enqueued)
+
+        if pbar is not None:
+            pbar.close()
 
         if return_provenance:
-            provenance = {key: dict(inner) for key, inner in provenance.items()}
+            provenance = {k: dict(v) for k, v in provenance.items()}
             return dict(demand), provenance
 
         return dict(demand)

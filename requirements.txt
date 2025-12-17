@@ -8,3 +8,4 @@ packaging
 bw2calc
 pyprind
 plotly
+tqdm
