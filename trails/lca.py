@@ -250,131 +250,138 @@ def lca(
     Temporal LCA + LCIA for one starting activity, with attribution of
     impacts to *first-level* suppliers.
 
-    If use_temporal_distributions=False, no temporal shifting is applied and
-    scores are computed directly from each bw2calc inventory.
+    Static mode (use_temporal_distributions=False):
+      - bw2calc inventory is characterized directly with CF matrix C
+      - supplier roots are computed with separate bw2calc solves
+      - start activity direct-only score is computed from Trails.B row and characterized
 
-    If use_temporal_distributions=True, biosphere is zeroed in the datapackage,
-    biosphere flows are accumulated with temporal shifting, and scoring happens
-    in the second pass.
+    Temporal mode (use_temporal_distributions=True):
+      - biosphere is zeroed in datapackage
+      - temporalized biosphere inventories are accumulated from Trails.B with temporal shifting
+      - characterization happens in a second pass
+      - start activity root is direct-only (only its own biosphere)
     """
-    # ------------------------------------------------------------------
-    # 1) Temporal traversal WITH provenance (needed for per-root attribution)
-    # ------------------------------------------------------------------
-    frontier, provenance = trails.temporal_traversal(
-        start_year=start_year,
-        start_act_idx=start_act_idx,
-        amount=amount,
-        max_depth=max_depth,
-        min_amount=min_amount,
-        return_provenance=True,  # always needed internally for per-root attribution
-        show_progress=show_progress,
-        use_temporal_distributions=use_temporal_distributions,
-    )
+    import numpy as np
+    from collections import defaultdict
+    import bw2calc as bc
 
-    # 2) Frontier -> per-year total demand vectors
+    # -----------------------------
+    # 1) Temporal traversal (used to build f_by_year; provenance optional)
+    # -----------------------------
+    # -----------------------------
+    # 1) Temporal traversal (used to build f_by_year; provenance optional)
+    # -----------------------------
+    if return_provenance:
+        frontier, provenance = trails.temporal_traversal(
+            start_year=start_year,
+            start_act_idx=start_act_idx,
+            amount=amount,
+            max_depth=max_depth,
+            min_amount=min_amount,
+            return_provenance=True,
+            show_progress=show_progress,
+            use_temporal_distributions=use_temporal_distributions,
+        )
+    else:
+        frontier = trails.temporal_traversal(
+            start_year=start_year,
+            start_act_idx=start_act_idx,
+            amount=amount,
+            max_depth=max_depth,
+            min_amount=min_amount,
+            return_provenance=False,
+            show_progress=show_progress,
+            use_temporal_distributions=use_temporal_distributions,
+        )
+        provenance = {}
+
+    # 2) Frontier -> per-year demand vectors (used only to get FU per year and diagnostics)
     f_by_year = trails.frontier_to_demand_vectors(frontier)
 
-    # ------------------------------------------------------------------
-    # 3) Build per-year, per-root demand from provenance:
-    #     - Supplier roots: only first-level suppliers (path[0])
-    #     - Start activity root is treated as DIRECT-ONLY, not a normal upstream root
-    #     - Any remainder goes into a RESIDUAL bucket
-    # ------------------------------------------------------------------
-    from collections import defaultdict
-
-    ROOT_DIRECT = start_act_idx  # we will treat this bucket as direct-only later
-    ROOT_RESIDUAL = -1  # special bucket for any unattributed remainder
-
-    # fu_per_root_by_year[year][root_act][act_idx] noted as "demand contributions"
-    fu_per_root_by_year: Dict[int, Dict[int, Dict[int, float]]] = defaultdict(
-        lambda: defaultdict(lambda: defaultdict(float))
-    )
-
-    # Populate supplier-root contributions from provenance
-    # (root is the first node in the path: path[0] = (child_year, child_act))
-    for (year, act_idx), path_map in provenance.items():
-        for path, amt in path_map.items():
-            if not path:
-                continue
-            root_year, root_act = path[0]
-            fu_per_root_by_year[year][root_act][act_idx] += float(amt)
-
-    # Now build a residual bucket so that, for each year:
-    # sum_root_fu (elementwise) + residual == total FU vector (elementwise)
-    for year, f_vec in f_by_year.items():
-        summed = np.zeros_like(f_vec, dtype=float)
-
-        for root_act, mp in fu_per_root_by_year.get(year, {}).items():
-            for aidx, v in mp.items():
-                if 0 <= int(aidx) < len(summed):
-                    summed[int(aidx)] += float(v)
-
-        residual = f_vec.astype(float) - summed
-        residual[np.abs(residual) < min_amount] = 0.0
-
-        # The functional unit itself is not an "unattributed supplier"; never put it into residual
-        if start_act_idx < len(residual):
-            residual[start_act_idx] = 0.0
-
-        # Store residual only once, and only if anything remains
-        if np.any(residual != 0.0):
-            for aidx, v in enumerate(residual):
-                if v != 0.0:
-                    fu_per_root_by_year[year][ROOT_RESIDUAL][int(aidx)] += float(v)
-
-        # The functional unit itself is not an "unattributed supplier"; do not put it into residual
-        if start_act_idx < len(residual):
-            residual[start_act_idx] = 0.0
-
-        # Put residual into a separate bucket (NOT into the start activity root)
-        for aidx, v in enumerate(residual):
-            if v != 0.0:
-                fu_per_root_by_year[year][ROOT_RESIDUAL][int(aidx)] += float(v)
-
-    # Also ensure the DIRECT bucket exists (even if empty), so it shows up consistently
-    # We do NOT populate it here with {start_act_idx: demand}; it will be computed as direct-only later.
-    for year in f_by_year.keys():
-        fu_per_root_by_year[year].setdefault(ROOT_DIRECT, {})
+    # -----------------------------
+    # Caches
+    # -----------------------------
+    # dp_cache[(year, zero_bio)] -> (dp, tech_idx, bio_idx, uncertain)
+    dp_cache: Dict[tuple, Any] = {}
+    # char_cache[(year, zero_bio)] -> CF matrix
+    char_cache: Dict[tuple, Any] = {}
 
     results_by_year: Dict[int, Dict[str, Any]] = {}
 
-    # ------------------------------------------------------------------
-    # Temporalized biosphere accounting (used only when temporal mode is on)
-    # ------------------------------------------------------------------
+    # -----------------------------
+    # Temporal-mode inventory accumulators
+    # -----------------------------
     inventory_by_year_total: Dict[int, np.ndarray] = {}
     inventory_by_year_per_root: Dict[int, Dict[int, np.ndarray]] = defaultdict(dict)
 
-    # ------------------------------------------------------------------
-    # Caches (mode-aware)
-    # ------------------------------------------------------------------
-    # dp_cache[(year, zero_biosphere)] -> (dp, tech_idx, bio_idx, uncertain)
-    dp_cache: Dict[tuple, Any] = {}
-    # char_cache[(year, zero_biosphere)] -> CF matrix
-    char_cache: Dict[tuple, Any] = {}
-
     candidate_years = sorted(f_by_year.keys())
-    total = max(len(candidate_years), 1)
+    if not candidate_years:
+        return ({}, provenance) if return_provenance else {}
 
+    # -----------------------------
+    # Optional progress bar
+    # -----------------------------
     bar = None
     if show_progress:
-        bar = pyprind.ProgBar(total, title="Temporal LCA over years")
+        try:
+            import pyprind
+            bar = pyprind.ProgBar(len(candidate_years), title="Temporal LCA over years")
+        except Exception:
+            bar = None
 
+    # -----------------------------
+    # Helper: build C in bw2calc biosphere ordering (static mode)
+    # -----------------------------
+    def _get_C_static(year: int, lca_obj, bio_idx: Dict[tuple, int], zero_bio: bool):
+        """
+        Build characterization matrix C such that C.shape[1] matches
+        lca_obj.inventory.shape[0], using lca_obj.dicts.biosphere ordering.
+        """
+        key = (year, zero_bio, "static_bw_order")
+        if key in char_cache:
+            return char_cache[key]
+
+        bw_bio_map = lca_obj.dicts.biosphere  # flow_id -> row position
+        biosphere_matrix_dict = {int(flow_id): int(pos) for flow_id, pos in bw_bio_map.items()}
+
+        # bio_idx: (name, comp, subcomp, unit) -> flow_id
+        biosphere_dict_simple = {
+            (name, comp, subcomp): int(flow_id)
+            for (name, comp, subcomp, unit), flow_id in bio_idx.items()
+        }
+
+        C = fill_characterization_factors_matrices(
+            methods=methods,
+            biosphere_matrix_dict=biosphere_matrix_dict,
+            biosphere_dict=biosphere_dict_simple,
+        )
+        char_cache[key] = C
+        return C
+
+    # -----------------------------
+    # Helper: score a bw2calc LCA inventory with C
+    # -----------------------------
+    def _score_from_lca_inventory(lca_obj, C) -> float:
+        inv = lca_obj.inventory
+        inv_vec = np.asarray(inv.sum(axis=1)).reshape((-1, 1))
+        if C.shape[1] != inv_vec.shape[0]:
+            raise ValueError(f"C columns ({C.shape[1]}) != inventory rows ({inv_vec.shape[0]})")
+        return float(np.sum(C.dot(inv_vec)))
+
+    # -----------------------------
+    # Main per-year loop
+    # -----------------------------
     for year in candidate_years:
-        f = f_by_year[year]
+        f_vec = f_by_year[year]
 
-        # Use ONLY the actual functional unit in bw2calc.
-        # The traversal vector `f` is for attribution/diagnostics, not for bw2calc demand.
-        fu_amt = float(f[start_act_idx]) if start_act_idx < len(f) else 0.0
+        # FU amount for this year is the start activity component
+        fu_amt = float(f_vec[start_act_idx]) if start_act_idx < len(f_vec) else 0.0
         if abs(fu_amt) <= min_amount:
             if bar:
                 bar.update()
             continue
 
-        # ------------------------------------------------------------------
-        # Build datapackage for this year
-        # In temporal mode: zero biosphere (we re-inject via temporalized inventory)
-        # In static mode: keep biosphere (we score directly from bw2calc inventory)
-        # ------------------------------------------------------------------
+        # Datapackage: zero biosphere in temporal mode; keep in static mode
         zero_bio = bool(use_temporal_distributions)
         dp_key = (year, zero_bio)
 
@@ -388,18 +395,16 @@ def lca(
         else:
             dp, tech_idx, bio_idx, uncertain_params = dp_cache[dp_key]
 
-        # 5) Total functional unit for this year
-        fu_total = {int(start_act_idx): fu_amt}
+        # Total FU for bw2calc is ONLY the real FU
+        fu_total = {int(start_act_idx): float(fu_amt)}
 
-        # 6) LCI for total FU
+        # Total LCI (always needed)
         lca_total = bc.LCA(demand=fu_total, data_objs=[dp])
         lca_total.lci()
 
-        # ------------------------------------------------------------------
-        # Build per-root FU maps for this year (used in BOTH modes)
-        # fu_per_root[root_idx] = {act_idx: amount, ...}
-        # ------------------------------------------------------------------
-        # First-level supplier demands from the FU (one-step expansion)
+        # -----------------------------
+        # Build first-level supplier roots (single-activity FUs)
+        # -----------------------------
         first_level = trails.expand_temporal_exchanges(
             year=year,
             act_idx=start_act_idx,
@@ -409,11 +414,10 @@ def lca(
 
         fu_per_root: Dict[int, Dict[int, float]] = {}
 
-        # Each first-level supplier becomes a root with a single-activity FU: {supplier_act: supplier_amt}
+        # Each first-level supplier root: {supplier_act: supplier_amt}
         for child_year, mapping in first_level.items():
             if child_year != year:
-                # If you allow temporal shifting in technosphere, you can decide how to handle cross-year roots.
-                # Simplest: ignore or accumulate separately; for now, keep only same-year roots
+                # If you want cross-year supplier roots, handle separately.
                 continue
             for supplier_act, supplier_amt in mapping.items():
                 supplier_amt = float(supplier_amt)
@@ -421,125 +425,103 @@ def lca(
                     continue
                 fu_per_root[int(supplier_act)] = {int(supplier_act): supplier_amt}
 
-        # ------------------------------------------------------------------
-        # Scoring branch
-        # ------------------------------------------------------------------
+        # Ensure start root exists in temporal mode (direct-only), static mode (direct-only)
+        fu_per_root.setdefault(int(start_act_idx), {})
+
+        # -----------------------------
+        # Branch: STATIC scoring
+        # -----------------------------
         if not use_temporal_distributions:
-            # ---------------------------
-            # STATIC scoring (no temporal shifting)
-            # ---------------------------
-            char_key = (year, zero_bio)  # zero_bio is False here
+            C = _get_C_static(year=year, lca_obj=lca_total, bio_idx=bio_idx, zero_bio=zero_bio)
 
-            if char_key not in char_cache:
-                biosphere_matrix_dict = {int(idx): int(idx) for idx in set(bio_idx.values())}
-                biosphere_dict_simple = {
-                    (name, comp, subcomp): idx
-                    for (name, comp, subcomp, unit), idx in bio_idx.items()
-                }
-                C = fill_characterization_factors_matrices(
-                    methods=methods,
-                    biosphere_matrix_dict=biosphere_matrix_dict,
-                    biosphere_dict=biosphere_dict_simple,
-                )
-                char_cache[char_key] = C
-            else:
-                C = char_cache[char_key]
+            total_score_scalar = _score_from_lca_inventory(lca_total, C)
 
-            def _score_from_lca_inventory(lca_obj) -> float:
-                inv = lca_obj.inventory
-                inv_vec = np.asarray(inv.sum(axis=1)).reshape((-1, 1))
-                scores_vec = C.dot(inv_vec)
-                return float(np.sum(scores_vec))
-
-            # Total score
-            total_score_scalar = _score_from_lca_inventory(lca_total)
-
-            # --- Direct-only contribution for the start activity (no upstream) ---
-            # Compute direct biosphere inventory for the start activity only, then characterize
-            try:
-                fu_amt = float(f_by_year[year][start_act_idx])
-            except Exception:
-                fu_amt = 0.0
-
-            if abs(fu_amt) > min_amount:
-                # Build direct inventory vector (biosphere flows) for this activity
-                # Your internal B slice is (activities x flows) in Trails
-                scenario_year = trails._map_year_to_scenario_year(year)
-                label = str(scenario_year)
-                if label in trails.scenario_index:
-                    t = trails.scenario_index[label]
-                    B_row = trails.B[t, start_act_idx, :]  # sparse.COO row slice
-                    inv_direct = np.zeros(len(bio_idx), dtype=float)
-
-                    # B_row.coords for 2D slice: [flows] if it collapses; safest: use coords
-                    coords = B_row.coords
-                    data = B_row.data
-
-                    # Handle possible shapes from sparse slicing
-                    if coords.shape[0] == 2:
-                        flow_idx = coords[1]
-                    else:
-                        flow_idx = coords[0]
-
-                    inv_direct[np.asarray(flow_idx, dtype=int)] = np.asarray(data, dtype=float) * fu_amt
-
-                    direct_score = float(np.sum(C.dot(inv_direct.reshape((-1, 1)))))
-                    if abs(direct_score) > min_amount:
-                        scores_per_root[start_act_idx] = direct_score
-
-            # Per-root scores
             scores_per_root: Dict[int, float] = {}
+
+            # (A) Direct-only for start activity (include only if non-zero)
+            bw_bio_map = lca_total.dicts.biosphere  # flow_id -> row position
+            inv_direct = np.zeros(len(bw_bio_map), dtype=float)
+
+            # Build direct biosphere vector from Trails.B row in flow-id space and map into bw2calc ordering
+            scenario_year = trails._map_year_to_scenario_year(year)
+            label = str(scenario_year)
+            if label in trails.scenario_index:
+                t = trails.scenario_index[label]
+                B_row = trails.B[t, start_act_idx, :]  # (activities x flows) row slice (COO)
+
+                coords = B_row.coords
+                data = B_row.data
+
+                if data.size > 0:
+                    if coords.shape[0] == 2:
+                        flow_ids = coords[1]
+                    else:
+                        flow_ids = coords[0]
+
+                    for flow_id, v in zip(flow_ids, data):
+                        pos = bw_bio_map.get(int(flow_id))
+                        if pos is None:
+                            continue
+                        inv_direct[int(pos)] += float(v) * fu_amt
+
+            direct_score = float(np.sum(C.dot(inv_direct.reshape((-1, 1)))))
+            if abs(direct_score) > min_amount:
+                scores_per_root[int(start_act_idx)] = direct_score
+
+            # (B) Supplier roots: full upstream burdens
             for root_idx, fu_root in fu_per_root.items():
+                if root_idx == int(start_act_idx):
+                    continue
                 lca_root = bc.LCA(demand=fu_root, data_objs=[dp])
                 lca_root.lci()
-                scores_per_root[root_idx] = _score_from_lca_inventory(lca_root)
+                s = _score_from_lca_inventory(lca_root, C)
+                if abs(s) > min_amount:
+                    scores_per_root[int(root_idx)] = float(s)
 
-        else:
-            # ---------------------------
-            # TEMPORAL scoring (existing logic)
-            # - build temporally shifted inventories now
-            # - score in second pass later
-            # ---------------------------
-            supply_by_act_idx: Dict[int, float] = {}
-            n_acts = trails.B.shape[1]
+            results_by_year[year] = {
+                "fu": fu_total,
+                "fu_per_root": fu_per_root,
+                "lca": lca_total,
+                "scores": float(total_score_scalar),
+                "scores_per_root": scores_per_root,
+            }
 
-            fu_per_root.setdefault(start_act_idx, {})
+            if bar:
+                bar.update()
+            continue  # static year done
 
-            for act_idx in range(n_acts):
-                try:
-                    prod_pos = lca_total.dicts.product[act_idx]
-                except KeyError:
-                    continue
-                supply = float(lca_total.supply_array[prod_pos])
-                if abs(supply) > min_amount:
-                    supply_by_act_idx[act_idx] = supply
+        # -----------------------------
+        # Branch: TEMPORAL accumulation (score later in second pass)
+        # -----------------------------
+        # Total temporalized inventory
+        supply_by_act_idx: Dict[int, float] = {}
+        n_acts = trails.B.shape[1]
 
-            trails.accumulate_temporalized_biosphere_inventory(
-                year,
-                supply_by_act_idx,
-                inventory_by_year_total,
-                min_amount=min_amount,
-                use_temporal_distributions=True,
-            )
+        for act_idx in range(n_acts):
+            try:
+                prod_pos = lca_total.dicts.product[act_idx]
+            except KeyError:
+                continue
+            supply = float(lca_total.supply_array[prod_pos])
+            if abs(supply) > min_amount:
+                supply_by_act_idx[int(act_idx)] = supply
 
-        # Per-root temporalized inventories (scored in second pass)
+        trails.accumulate_temporalized_biosphere_inventory(
+            year,
+            supply_by_act_idx,
+            inventory_by_year_total,
+            min_amount=min_amount,
+            use_temporal_distributions=True,
+        )
+
+        # Per-root temporalized inventories
         for root_idx, fu_root in fu_per_root.items():
-
-            if root_idx == start_act_idx:
-                # DIRECT-ONLY bucket:
-                # Only count biosphere emissions that belong to the start activity itself.
-                # Do NOT run an LCA solve, as that would include the full upstream chain.
-                supply_start = float(f_by_year[year][start_act_idx]) if start_act_idx < len(
-                    f_by_year[year]) else 0.0
-                if abs(supply_start) <= min_amount:
-                    continue
-                supply_by_act_root = {int(start_act_idx): supply_start}
-
+            if root_idx == int(start_act_idx):
+                # Direct-only: only the start activity itself
+                supply_by_act_root = {int(start_act_idx): float(fu_amt)}
             else:
-                # Normal roots (supplier roots + residual bucket): solve and use their supply arrays
                 lca_root = bc.LCA(demand=fu_root, data_objs=[dp])
                 lca_root.lci()
-
                 supply_by_act_root = {}
                 for act_idx in range(n_acts):
                     try:
@@ -548,48 +530,48 @@ def lca(
                         continue
                     supply = float(lca_root.supply_array[prod_pos])
                     if abs(supply) > min_amount:
-                        supply_by_act_root[act_idx] = supply
+                        supply_by_act_root[int(act_idx)] = supply
 
             trails.accumulate_temporalized_biosphere_inventory(
                 year,
                 supply_by_act_root,
-                inventory_by_year_per_root[root_idx],
+                inventory_by_year_per_root[int(root_idx)],
                 min_amount=min_amount,
                 use_temporal_distributions=True,
             )
 
-            # Placeholders; overwritten in second pass
-            total_score_scalar = 0.0
-            scores_per_root = {root_idx: 0.0 for root_idx in fu_per_root.keys()}
-
-        # ------------------------------------------------------------------
-        # Store first-pass results
-        # ------------------------------------------------------------------
+        # Placeholders; overwritten in second pass
         results_by_year[year] = {
             "fu": fu_total,
             "fu_per_root": fu_per_root,
             "lca": lca_total,
-            "scores": total_score_scalar,
-            "scores_per_root": scores_per_root,
+            "scores": 0.0,
+            "scores_per_root": {int(k): 0.0 for k in fu_per_root.keys()},
         }
 
         if bar:
             bar.update()
 
-    # ------------------------------------------------------------------
-    # Second pass: characterize temporally shifted biosphere inventories
-    # (only in temporal mode)
-    # ------------------------------------------------------------------
+    if bar:
+        try:
+            bar.stop()
+        except Exception:
+            pass
+
+    # -----------------------------
+    # Second pass: characterize temporalized inventories (only temporal mode)
+    # -----------------------------
     if use_temporal_distributions:
-        all_years = sorted(set(candidate_years) | set(inventory_by_year_total.keys()))
+        # inventory vectors produced by trails.accumulate_* are assumed indexed by flow_id (position == flow_id)
         n_flows = int(trails.B.shape[2]) if trails.B is not None else 0
+        if n_flows <= 0:
+            return (results_by_year, provenance) if return_provenance else results_by_year
+
+        # Build C once per effective year (can differ if CFs vary by year)
+        all_years = sorted(set(results_by_year.keys()) | set(inventory_by_year_total.keys()))
 
         for y_eff in all_years:
-            # In second pass we always need a mapping consistent with the temporal-mode datapackage:
-            # zero_biosphere=True
-            zero_bio_2 = True
-            dp_key = (y_eff, zero_bio_2)
-
+            dp_key = (y_eff, True)
             if dp_key not in dp_cache:
                 dp, tech_idx, bio_idx, uncertain_params = build_datapackage_for_year_from_trails(
                     trails=trails,
@@ -600,13 +582,24 @@ def lca(
             else:
                 dp, tech_idx, bio_idx, uncertain_params = dp_cache[dp_key]
 
-            char_key = (y_eff, zero_bio_2)
+            # Characterization for temporal inventories:
+            # inventory vectors are length n_flows and indexed by flow_id,
+            # so we map flow_id -> flow_id (identity).
+            char_key = (y_eff, True, "temporal_flowid_space")
             if char_key not in char_cache:
-                biosphere_matrix_dict = {int(idx): int(idx) for idx in set(bio_idx.values())}
+                max_flow_id = max(int(v) for v in bio_idx.values()) if bio_idx else -1
+                if max_flow_id >= n_flows:
+                    raise ValueError(
+                        f"Temporal inventory length n_flows={n_flows} but max biosphere flow id={max_flow_id}."
+                        " Your temporal inventory is not in pure flow-id space."
+                    )
+
+                biosphere_matrix_dict = {int(flow_id): int(flow_id) for flow_id in set(bio_idx.values())}
                 biosphere_dict_simple = {
-                    (name, comp, subcomp): idx
-                    for (name, comp, subcomp, unit), idx in bio_idx.items()
+                    (name, comp, subcomp): int(flow_id)
+                    for (name, comp, subcomp, unit), flow_id in bio_idx.items()
                 }
+
                 C = fill_characterization_factors_matrices(
                     methods=methods,
                     biosphere_matrix_dict=biosphere_matrix_dict,
@@ -616,33 +609,26 @@ def lca(
             else:
                 C = char_cache[char_key]
 
-            inv_vec = inventory_by_year_total.get(
+            inv_total = inventory_by_year_total.get(
                 y_eff,
-                np.zeros(n_flows, dtype=trails.value_dtype) if n_flows else np.zeros(0),
+                np.zeros(n_flows, dtype=trails.value_dtype),
             )
+            total_score_scalar = float(np.sum(C.dot(inv_total.reshape((-1, 1)))))
 
-            total_scores = C.dot(inv_vec.reshape((-1, 1)))
-            total_score_scalar = float(np.sum(total_scores))
-
-            # Per-root scores
             scores_per_root_2: Dict[int, float] = {}
             for root_idx, inv_map in inventory_by_year_per_root.items():
                 inv_root = inv_map.get(
                     y_eff,
-                    np.zeros(n_flows, dtype=trails.value_dtype) if n_flows else np.zeros(0),
+                    np.zeros(n_flows, dtype=trails.value_dtype),
                 )
-                root_scores = C.dot(inv_root.reshape((-1, 1)))
-                score_val = float(np.sum(root_scores))
+                score_val = float(np.sum(C.dot(inv_root.reshape((-1, 1)))))
 
-                # Only include start/root activity if it has characterized direct emissions
-                if root_idx == start_act_idx and abs(score_val) <= min_amount:
+                # Include start activity root only if it has non-zero direct characterized emissions
+                if root_idx == int(start_act_idx) and abs(score_val) <= min_amount:
                     continue
 
-                # Optionally also drop near-zero entries for readability
-                if abs(score_val) <= min_amount:
-                    continue
-
-                scores_per_root_2[root_idx] = score_val
+                if abs(score_val) > min_amount:
+                    scores_per_root_2[int(root_idx)] = score_val
 
             if y_eff not in results_by_year:
                 results_by_year[y_eff] = {
