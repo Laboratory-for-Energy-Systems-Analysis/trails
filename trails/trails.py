@@ -580,6 +580,25 @@ class Trails:
             if show_progress and (pbar is not None) and (pbar.total is None) and nodes_processed <= WARMUP_LIMIT:
                 branching_samples.append(children_enqueued)
 
+        # ------------------------------------------------------------------
+        # Force-complete progress bar (so it always ends at 100%)
+        # ------------------------------------------------------------------
+        if pbar is not None:
+            try:
+                # Case 1: total was never set (indeterminate bar) -> set it to actual work
+                if pbar.total is None:
+                    pbar.total = nodes_processed
+
+                # Case 2: total exists but we processed fewer nodes than estimated -> fill to 100%
+                if pbar.n < pbar.total:
+                    pbar.update(pbar.total - pbar.n)
+
+                pbar.refresh()
+            except Exception:
+                pass
+
+            pbar.close()
+
         if pbar is not None:
             pbar.close()
 
