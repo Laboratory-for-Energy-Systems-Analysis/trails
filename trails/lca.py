@@ -9,6 +9,9 @@ import pyprind
 from .trails import Trails
 from .lcia import fill_characterization_factors_matrices
 
+import logging
+logger = logging.getLogger(__name__)
+
 
 def _nearest_metadata_label_for_year(trails: Trails, year: int) -> str:
     """
@@ -261,9 +264,11 @@ def lca(
       - characterization happens in a second pass
       - start activity root is direct-only (only its own biosphere)
     """
-    import numpy as np
-    from collections import defaultdict
-    import bw2calc as bc
+
+    logger.info(
+        "LCA start: start_year=%d start_act_idx=%d amount=%g max_depth=%d min_amount=%g methods=%s use_td=%s",
+        start_year, start_act_idx, amount, max_depth, min_amount, methods, use_temporal_distributions
+    )
 
     # -----------------------------
     # 1) Temporal traversal (used to build f_by_year; provenance optional)
@@ -282,6 +287,9 @@ def lca(
             show_progress=show_progress,
             use_temporal_distributions=use_temporal_distributions,
         )
+        logger.info("LCA: traversal frontier years=%d", len(frontier))
+        logger.debug("LCA: frontier years=%s", sorted(frontier.keys()))
+
     else:
         frontier = trails.temporal_traversal(
             start_year=start_year,
@@ -294,9 +302,17 @@ def lca(
             use_temporal_distributions=use_temporal_distributions,
         )
         provenance = {}
+        logger.info("LCA: traversal frontier years=%d", len(frontier))
+        logger.debug("LCA: frontier years=%s", sorted(frontier.keys()))
 
     # 2) Frontier -> per-year demand vectors (used only to get FU per year and diagnostics)
     f_by_year = trails.frontier_to_demand_vectors(frontier)
+
+    nz = {y: v for y, v in f_by_year.items() if np.any(np.asarray(v) != 0)}
+    logger.info("LCA: FU-by-year years=%d nonzero=%d", len(f_by_year), len(nz))
+    logger.debug("LCA: FU-by-year (first 25 nonzero)=%s", list(sorted(nz.items()))[:25])
+    if not nz:
+        logger.error("LCA: FU-by-year is all zero -> results will be empty. Check traversal sign/min_amount/expansion.")
 
     # -----------------------------
     # Caches
@@ -371,15 +387,58 @@ def lca(
     # -----------------------------
     # Main per-year loop
     # -----------------------------
+
+    # Diagnostics: per-year screening and root coverage
+    n_years = len(candidate_years)
+    n_skip_fu = 0
+    n_process = 0
+    max_abs_fu = 0.0
+    max_abs_fu_year = None
+
+    # Diagnostics: root building and temporal accumulation
+    n_years_with_any_root = 0
+    n_years_with_supplier_roots = 0  # roots excluding start_act direct-only bucket
+    max_roots = 0
+    max_roots_year = None
+
     for year in candidate_years:
         f_vec = f_by_year[year]
 
         # FU amount for this year is the start activity component
         fu_amt = float(f_vec[start_act_idx]) if start_act_idx < len(f_vec) else 0.0
+
+        # Diagnostics: track max FU and how many years are skipped
+        if abs(fu_amt) > abs(max_abs_fu):
+            max_abs_fu = fu_amt
+            max_abs_fu_year = year
+
         if abs(fu_amt) <= min_amount:
+            n_skip_fu += 1
+            # Low-noise: log first few skips and then every 50th
+            if n_skip_fu <= 5 or (n_skip_fu % 50 == 0):
+                logger.info(
+                    "LCA: skip year=%d because fu_amt(start_act_idx=%d)=%g <= min_amount=%g",
+                    year, start_act_idx, fu_amt, min_amount
+                )
             if bar:
                 bar.update()
+
+            # Diagnose where the demand actually is in this year's vector
+            arr = np.asarray(f_vec)
+            nz_idx = np.where(arr != 0)[0]
+            if nz_idx.size:
+                # log first few nonzero indices and their values
+                sample = [(int(i), float(arr[i])) for i in nz_idx[:10]]
+                logger.info(
+                    "LCA: year=%d f_vec has nnz=%d; first nonzeros=%s (start_act_idx=%d is zero)",
+                    year, int(nz_idx.size), sample, start_act_idx
+                )
+            else:
+                logger.info("LCA: year=%d f_vec is entirely zero (unexpected given FU-by-year nonzero count).", year)
+
             continue
+
+        n_process += 1
 
         # Datapackage: zero biosphere in temporal mode; keep in static mode
         zero_bio = bool(use_temporal_distributions)
@@ -427,6 +486,24 @@ def lca(
 
         # Ensure start root exists in temporal mode (direct-only), static mode (direct-only)
         fu_per_root.setdefault(int(start_act_idx), {})
+
+        # Diagnostics: root coverage
+        n_roots = len(fu_per_root)
+        n_years_with_any_root += 1 if n_roots > 0 else 0
+        n_suppliers = len([k for k in fu_per_root.keys() if k != int(start_act_idx)])
+        if n_suppliers > 0:
+            n_years_with_supplier_roots += 1
+
+        if n_roots > max_roots:
+            max_roots = n_roots
+            max_roots_year = year
+
+        # Log only occasionally to avoid noise
+        if n_process <= 3 or (n_process % 25 == 0):
+            logger.info(
+                "LCA: year=%d processed fu_amt=%g roots=%d suppliers=%d (filtered child_year==year)",
+                year, fu_amt, n_roots, n_suppliers
+            )
 
         # -----------------------------
         # Branch: STATIC scoring
@@ -514,6 +591,14 @@ def lca(
             use_temporal_distributions=True,
         )
 
+        # Diagnostics: total inventory added this iteration (in flow-id space)
+        inv_now = inventory_by_year_total.get(year)
+        if inv_now is not None:
+            l1 = float(np.sum(np.abs(inv_now)))
+            nnz = int(np.count_nonzero(inv_now))
+            if n_process <= 3 or (n_process % 25 == 0):
+                logger.info("LCA: year=%d inv_total nnz=%d L1=%g", year, nnz, l1)
+
         # Per-root temporalized inventories
         for root_idx, fu_root in fu_per_root.items():
             if root_idx == int(start_act_idx):
@@ -540,6 +625,17 @@ def lca(
                 use_temporal_distributions=True,
             )
 
+        # Diagnostics: per-root inventories present for this year
+        if n_process <= 3 or (n_process % 25 == 0):
+            root_counts = 0
+            for r, inv_map in inventory_by_year_per_root.items():
+                inv_r = inv_map.get(year)
+                if inv_r is None:
+                    continue
+                if np.any(inv_r != 0):
+                    root_counts += 1
+            logger.info("LCA: year=%d per-root inventories nonzero_roots=%d", year, root_counts)
+
         # Placeholders; overwritten in second pass
         results_by_year[year] = {
             "fu": fu_total,
@@ -551,6 +647,15 @@ def lca(
 
         if bar:
             bar.update()
+
+    logger.info(
+        "LCA: per-year summary: candidate_years=%d processed=%d skipped_fu=%d "
+        "max_abs_fu=%g (year=%s) max_roots=%d (year=%s) years_with_supplier_roots=%d",
+        n_years, n_process, n_skip_fu,
+        float(max_abs_fu), str(max_abs_fu_year),
+        int(max_roots), str(max_roots_year),
+        int(n_years_with_supplier_roots),
+    )
 
     if bar:
         try:
@@ -615,6 +720,14 @@ def lca(
             )
             total_score_scalar = float(np.sum(C.dot(inv_total.reshape((-1, 1)))))
 
+            # Diagnostics: second pass total inventory mass and score
+            nnz_total = int(np.count_nonzero(inv_total))
+            l1_total = float(np.sum(np.abs(inv_total)))
+            logger.info(
+                "LCIA second pass: y_eff=%d inv_total nnz=%d L1=%g score=%g",
+                y_eff, nnz_total, l1_total, float(total_score_scalar)
+            )
+
             scores_per_root_2: Dict[int, float] = {}
             for root_idx, inv_map in inventory_by_year_per_root.items():
                 inv_root = inv_map.get(
@@ -629,6 +742,12 @@ def lca(
 
                 if abs(score_val) > min_amount:
                     scores_per_root_2[int(root_idx)] = score_val
+
+            logger.info(
+                "LCIA second pass: y_eff=%d scores_per_root kept=%d dropped_by_threshold=%s",
+                y_eff, len(scores_per_root_2),
+                "yes (start root dropped if <= min_amount)"  # reminder of your existing filter
+            )
 
             if y_eff not in results_by_year:
                 results_by_year[y_eff] = {

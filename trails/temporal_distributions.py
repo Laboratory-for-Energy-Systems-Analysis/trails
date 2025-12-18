@@ -7,6 +7,9 @@ import numpy as np
 import numpy as np
 from math import erf, sqrt, exp, pi
 
+import logging
+logger = logging.getLogger(__name__)
+
 
 @dataclass
 class TemporalExchange:
@@ -66,6 +69,7 @@ class TemporalDistribution:
         t = self.tex
         offsets = np.arange(t.offset_min, t.offset_max + 1, dtype=int)
         if offsets.size == 0:
+            logger.warning("TemporalDistribution: total weight <= 0 -> returning empty distribution")
             return iter(())
 
         dist = t.distribution
@@ -100,8 +104,9 @@ class TemporalDistribution:
         # 2) Apply offset-dependent scaling (NEW)
         # ------------------------------------------------------------
         scale_mode = (getattr(t, "scale_mode", None) or "").lower()
-        scale_base = float(getattr(t, "scale_base", 1.0))
-        scale_rate = float(getattr(t, "scale_rate", 0.0))
+        if scale_mode:
+            scale_base = float(getattr(t, "scale_base", 1.0))
+            scale_rate = float(getattr(t, "scale_rate", 0.0))
 
         if scale_mode:
             scaled_weights = np.zeros_like(weights, dtype=float)
@@ -139,8 +144,9 @@ class TemporalDistribution:
     def scale_factor(self, offset: int, *, clip: Optional[Tuple[float, float]] = None) -> float:
         t = self.tex
         mode = (getattr(t, "scale_mode", None) or "").lower()
-        base = float(getattr(t, "scale_base", 1.0))
-        rate = float(getattr(t, "scale_rate", 0.0))
+        if mode:
+            base = float(getattr(t, "scale_base", 1.0))
+            rate = float(getattr(t, "scale_rate", 0.0))
 
         if not mode:
             return 1.0

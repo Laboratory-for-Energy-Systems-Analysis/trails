@@ -9,6 +9,9 @@ import sparse
 from .utils import _parse_float_or_none, _parse_int_or_none
 from .temporal_distributions import TemporalExchange
 
+import logging
+logger = logging.getLogger(__name__)
+
 def _parse_intish_or_none(value):
     """Parse an integer from values that may be given as '3', '3.0', 3.0, etc."""
     if value is None:
@@ -267,6 +270,14 @@ def load_matrices_from_package(
             shape=(n_scenarios, n_activities, n_flows),
         )
 
+    logger.info(
+        "Datapackage: loaded A shape=%s nnz=%d | B shape=%s nnz=%d | scenarios=%d | temporal_exchanges=%d",
+        getattr(A, "shape", None), int(getattr(A, "nnz", 0)),
+        getattr(B, "shape", None), int(getattr(B, "nnz", 0)),
+        len(scenario_labels),
+        len(temporal_exchanges),
+    )
+
     return A, B, scenario_labels, scenario_index, temporal_exchanges, temporal_biosphere_exchanges
 
 
@@ -299,6 +310,8 @@ def interpolate_to_annual(
         Mapping from year label to index.
     """
     years_sorted, order = _years_and_sorted_indices(scenario_labels)
+
+    logger.info("Datapackage: discovered inventory years=%s", years_sorted)
 
     # Reorder A and B to chronological order
     A_sorted = A[order, :, :]
@@ -346,6 +359,7 @@ def interpolate_to_annual(
             new_As.append(A_y)
             new_Bs.append(B_y)
             new_labels.append(str(y))
+
 
     A_interp = sparse.stack(new_As, axis=0).astype(val_dtype)
     B_interp = sparse.stack(new_Bs, axis=0).astype(val_dtype)

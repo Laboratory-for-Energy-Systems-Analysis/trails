@@ -6,6 +6,9 @@ from scipy.sparse import csr_matrix
 
 from .filesystem_constants import DATA_DIR
 
+import logging
+logger = logging.getLogger(__name__)
+
 LCIA_METHODS_EI310 = DATA_DIR / "lcia_ei310.json"
 LCIA_METHODS_EI311 = DATA_DIR / "lcia_ei311.json"
 
@@ -90,6 +93,11 @@ def fill_characterization_factors_matrices(
     :rtype: scipy.sparse.csr_matrix
     """
 
+    logger.info(
+        "LCIA: building CF matrix for methods=%d biosphere_flows=%d",
+        len(methods), len(biosphere_matrix_dict)
+    )
+
     lcia_data = get_lcia_methods(methods=methods)
 
     # Prepare data for efficient creation of the sparse matrix
@@ -97,6 +105,8 @@ def fill_characterization_factors_matrices(
     rows = []
     cols = []
     cfs = []
+
+    matched, unmatched = 0, 0
 
     for m, method in enumerate(methods):
         method_data = lcia_data[method]
@@ -109,6 +119,18 @@ def fill_characterization_factors_matrices(
                     rows.append(biosphere_matrix_dict[idx])
                     cols.append(m)
                     cfs.append((method, flow_name, idx, method_data[flow_name]))
+                    matched += 1
+                else:
+                    unmatched += 1
+            else:
+                unmatched += 1
+
+
+    logger.info("LCIA: CF nonzeros=%d", len(data))
+    if len(data) == 0:
+        logger.warning("LCIA: CF matrix has zero entries -> all scores will be zero.")
+
+    logger.info("LCIA: matched_flows=%d unmatched_flows=%d", matched, unmatched)
 
     # Efficiently create the sparse matrix
     matrix = sparse.csr_matrix(
