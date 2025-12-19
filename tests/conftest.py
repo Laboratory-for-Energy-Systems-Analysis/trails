@@ -7,6 +7,10 @@ import sys
 import platform
 import pytest
 
+from datapackage import Package
+
+import trails.trails as trails_module
+
 BASE = Path(os.environ.get("PYTEST_DEBUG_DIR", ".pytest-debug"))
 
 
@@ -38,3 +42,14 @@ def test_debug_dir(request, debug_base: Path):
     d = debug_base / _slug(request.node.nodeid)
     d.mkdir(parents=True, exist_ok=True)
     return d
+
+
+@pytest.fixture(scope="session")
+def example_package() -> Package:
+    package_path = Path(__file__).resolve().parents[1] / "dev" / "example" / "datapackage.json"
+    return Package(str(package_path))
+
+
+@pytest.fixture(scope="session")
+def example_trails(example_package: Package):
+    return trails_module.Trails(example_package, interpolate_annual=False)
