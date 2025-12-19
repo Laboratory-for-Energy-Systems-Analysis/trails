@@ -547,65 +547,48 @@ class Trails:
         # Traversal state
         # ------------------------------------------------------------------
         queue = deque()
-        queue.append((start_year, start_act_idx, float(amount), 0, ()))
+        queue.append((int(start_year), int(start_act_idx), float(amount), 0, (), None))
 
-        demand = defaultdict(float)
-        provenance = defaultdict(lambda: defaultdict(float))
+        frontier_total = defaultdict(float)  # (year, act) -> amt
+        provenance_roots = defaultdict(lambda: defaultdict(float))  # (year, act) -> {root_act: amt}
+
         bio_cache: dict[tuple[int, int], bool] = {}
 
-        # ------------------------------------------------------------------
-        # Main traversal loop
-        # ------------------------------------------------------------------
         while queue:
-            year, act, amt, depth, path = queue.popleft()
+            year, act, amt, depth, path, root_act = queue.popleft()
 
             if abs(amt) < min_amount:
                 continue
 
-            nodes_processed += 1
             if pbar is not None:
                 pbar.update(1)
 
-            # If we didn't have an empirical total, switch to an estimated total after warm-up
-            if (
-                    show_progress
-                    and pbar is not None
-                    and pbar.total is None
-                    and nodes_processed >= WARMUP_LIMIT
-            ):
-                total_est = estimate_total_from_branching(branching_samples)
-                total_est = max(total_est, nodes_processed + 1)
-                pbar.total = total_est
-                pbar.refresh()
-
-            # Map to scenario year for looking into B
+            # Map to scenario year for "has direct biosphere" test (fast cutoff logic)
             scenario_year = self._map_year_to_scenario_year(year)
             label = str(scenario_year)
 
-            if label in self.scenario_index:
+            has_direct_bio = False
+            if label in self.scenario_index and (self.B is not None):
                 t = self.scenario_index[label]
                 key = (scenario_year, act)
                 if key in bio_cache:
                     has_direct_bio = bio_cache[key]
                 else:
-                    has_direct_bio = self.B[t, act, :].nnz > 0
+                    has_direct_bio = (self.B[t, act, :].nnz > 0)
                     bio_cache[key] = has_direct_bio
 
-                    logger.info(
-                        "temporal_traversal: node year=%d (scenario=%d t=%d) act=%d amt=%g depth=%d has_direct_bio=%s",
-                        int(year), int(scenario_year), int(t), int(act), float(amt), int(depth), bool(has_direct_bio)
-                    )
-            else:
-                has_direct_bio = False
+            # Helper: record a node into frontier + provenance
+            def _record_node(y: int, a: int, x: float, r: Optional[int]):
+                frontier_total[(int(y), int(a))] += float(x)
+                if return_provenance and (r is not None):
+                    provenance_roots[(int(y), int(a))][int(r)] += float(x)
 
-            # Cutoff at max_depth
+            # Stop expanding at max_depth
             if depth >= max_depth:
-                demand[(year, act)] += amt
-                if path:
-                    provenance[(year, act)][path] += amt
+                _record_node(year, act, amt, root_act)
                 continue
 
-            # Expand this node one step
+            # Expand this node
             child_demands = self.expand_temporal_exchanges(
                 year=year,
                 act_idx=act,
@@ -613,87 +596,84 @@ class Trails:
                 use_temporal_distributions=use_temporal_distributions,
             )
 
+            # Leaf: record it
             if not child_demands:
-                demand[(year, act)] += amt
-                if path:
-                    provenance[(year, act)][path] += amt
+                _record_node(year, act, amt, root_act)
                 continue
 
+            # IMPORTANT BEHAVIOR:
+            # If this node has direct biosphere flows, we record it as part of the frontier.
+            # This matches your existing “solve nodes with direct biosphere” design.
+            # (It is NOT a full “score technosphere exchange at its own year” algorithm.)
             if has_direct_bio:
-                demand[(year, act)] += amt
-                if path:
-                    provenance[(year, act)][path] += amt
+                _record_node(year, act, amt, root_act)
 
-            # Enqueue children (+ warm-up branching sample if needed)
-            children_enqueued = 0
+            # Enqueue children
             for child_year, mapping in child_demands.items():
                 for child_act, child_amt in mapping.items():
+                    child_amt = float(child_amt)
                     if abs(child_amt) < min_amount:
                         continue
 
-                    child_node = (child_year, child_act)
+                    child_year = int(child_year)
+                    child_act = int(child_act)
+
+                    # Root propagation (Option A)
+                    # - If parent is the start node (depth == 0): root becomes this child activity
+                    # - Otherwise: propagate existing root_act
                     if depth == 0:
-                        child_path = (child_node,)
+                        child_root = child_act
+                        child_path = ((child_year, child_act),)
                     else:
-                        child_path = path + (child_node,)
+                        child_root = root_act
+                        child_path = path + ((child_year, child_act),)
 
-                    queue.append((child_year, child_act, child_amt, depth + 1, child_path))
-                    children_enqueued += 1
+                    queue.append((child_year, child_act, child_amt, depth + 1, child_path, child_root))
 
-            if show_progress and (pbar is not None) and (pbar.total is None) and nodes_processed <= WARMUP_LIMIT:
-                branching_samples.append(children_enqueued)
-
-        # ------------------------------------------------------------------
-        # Force-complete progress bar (so it always ends at 100%)
-        # ------------------------------------------------------------------
         if pbar is not None:
             try:
-                # Case 1: total was never set (indeterminate bar) -> set it to actual work
-                if pbar.total is None:
-                    pbar.total = nodes_processed
-
-                # Case 2: total exists but we processed fewer nodes than estimated -> fill to 100%
-                if pbar.n < pbar.total:
-                    pbar.update(pbar.total - pbar.n)
-
-                pbar.refresh()
+                pbar.close()
             except Exception:
                 pass
 
-            pbar.close()
-
-        if pbar is not None:
-            pbar.close()
-
-        provenance = {}
+        # Normalize provenance to plain dicts
         if return_provenance:
-            provenance = {k: dict(v) for k, v in provenance.items()}
-        return dict(demand), provenance
+            provenance_roots = {k: dict(v) for k, v in provenance_roots.items()}
+            return dict(frontier_total), provenance_roots
+
+        return dict(frontier_total)
 
     def frontier_to_demand_vectors(self, frontier: dict) -> dict[int, np.ndarray]:
         """
         Convert a (year, activity) -> amount frontier into per-year demand vectors.
 
-        IMPORTANT:
-        - Keep calendar years as-is (do NOT map to scenario years here), otherwise
-          all temporal links collapse to the nearest scenario year (e.g., 2050).
+        Calendar years are preserved (no mapping to scenario years here).
         """
-        n_activities = self.A.shape[1]
+        if self.A is None:
+            raise ValueError("Cannot build demand vectors: A is None")
+
+        n_activities = int(self.A.shape[1])
         dtype = self.value_dtype
 
         f_by_year: dict[int, np.ndarray] = {}
 
-        for (year, act_idx), amt in frontier.items():
+        for key, amt in frontier.items():
+            if not isinstance(key, tuple):
+                raise ValueError(f"Frontier key must be a tuple (year, act). Got {type(key)}: {key}")
+
+            if len(key) != 2:
+                raise ValueError(f"Frontier key must be (year, act). Got len={len(key)}: {key}")
+
+            year, act_idx = key
             y = int(year)
+            a = int(act_idx)
 
             if y not in f_by_year:
                 f_by_year[y] = np.zeros(n_activities, dtype=dtype)
 
-            f_by_year[y][act_idx] += dtype(amt)
+            f_by_year[y][a] += dtype(amt)
 
         return f_by_year
-
-
 
     def collect_traversal_edges(
             self,
@@ -717,7 +697,8 @@ class Trails:
           at that depth, starting from a functional unit of `amount` at the root.
         """
         queue = deque()
-        queue.append((start_year, start_act_idx, float(amount), 0))
+        # root_act is the first-level child activity (not year), or None for the FU itself
+        queue.append((start_year, start_act_idx, float(amount), 0, (), None))
 
         edges_by_depth: dict[int, dict[tuple[tuple[int, int], tuple[int, int]], float]] = (
             defaultdict(lambda: defaultdict(float))
