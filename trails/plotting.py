@@ -48,6 +48,82 @@ def _activity_label_map(trails: Trails) -> dict[int, str]:
     return labels
 
 
+def to_impact_year_results(results: Dict[int, Dict[str, Any]] | Dict[str, Any]) -> Dict[int, Dict[str, Any]]:
+    """
+    Normalize different result structures into the "impact-year" format expected by plot_temporal_scores:
+
+        impact_year -> {"scores": float, "scores_per_root": {root: float}}
+
+    Supported inputs:
+    1) New explicit structure:
+         {"results_by_solve_year": {...}, "results_by_impact_year": {...}}
+       -> returns results_by_impact_year
+
+    2) Already impact-year structure:
+         {2024: {"scores": ..., "scores_per_root": {...}}, ...}
+       -> returned as-is
+
+    3) Legacy per-solve-year duplicated timeline structure:
+         {solve_year: {"temporal_scores_by_year": {...}, "temporal_scores_per_root_by_year": {...}, ...}, ...}
+       -> aggregated to impact-year (sums across solve years if multiple are present)
+    """
+
+    # --- Case 1: New explicit structure
+    if isinstance(results, dict) and "results_by_impact_year" in results:
+        iby = results.get("results_by_impact_year", {})
+        if not isinstance(iby, dict):
+            raise ValueError("'results_by_impact_year' exists but is not a dict.")
+        return iby
+
+    # --- Case 2: Already impact-year structure
+    # Heuristic: keys are years (ints) and values have "scores_per_root" or "scores"
+    if isinstance(results, dict) and results:
+        k0 = next(iter(results.keys()))
+        v0 = results[k0]
+        if isinstance(k0, int) and isinstance(v0, dict) and ("scores_per_root" in v0 or "scores" in v0):
+            return results  # already normalized
+
+    # --- Case 3: Legacy duplicated timeline under each solve-year
+    # Find one exemplar entry that contains the legacy fields
+    exemplar = None
+    for _, v in (results or {}).items():
+        if isinstance(v, dict) and "temporal_scores_per_root_by_year" in v:
+            exemplar = v
+            break
+
+    if exemplar is None:
+        raise ValueError(
+            "Could not interpret results for plotting. Expected either:\n"
+            "  (a) {'results_by_impact_year': ...}\n"
+            "  (b) {impact_year: {'scores', 'scores_per_root'}}\n"
+            "  (c) legacy {solve_year: {'temporal_scores_per_root_by_year', ...}}\n"
+        )
+
+    # Aggregate across solve years if needed
+    out: Dict[int, Dict[str, Any]] = {}
+    for solve_year, entry in results.items():
+        if not isinstance(entry, dict):
+            continue
+        tspr = entry.get("temporal_scores_per_root_by_year", {})  # impact_year -> {root: score}
+        tst  = entry.get("temporal_scores_by_year", {})           # impact_year -> total score (optional)
+
+        for impact_year, per_root in tspr.items():
+            impact_year = int(impact_year)
+            out.setdefault(impact_year, {"scores": 0.0, "scores_per_root": {}})
+
+            # per-root sums
+            for root, val in (per_root or {}).items():
+                out[impact_year]["scores_per_root"][int(root)] = (
+                    out[impact_year]["scores_per_root"].get(int(root), 0.0) + float(val)
+                )
+
+        # total scores (if present)
+        for impact_year, total in (tst or {}).items():
+            impact_year = int(impact_year)
+            out.setdefault(impact_year, {"scores": 0.0, "scores_per_root": {}})
+            out[impact_year]["scores"] += float(total)
+
+    return out
 
 def plot_temporal_scores(
     results_by_year: Dict[int, Dict[str, Any]],
@@ -78,6 +154,8 @@ def plot_temporal_scores(
     y_max: Optional[float] = None,
     y2_max: Optional[float] = None,
 ):
+    results_by_year = to_impact_year_results(results_by_year)
+
     if year_tick < 1:
         raise ValueError("year_tick must be >= 1")
 

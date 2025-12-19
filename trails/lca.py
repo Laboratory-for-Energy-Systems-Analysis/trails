@@ -245,7 +245,6 @@ def lca(
     max_depth: int = 2,
     min_amount: float = 1e-16,
     show_progress: bool = True,
-    debug: bool = False,
     return_provenance: bool = False,
     use_temporal_distributions: bool = True,
 ) -> Dict[int, Dict[str, Any]]:
@@ -273,37 +272,19 @@ def lca(
     # -----------------------------
     # 1) Temporal traversal (used to build f_by_year; provenance optional)
     # -----------------------------
+    frontier, provenance = trails.temporal_traversal(
+        start_year=start_year,
+        start_act_idx=start_act_idx,
+        amount=amount,
+        max_depth=max_depth,
+        min_amount=min_amount,
+        return_provenance=True if return_provenance else False,
+        show_progress=show_progress,
+        use_temporal_distributions=use_temporal_distributions,
+    )
+    logger.info("LCA: traversal frontier years=%d", len(frontier))
+    logger.debug("LCA: frontier years=%s", sorted(frontier.keys()))
     # -----------------------------
-    # 1) Temporal traversal (used to build f_by_year; provenance optional)
-    # -----------------------------
-    if return_provenance:
-        frontier, provenance = trails.temporal_traversal(
-            start_year=start_year,
-            start_act_idx=start_act_idx,
-            amount=amount,
-            max_depth=max_depth,
-            min_amount=min_amount,
-            return_provenance=True,
-            show_progress=show_progress,
-            use_temporal_distributions=use_temporal_distributions,
-        )
-        logger.info("LCA: traversal frontier years=%d", len(frontier))
-        logger.debug("LCA: frontier years=%s", sorted(frontier.keys()))
-
-    else:
-        frontier = trails.temporal_traversal(
-            start_year=start_year,
-            start_act_idx=start_act_idx,
-            amount=amount,
-            max_depth=max_depth,
-            min_amount=min_amount,
-            return_provenance=False,
-            show_progress=show_progress,
-            use_temporal_distributions=use_temporal_distributions,
-        )
-        provenance = {}
-        logger.info("LCA: traversal frontier years=%d", len(frontier))
-        logger.debug("LCA: frontier years=%s", sorted(frontier.keys()))
 
     # 2) Frontier -> per-year demand vectors (used only to get FU per year and diagnostics)
     f_by_year = trails.frontier_to_demand_vectors(frontier)
@@ -402,41 +383,22 @@ def lca(
     max_roots_year = None
 
     for year in candidate_years:
+        # Demand vector for this calendar year coming from traversal frontier
         f_vec = f_by_year[year]
+        arr = np.asarray(f_vec)
 
-        # FU amount for this year is the start activity component
-        fu_amt = float(f_vec[start_act_idx]) if start_act_idx < len(f_vec) else 0.0
-
-        # Diagnostics: track max FU and how many years are skipped
-        if abs(fu_amt) > abs(max_abs_fu):
-            max_abs_fu = fu_amt
-            max_abs_fu_year = year
-
-        if abs(fu_amt) <= min_amount:
+        # Process this year if there is ANY demand above threshold
+        nz_idx = np.where(np.abs(arr) > min_amount)[0]
+        if nz_idx.size == 0:
             n_skip_fu += 1
-            # Low-noise: log first few skips and then every 50th
-            if n_skip_fu <= 5 or (n_skip_fu % 50 == 0):
-                logger.info(
-                    "LCA: skip year=%d because fu_amt(start_act_idx=%d)=%g <= min_amount=%g",
-                    year, start_act_idx, fu_amt, min_amount
-                )
             if bar:
                 bar.update()
-
-            # Diagnose where the demand actually is in this year's vector
-            arr = np.asarray(f_vec)
-            nz_idx = np.where(arr != 0)[0]
-            if nz_idx.size:
-                # log first few nonzero indices and their values
-                sample = [(int(i), float(arr[i])) for i in nz_idx[:10]]
-                logger.info(
-                    "LCA: year=%d f_vec has nnz=%d; first nonzeros=%s (start_act_idx=%d is zero)",
-                    year, int(nz_idx.size), sample, start_act_idx
-                )
-            else:
-                logger.info("LCA: year=%d f_vec is entirely zero (unexpected given FU-by-year nonzero count).", year)
-
             continue
+
+        n_process += 1
+
+        # FU for bw2calc is the whole demand vector for this year (row space)
+        fu_total = {int(i): float(arr[i]) for i in nz_idx}
 
         n_process += 1
 
@@ -455,21 +417,28 @@ def lca(
             dp, tech_idx, bio_idx, uncertain_params = dp_cache[dp_key]
 
         # Total FU for bw2calc is ONLY the real FU
-        fu_total = {int(start_act_idx): float(fu_amt)}
-
         # Total LCI (always needed)
         lca_total = bc.LCA(demand=fu_total, data_objs=[dp])
         lca_total.lci()
 
+
+        # Define a scalar amount to expand the start activity for root attribution.
+        # Use the actual demand for start_act_idx in this year, if present; else 0.
         # -----------------------------
         # Build first-level supplier roots (single-activity FUs)
         # -----------------------------
-        first_level = trails.expand_temporal_exchanges(
-            year=year,
-            act_idx=start_act_idx,
-            amount=fu_amt,
-            use_temporal_distributions=use_temporal_distributions,
-        )
+
+        # Scalar demand for the start activity in this year (used only for root attribution)
+        start_amt_year = float(arr[start_act_idx]) if start_act_idx < arr.size else 0.0
+
+        first_level = {}
+        if abs(start_amt_year) > min_amount:
+            first_level = trails.expand_temporal_exchanges(
+                year=year,
+                act_idx=start_act_idx,
+                amount=start_amt_year,
+                use_temporal_distributions=use_temporal_distributions,
+            )
 
         fu_per_root: Dict[int, Dict[int, float]] = {}
 
@@ -484,7 +453,7 @@ def lca(
                     continue
                 fu_per_root[int(supplier_act)] = {int(supplier_act): supplier_amt}
 
-        # Ensure start root exists in temporal mode (direct-only), static mode (direct-only)
+        # Ensure start root exists (direct-only bucket)
         fu_per_root.setdefault(int(start_act_idx), {})
 
         # Diagnostics: root coverage
@@ -497,13 +466,6 @@ def lca(
         if n_roots > max_roots:
             max_roots = n_roots
             max_roots_year = year
-
-        # Log only occasionally to avoid noise
-        if n_process <= 3 or (n_process % 25 == 0):
-            logger.info(
-                "LCA: year=%d processed fu_amt=%g roots=%d suppliers=%d (filtered child_year==year)",
-                year, fu_amt, n_roots, n_suppliers
-            )
 
         # -----------------------------
         # Branch: STATIC scoring
@@ -603,7 +565,8 @@ def lca(
         for root_idx, fu_root in fu_per_root.items():
             if root_idx == int(start_act_idx):
                 # Direct-only: only the start activity itself
-                supply_by_act_root = {int(start_act_idx): float(fu_amt)}
+                supply_by_act_root = {int(start_act_idx): float(start_amt_year)}
+
             else:
                 lca_root = bc.LCA(demand=fu_root, data_objs=[dp])
                 lca_root.lci()
@@ -736,10 +699,12 @@ def lca(
                 )
                 score_val = float(np.sum(C.dot(inv_root.reshape((-1, 1)))))
 
-                # Include start activity root only if it has non-zero direct characterized emissions
-                if root_idx == int(start_act_idx) and abs(score_val) <= min_amount:
+                # Always keep the start activity root (direct-only bucket), even if tiny/zero
+                if root_idx == int(start_act_idx):
+                    scores_per_root_2[int(root_idx)] = score_val
                     continue
 
+                # Keep supplier roots only if meaningful
                 if abs(score_val) > min_amount:
                     scores_per_root_2[int(root_idx)] = score_val
 

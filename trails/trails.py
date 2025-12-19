@@ -48,8 +48,6 @@ class Trails:
         self.A: Optional[sparse.COO] = None
         self.B: Optional[sparse.COO] = None
 
-        self.temporal_exchanges: Dict = {}
-        self.temporal_biosphere_exchanges: Dict = {}
 
         print("Loading matrices from data package          [1/3]")
         (
@@ -57,7 +55,7 @@ class Trails:
             self.B,
             self.scenario_labels,
             self.scenario_index,
-            self.temporal_exchanges,
+            self.temporal_technosphere_exchanges,
             self.temporal_biosphere_exchanges,
         ) = load_matrices_from_package(
             package=self.package,
@@ -76,26 +74,6 @@ class Trails:
             None if self.B is None else int(self.B.nnz),
             len(getattr(self, "temporal_exchanges", {})),
         )
-
-
-        # Backward-compatible support for tagged temporal exchange keys.
-        # If a single dict contains ('tech', ...) and ('bio', ...) keys, split them.
-        if self.temporal_biosphere_exchanges is None:
-            self.temporal_biosphere_exchanges = {}
-        if self.temporal_exchanges:
-            sample_key = next(iter(self.temporal_exchanges.keys()))
-            if isinstance(sample_key, tuple) and len(sample_key) >= 1 and sample_key[0] in ("tech", "bio"):
-                tagged = self.temporal_exchanges
-                self.temporal_exchanges = {}
-                for k, v in tagged.items():
-                    if not (isinstance(k, tuple) and len(k) == 4):
-                        continue
-                    kind, label, act, idx = k
-                    if kind == "bio":
-                        self.temporal_biosphere_exchanges[(label, act, idx)] = v
-                    else:
-                        self.temporal_exchanges[(label, act, idx)] = v
-
 
 
         self.template_labels = list(self.scenario_labels)
@@ -174,7 +152,7 @@ class Trails:
         Keys are based on the original scenario label strings.
         """
         label = str(year)
-        return self.temporal_exchanges.get((label, act_idx, prod_idx))
+        return self.temporal_technosphere_exchanges.get((label, act_idx, prod_idx))
 
     def get_temporal_distribution(self, year: int, act_idx: int, prod_idx: int):
         """
@@ -182,7 +160,7 @@ class Trails:
         or None if this exchange has no temporal metadata.
         """
         label = str(year)
-        tex = self.temporal_exchanges.get((label, act_idx, prod_idx))
+        tex = self.temporal_technosphere_exchanges.get((label, act_idx, prod_idx))
         if tex is None:
             return None
         return TemporalDistribution(tex)
@@ -229,19 +207,6 @@ class Trails:
             )
             return demand
 
-        # --- TRIAGE: dump row if it looks pathological (only diag / too sparse) ---
-        if A_row.nnz <= 2 and logger.isEnabledFor(logging.INFO):
-            coords = A_row.coords[0].astype(int)
-            data = A_row.data.astype(float)
-            # show sorted by product index for readability
-            order = np.argsort(coords)
-            coords = coords[order]
-            data = data[order]
-            logger.info(
-                "expand_tech_row_dump: year=%d scenario_year=%d t=%d act=%d A_row.nnz=%d entries=%s",
-                year, scenario_year, t, act_idx, int(A_row.nnz),
-                list(zip(coords.tolist(), data.tolist()))
-            )
 
         prod_indices = A_row.coords[0]
         values = A_row.data
@@ -256,13 +221,8 @@ class Trails:
             prod_idx = int(prod_idx)
 
             # Always skip the canonical production exchange, if present in your data
-            # (common convention: A[act, act] = -1)
-            if prod_idx == act_idx and value == -1.0:
-                continue
-
-            # Ignore positive "output" entries only when they are on the diagonal-equivalent
-            # (activity index == product index indicates the activity's own output/reference product)
-            if value > 0.0 and prod_idx == act_idx:
+            # (common convention: A[act, act] = 1)
+            if prod_idx == act_idx and abs(value) == 1.0:
                 continue
 
             # Now compute the propagated requirement amount:
@@ -273,7 +233,7 @@ class Trails:
             else:
                 child_amt = amount * (value)  # keep positive sign (supply-driven service)
 
-            tex = self.temporal_exchanges.get((template_label, act_idx, prod_idx))
+            tex = self.temporal_technosphere_exchanges.get((template_label, act_idx, prod_idx))
 
             if (tex is None) or (not use_temporal_distributions):
                 y_eff = scenario_year
@@ -335,8 +295,6 @@ class Trails:
 
         supply_by_activity maps Trails activity indices -> supply.
         """
-        logger = logging.getLogger(__name__)
-
         # -----------------------------
         # (A) Entry diagnostics
         # -----------------------------
@@ -382,15 +340,6 @@ class Trails:
         if B_t_nnz == 0:
             logger.warning("accumulate_bio: B_t.nnz==0 -> nothing to accumulate")
             return
-
-        # --- TRIAGE: summarize supply vector content vs B activity support ---
-        if logger.isEnabledFor(logging.INFO):
-            nonzero_acts = [(a, float(v)) for a, v in supply_by_activity.items() if abs(v) >= min_amount]
-            nonzero_acts.sort(key=lambda x: -abs(x[1]))
-            logger.info(
-                "accumulate_bio_supply_summary: base_year=%d nonzero_acts=%d top=%s",
-                base_year, len(nonzero_acts), nonzero_acts[:10]
-            )
 
         n_flows = int(self.B.shape[2])
 
@@ -473,30 +422,7 @@ class Trails:
                         template_label, act_idx, flow_idx
                     )
 
-        # -----------------------------
-        # (E) Exit diagnostics: did we actually write anything?
-        # -----------------------------
-        years_touched = sorted(inventory_by_year.keys())
-        if years_touched:
-            # Compute per-year nnz and L1 just for years we touched in this call
-            nnz_by_year = {y: int(np.count_nonzero(inventory_by_year[y])) for y in years_touched}
-            l1_by_year = {y: float(np.sum(np.abs(inventory_by_year[y]))) for y in years_touched}
-            logger.info(
-                "accumulate_bio: base_year=%d done triplets=%d supply_nonzero=%d scaled_nonzero=%d below_min=%d no_td=%d with_td=%d years_touched=%s",
-                int(base_year), n_triplets, n_supply_nonzero, n_scaled_nonzero, n_below_min, n_no_td, n_with_td,
-                years_touched
-            )
-            # Log only the base year and a couple of others to keep it readable
-            for y in years_touched[:5]:
-                logger.info(
-                    "accumulate_bio: year=%d inv_nnz=%d inv_L1=%g",
-                    int(y), nnz_by_year[y], l1_by_year[y]
-                )
-        else:
-            logger.warning(
-                "accumulate_bio: base_year=%d done but wrote nothing. triplets=%d supply_nonzero=%d scaled_nonzero=%d below_min=%d",
-                int(base_year), n_triplets, n_supply_nonzero, n_scaled_nonzero, n_below_min
-            )
+
 
     def _map_year_to_available(self, year: int) -> int:
         """
@@ -517,49 +443,6 @@ class Trails:
         idx = int(np.abs(self.years_int - y).argmin())
         return int(self.years_int[idx])
 
-
-    def _count_traversal_nodes(
-        self,
-        start_year: int,
-        start_act_idx: int,
-        amount: float,
-        max_depth: int,
-        min_amount: float,
-    ) -> int:
-        """
-        Dry-run traversal just to count how many nodes would be processed.
-        Used to size the progress bar.
-        """
-        queue = deque()
-        queue.append((start_year, start_act_idx, float(amount), 0))
-
-        count = 0
-
-        while queue:
-            year, act, amt, depth = queue.popleft()
-
-            if abs(amt) < min_amount:
-                continue
-
-            count += 1
-
-            if depth >= max_depth:
-                continue
-
-            child_demands = self.expand_temporal_exchanges(
-                year=year, act_idx=act, amount=amt
-            )
-
-            if not child_demands:
-                continue
-
-            for child_year, mapping in child_demands.items():
-                for child_act, child_amt in mapping.items():
-                    if abs(child_amt) < min_amount:
-                        continue
-                    queue.append((child_year, child_act, child_amt, depth + 1))
-
-        return count
 
     def temporal_traversal(
             self,
@@ -782,104 +665,35 @@ class Trails:
         if pbar is not None:
             pbar.close()
 
+        provenance = {}
         if return_provenance:
             provenance = {k: dict(v) for k, v in provenance.items()}
-            return dict(demand), provenance
-
-        return dict(demand)
+        return dict(demand), provenance
 
     def frontier_to_demand_vectors(self, frontier: dict) -> dict[int, np.ndarray]:
         """
         Convert a (year, activity) -> amount frontier into per-year demand vectors.
 
-        Parameters
-        ----------
-        frontier : dict[(int, int), float]
-            Mapping from (year, act_idx) to demanded amount.
-
-        Returns
-        -------
-        f_by_year : dict[int, np.ndarray]
-            {year: demand_vector}, where demand_vector has length = n_activities
-            and dtype = self.value_dtype.
+        IMPORTANT:
+        - Keep calendar years as-is (do NOT map to scenario years here), otherwise
+          all temporal links collapse to the nearest scenario year (e.g., 2050).
         """
         n_activities = self.A.shape[1]
         dtype = self.value_dtype
 
-        # Use defaultdict of arrays to accumulate
         f_by_year: dict[int, np.ndarray] = {}
 
         for (year, act_idx), amt in frontier.items():
-            # Map to nearest scenario year just in case
-            y_eff = self._map_year_to_scenario_year(year)
-            label = str(y_eff)
+            y = int(year)
 
-            # Skip anything that cannot be mapped (shouldn't happen, but safe)
-            if label not in self.scenario_index:
-                continue
+            if y not in f_by_year:
+                f_by_year[y] = np.zeros(n_activities, dtype=dtype)
 
-            if y_eff not in f_by_year:
-                f_by_year[y_eff] = np.zeros(n_activities, dtype=dtype)
-
-            f_by_year[y_eff][act_idx] += dtype(amt)
+            f_by_year[y][act_idx] += dtype(amt)
 
         return f_by_year
 
-    def collect_traversal_nodes(
-            self,
-            start_year: int,
-            start_act_idx: int,
-            amount: float = 1.0,
-            max_depth: int = 3,
-            min_amount: float = 1e-12,
-    ) -> dict[int, dict[tuple[int, int], float]]:
-        """
-        Traverse the temporal-technosphere graph starting from
-        (start_year, start_act_idx), and record visited nodes by depth.
 
-        Returns
-        -------
-        nodes_by_depth : dict[int, dict[(int, int), float]]
-            {depth: {(year, act_idx): cumulative_amount, ...}, ...}
-
-        Here, 'amount' is the total flow of the functional unit that
-        reaches that node (year, act) at that depth.
-        """
-        queue = deque()
-        queue.append((start_year, start_act_idx, float(amount), 0))
-
-        # nodes_by_depth[depth][(year, act)] = amount
-        nodes_by_depth: dict[int, dict[tuple[int, int], float]] = defaultdict(
-            lambda: defaultdict(float)
-        )
-
-        while queue:
-            year, act, amt, depth = queue.popleft()
-
-            if abs(amt) < min_amount:
-                continue
-
-            # record this node at this depth
-            nodes_by_depth[depth][(year, act)] += amt
-
-            if depth >= max_depth:
-                continue
-
-            # Expand this node one step in time + technosphere
-            child_demands = self.expand_temporal_exchanges(
-                year=year, act_idx=act, amount=amt
-            )
-
-            if not child_demands:
-                continue
-
-            for child_year, mapping in child_demands.items():
-                for child_act, child_amt in mapping.items():
-                    if abs(child_amt) < min_amount:
-                        continue
-                    queue.append((child_year, child_act, child_amt, depth + 1))
-
-        return nodes_by_depth
 
     def collect_traversal_edges(
             self,
