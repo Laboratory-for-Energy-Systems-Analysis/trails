@@ -13,32 +13,24 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class TemporalExchange:
-    """Metadata for a single temporally-distributed exchange.
+    """
+    Metadata for a single temporally-distributed exchange.
 
-    Parameters
-    ----------
-    distribution : int
-        Code for the temporal distribution:
-            1 = uniform
-            2 = normal
-            3 = lognormal
-            4 = discrete (delta at nearest offset to `loc`)
-            5 = triangular
-        Any other value falls back to uniform.
-    loc : float | None
-        Central parameter of the distribution, interpreted as:
-            - normal: mean (in offset space)
-            - lognormal: *median* in offset space (if > 0)
-            - triangular: mode (peak location)
-            - discrete: preferred offset (nearest integer will be used)
-            - uniform: ignored
-    scale : float | None
-        Spread parameter for continuous distributions (normal, lognormal).
-        If None or <= 0, a default is inferred from offset_min/max.
-    offset_min : int
-        Minimum offset in years (inclusive).
-    offset_max : int
-        Maximum offset in years (inclusive).
+    :param distribution: Integer code for the distribution shape.
+        - 1: discrete (all mass at loc)
+        - 2: lognormal
+        - 3: normal
+        - 4: uniform
+        - 5: triangular
+    :param loc: Location parameter (mean, median, or mode depending on distribution).
+    :param scale: Scale parameter (stddev for normal, sigma for lognormal).
+    :param offset_min: Minimum integer offset (inclusive).
+    :param offset_max: Maximum integer offset (inclusive).
+    :param scale_mode: Optional scaling mode for offset-dependent scaling.
+        - "linear": scale factor = scale_base + scale_rate * offset
+        - "compound": scale factor = scale_base * (1 + scale_rate) ** offset
+    :param scale_base: Base scaling factor (default 1.0).
+    :param scale_rate: Rate of scaling per offset (default 0.0).
     """
     distribution: int
     loc: Optional[float]
@@ -100,30 +92,6 @@ class TemporalDistribution:
         if weights.sum() <= 0.0:
             return iter(())
 
-        # ------------------------------------------------------------
-        # 2) Apply offset-dependent scaling (NEW)
-        # ------------------------------------------------------------
-        scale_mode = (getattr(t, "scale_mode", None) or "").lower()
-        if scale_mode:
-            scale_base = float(getattr(t, "scale_base", 1.0))
-            scale_rate = float(getattr(t, "scale_rate", 0.0))
-
-        if scale_mode:
-            scaled_weights = np.zeros_like(weights, dtype=float)
-
-            for i, k in enumerate(offsets):
-                if scale_mode == "linear":
-                    factor = scale_base + scale_rate * float(k)
-                elif scale_mode == "compound":
-                    factor = scale_base * ((1.0 + scale_rate) ** float(k))
-                else:
-                    raise ValueError(f"Unknown temporal_scale_mode: {scale_mode}")
-
-                # Prevent negative or NaN contributions
-                if factor > 0.0:
-                    scaled_weights[i] = weights[i] * factor
-
-            weights = scaled_weights
 
         # ------------------------------------------------------------
         # 3) Renormalize so total mass is preserved
@@ -156,6 +124,9 @@ class TemporalDistribution:
             f = base * ((1.0 + rate) ** float(offset))
         else:
             raise ValueError(f"Unknown temporal_scale_mode: {mode}")
+
+        if not np.isfinite(f) or f <= 0.0:
+            return 0.0
 
         if clip is not None:
             lo, hi = clip
