@@ -80,8 +80,6 @@ class TemporalDistribution:
         if dist == 5:
             weights = self._triangular_weights(offsets, t.loc)
         elif dist == 2:
-            weights = self._lognormal_weights(offsets, t.loc, t.scale)
-        elif dist == 3:
             weights = self._normal_weights(
                 offsets=offsets,
                 loc=t.loc if t.loc is not None else 0.0,
@@ -89,10 +87,12 @@ class TemporalDistribution:
                 offset_min=t.offset_min,
                 offset_max=t.offset_max,
             )
+        elif dist == 3:
+            weights = self._lognormal_weights(offsets, t.loc, t.scale)
         elif dist == 4:
-            weights = np.ones_like(offsets, dtype=float)
-        elif dist == 1:
             weights = self._discrete_weights(offsets, t.loc)
+        elif dist == 1:
+            weights = np.ones_like(offsets, dtype=float)
         else:
             weights = np.ones_like(offsets, dtype=float)
 
@@ -101,32 +101,7 @@ class TemporalDistribution:
             return iter(())
 
         # ------------------------------------------------------------
-        # 2) Apply offset-dependent scaling (NEW)
-        # ------------------------------------------------------------
-        scale_mode = (getattr(t, "scale_mode", None) or "").lower()
-        if scale_mode:
-            scale_base = float(getattr(t, "scale_base", 1.0))
-            scale_rate = float(getattr(t, "scale_rate", 0.0))
-
-        if scale_mode:
-            scaled_weights = np.zeros_like(weights, dtype=float)
-
-            for i, k in enumerate(offsets):
-                if scale_mode == "linear":
-                    factor = scale_base + scale_rate * float(k)
-                elif scale_mode == "compound":
-                    factor = scale_base * ((1.0 + scale_rate) ** float(k))
-                else:
-                    raise ValueError(f"Unknown temporal_scale_mode: {scale_mode}")
-
-                # Prevent negative or NaN contributions
-                if factor > 0.0:
-                    scaled_weights[i] = weights[i] * factor
-
-            weights = scaled_weights
-
-        # ------------------------------------------------------------
-        # 3) Renormalize so total mass is preserved
+        # 2) Renormalize so total mass is preserved
         # ------------------------------------------------------------
         total = float(weights.sum())
         if total <= 0.0:
@@ -135,7 +110,7 @@ class TemporalDistribution:
         weights /= total
 
         # ------------------------------------------------------------
-        # 4) Yield results
+        # 3) Yield results
         # ------------------------------------------------------------
         for k, w in zip(offsets, weights):
             if w != 0.0:
@@ -156,6 +131,9 @@ class TemporalDistribution:
             f = base * ((1.0 + rate) ** float(offset))
         else:
             raise ValueError(f"Unknown temporal_scale_mode: {mode}")
+
+        if not np.isfinite(f) or f <= 0.0:
+            return 0.0
 
         if clip is not None:
             lo, hi = clip
