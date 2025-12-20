@@ -15,7 +15,7 @@ from .datapackage import (
     load_indices_from_package
 )
 
-from .temporal_distributions import TemporalDistribution
+from .temporal_distributions import TemporalDistribution, TemporalExchange
 
 import logging
 logger = logging.getLogger(__name__)
@@ -112,6 +112,68 @@ class Trails:
     # ------------------------------------------------------------------
     # Convenience accessors
     # ------------------------------------------------------------------
+    def _interpolate_temporal_exchange(
+        self,
+        year: int,
+        act_idx: int,
+        other_idx: int,
+        exchanges: Dict[tuple, TemporalExchange],
+    ) -> Optional[TemporalExchange]:
+        if not exchanges:
+            return None
+
+        label = str(year)
+        direct = exchanges.get((label, act_idx, other_idx))
+        if direct is not None:
+            return direct
+
+        entries = [
+            (int(lbl), tex)
+            for (lbl, a_idx, o_idx), tex in exchanges.items()
+            if a_idx == act_idx and o_idx == other_idx
+        ]
+        if not entries:
+            return None
+
+        entries.sort(key=lambda pair: pair[0])
+        years = [y for y, _ in entries]
+
+        if year <= years[0]:
+            return entries[0][1]
+        if year >= years[-1]:
+            return entries[-1][1]
+
+        for (y0, tex0), (y1, tex1) in zip(entries, entries[1:]):
+            if y0 <= year <= y1:
+                if y1 == y0:
+                    return tex0
+                if (
+                    tex0.distribution != tex1.distribution
+                    or tex0.offset_min != tex1.offset_min
+                    or tex0.offset_max != tex1.offset_max
+                    or (tex0.scale_mode or "") != (tex1.scale_mode or "")
+                ):
+                    return tex0 if (year - y0) <= (y1 - year) else tex1
+
+                w = (year - y0) / (y1 - y0)
+
+                def interp_optional(v0, v1):
+                    if v0 is None or v1 is None:
+                        return v0 if (year - y0) <= (y1 - year) else v1
+                    return float(v0) + (float(v1) - float(v0)) * w
+
+                return TemporalExchange(
+                    distribution=tex0.distribution,
+                    loc=interp_optional(tex0.loc, tex1.loc),
+                    scale=interp_optional(tex0.scale, tex1.scale),
+                    offset_min=tex0.offset_min,
+                    offset_max=tex0.offset_max,
+                    scale_mode=tex0.scale_mode,
+                    scale_base=interp_optional(tex0.scale_base, tex1.scale_base),
+                    scale_rate=interp_optional(tex0.scale_rate, tex1.scale_rate),
+                )
+
+        return None
 
     def _map_year_to_scenario_year(self, year: int) -> int:
         """
@@ -151,16 +213,24 @@ class Trails:
         Return TemporalExchange for (year, act_idx, prod_idx), or None.
         Keys are based on the original scenario label strings.
         """
-        label = str(year)
-        return self.temporal_technosphere_exchanges.get((label, act_idx, prod_idx))
+        return self._interpolate_temporal_exchange(
+            year,
+            act_idx,
+            prod_idx,
+            self.temporal_technosphere_exchanges,
+        )
 
     def get_temporal_distribution(self, year: int, act_idx: int, prod_idx: int):
         """
         Return a TemporalDistribution object for (year, act_idx, prod_idx),
         or None if this exchange has no temporal metadata.
         """
-        label = str(year)
-        tex = self.temporal_technosphere_exchanges.get((label, act_idx, prod_idx))
+        tex = self._interpolate_temporal_exchange(
+            year,
+            act_idx,
+            prod_idx,
+            self.temporal_technosphere_exchanges,
+        )
         if tex is None:
             return None
         return TemporalDistribution(tex)
@@ -191,12 +261,9 @@ class Trails:
             int(year), int(scenario_year), int(t), int(act_idx), float(amount)
         )
 
-        template_year = self._map_year_to_template_year(year)
-        template_label = str(template_year)
-
         logger.debug(
-            "expand_temporal_exchanges: year=%d act=%d amount=%g scenario_year=%d template_year=%d use_td=%s",
-            year, act_idx, amount, scenario_year, template_year, use_temporal_distributions
+            "expand_temporal_exchanges: year=%d act=%d amount=%g scenario_year=%d use_td=%s",
+            year, act_idx, amount, scenario_year, use_temporal_distributions
         )
 
         A_row = self.A[t, act_idx, :]
@@ -233,7 +300,12 @@ class Trails:
             else:
                 child_amt = amount * (value)  # keep positive sign (supply-driven service)
 
-            tex = self.temporal_technosphere_exchanges.get((template_label, act_idx, prod_idx))
+            tex = self._interpolate_temporal_exchange(
+                year,
+                act_idx,
+                prod_idx,
+                self.temporal_technosphere_exchanges,
+            )
 
             if (tex is None) or (not use_temporal_distributions):
                 y_eff = scenario_year
@@ -242,8 +314,8 @@ class Trails:
                 continue
 
             logger.debug(
-                "expand_temporal_exchanges: applying TD for (template=%s act=%d prod=%d) child_amt=%g",
-                template_label, act_idx, prod_idx, child_amt
+                "expand_temporal_exchanges: applying TD for (year=%d act=%d prod=%d) child_amt=%g",
+                year, act_idx, prod_idx, child_amt
             )
 
             td = TemporalDistribution(tex)
@@ -251,8 +323,8 @@ class Trails:
             pairs = list(td.iter_offsets_and_weights())
             if not pairs:
                 logger.warning(
-                    "expand_temporal_exchanges: TD produced no offsets/weights for (template=%s act=%d prod=%d) -> dropping exchange",
-                    template_label, act_idx, prod_idx
+                    "expand_temporal_exchanges: TD produced no offsets/weights for (year=%d act=%d prod=%d) -> dropping exchange",
+                    year, act_idx, prod_idx
                 )
             else:
                 logger.debug(
@@ -320,12 +392,9 @@ class Trails:
             return
         t = self.scenario_index[scenario_label]
 
-        template_year = self._map_year_to_template_year(base_year)
-        template_label = str(template_year)
-
         logger.info(
-            "accumulate_bio: base_year=%d scenario_year=%d t=%d template_year=%d",
-            int(base_year), int(scenario_year), int(t), int(template_year)
+            "accumulate_bio: base_year=%d scenario_year=%d t=%d",
+            int(base_year), int(scenario_year), int(t)
         )
 
         # -----------------------------
@@ -390,7 +459,12 @@ class Trails:
                 )
                 logged_nonzero_rows += 1
 
-            tex = self.temporal_biosphere_exchanges.get((template_label, act_idx, flow_idx))
+            tex = self._interpolate_temporal_exchange(
+                base_year,
+                act_idx,
+                flow_idx,
+                self.temporal_biosphere_exchanges,
+            )
 
             if (tex is None) or (not use_temporal_distributions):
                 n_no_td += 1
@@ -418,8 +492,8 @@ class Trails:
 
                 if not any_pair:
                     logger.warning(
-                        "accumulate_bio: TD produced no offsets/weights (template=%s act=%d flow=%d) -> dropped",
-                        template_label, act_idx, flow_idx
+                        "accumulate_bio: TD produced no offsets/weights (year=%d act=%d flow=%d) -> dropped",
+                        int(base_year), act_idx, flow_idx
                     )
 
 
