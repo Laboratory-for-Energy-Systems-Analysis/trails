@@ -36,6 +36,7 @@ class Trails:
         interpolate_annual: bool = True,
         value_dtype=np.float32,
         index_dtype=np.int32,
+        debug: bool = False,
     ):
         self.package = package
         self.value_dtype = value_dtype
@@ -59,19 +60,21 @@ class Trails:
             package=self.package,
             value_dtype=self.value_dtype,
             index_dtype=self.index_dtype,
+            debug=debug,
         )
 
-        logger.info(
-            "Trails init: scenarios=%d year_range=[%s..%s] A=%s nnz=%s B=%s nnz=%s temporal_exchanges=%d",
-            len(self.scenario_labels),
-            getattr(self, "min_year", None),
-            getattr(self, "max_year", None),
-            None if self.A is None else self.A.shape,
-            None if self.A is None else int(self.A.nnz),
-            None if self.B is None else self.B.shape,
-            None if self.B is None else int(self.B.nnz),
-            len(getattr(self, "temporal_exchanges", {})),
-        )
+        if debug:
+            logger.info(
+                "Trails init: scenarios=%d year_range=[%s..%s] A=%s nnz=%s B=%s nnz=%s temporal_exchanges=%d",
+                len(self.scenario_labels),
+                getattr(self, "min_year", None),
+                getattr(self, "max_year", None),
+                None if self.A is None else self.A.shape,
+                None if self.A is None else int(self.A.nnz),
+                None if self.B is None else self.B.shape,
+                None if self.B is None else int(self.B.nnz),
+                len(getattr(self, "temporal_exchanges", {})),
+            )
 
         self.template_labels = list(self.scenario_labels)
         self.template_years_int = np.array([int(lbl) for lbl in self.template_labels], dtype=int)
@@ -100,6 +103,7 @@ class Trails:
                 self.B,
                 self.scenario_labels,
                 value_dtype=self.value_dtype,
+                debug=debug,
             )
 
             self.years_int = np.array([int(lbl) for lbl in self.scenario_labels], dtype=int)
@@ -239,6 +243,7 @@ class Trails:
             amount: float = 1.0,
             *,
             use_temporal_distributions: bool = True,
+            debug: bool = False,
     ):
         """
         Expand one activity-year demand into temporally distributed multi-year
@@ -253,32 +258,35 @@ class Trails:
         scenario_label = str(scenario_year)
         t = self.scenario_index[scenario_label]
 
-        logger.info(
-            "expand_tech: year=%d scenario_year=%d t=%d act=%d amount=%g",
-            int(year), int(scenario_year), int(t), int(act_idx), float(amount)
-        )
+        if debug:
+            logger.info(
+                "expand_tech: year=%d scenario_year=%d t=%d act=%d amount=%g",
+                int(year), int(scenario_year), int(t), int(act_idx), float(amount)
+            )
 
-        logger.debug(
-            "expand_temporal_exchanges: year=%d act=%d amount=%g scenario_year=%d use_td=%s",
-            year, act_idx, amount, scenario_year, use_temporal_distributions
-        )
+            logger.debug(
+                "expand_temporal_exchanges: year=%d act=%d amount=%g scenario_year=%d use_td=%s",
+                year, act_idx, amount, scenario_year, use_temporal_distributions
+            )
 
         A_row = self.A[t, act_idx, :]
         if A_row.nnz == 0:
-            logger.debug(
-                "expand_temporal_exchanges: EMPTY A_row (year=%d mapped=%d t=%d act=%d) -> no children",
-                year, scenario_year, t, act_idx
-            )
+            if debug:
+                logger.debug(
+                    "expand_temporal_exchanges: EMPTY A_row (year=%d mapped=%d t=%d act=%d) -> no children",
+                    year, scenario_year, t, act_idx
+                )
             return demand
 
 
         product_indices = A_row.coords[0]
         values = A_row.data
 
-        logger.debug(
-            "expand_temporal_exchanges: A_row.nnz=%d (before skipping production/diag outputs)",
-            int(A_row.nnz),
-        )
+        if debug:
+            logger.debug(
+                "expand_temporal_exchanges: A_row.nnz=%d (before skipping production/diag outputs)",
+                int(A_row.nnz),
+            )
 
         def _add_to_demand(target_year: int, product_index: int, exchange_amount: float) -> None:
             demand.setdefault(target_year, {})
@@ -310,25 +318,28 @@ class Trails:
                 _add_to_demand(y_eff, product_index, child_amount)
                 continue
 
-            logger.debug(
-                "expand_temporal_exchanges: applying TD for (year=%d act=%d prod=%d) child_amt=%g",
-                year, act_idx, product_index, child_amount
-            )
+            if debug:
+                logger.debug(
+                    "expand_temporal_exchanges: applying TD for (year=%d act=%d prod=%d) child_amt=%g",
+                    year, act_idx, product_index, child_amount
+                )
 
             td = TemporalDistribution(tex)
 
-            offsets_and_weights = list(td.iter_offsets_and_weights())
+            offsets_and_weights = list(td.iter_offsets_and_weights(debug=debug))
             if not offsets_and_weights:
-                logger.warning(
-                    "expand_temporal_exchanges: TD produced no offsets/weights for (year=%d act=%d prod=%d) -> dropping exchange",
-                    year, act_idx, product_index
-                )
+                if debug:
+                    logger.warning(
+                        "expand_temporal_exchanges: TD produced no offsets/weights for (year=%d act=%d prod=%d) -> dropping exchange",
+                        year, act_idx, product_index
+                    )
             else:
-                logger.debug(
-                    "expand_temporal_exchanges: TD offsets=%s (sum_w=%g)",
-                    [p[0] for p in offsets_and_weights],
-                    float(sum(p[1] for p in offsets_and_weights)),
-                )
+                if debug:
+                    logger.debug(
+                        "expand_temporal_exchanges: TD offsets=%s (sum_w=%g)",
+                        [p[0] for p in offsets_and_weights],
+                        float(sum(p[1] for p in offsets_and_weights)),
+                    )
 
             for offset, weight in offsets_and_weights:
                 raw_year = year + offset
@@ -342,10 +353,11 @@ class Trails:
                 )
 
         total_children = sum(len(m) for m in demand.values())
-        logger.debug(
-            "expand_temporal_exchanges: produced years=%d total_children=%d",
-            len(demand), total_children
-        )
+        if debug:
+            logger.debug(
+                "expand_temporal_exchanges: produced years=%d total_children=%d",
+                len(demand), total_children
+            )
 
         return demand
 
@@ -382,6 +394,7 @@ class Trails:
             *,
             min_amount: float = 0.0,
             use_temporal_distributions: bool = True,
+            debug: bool = False,
     ) -> None:
         """
         Accumulate temporally shifted biosphere emissions resulting from a
@@ -389,38 +402,44 @@ class Trails:
 
         supply_by_activity maps Trails activity indices -> supply.
         """
-        logger.info(
-            "accumulate_bio: base_year=%d acts_in=%d min_amount=%g use_td=%s",
-            int(base_year), len(supply_by_activity), float(min_amount), bool(use_temporal_distributions)
-        )
+        if debug:
+            logger.info(
+                "accumulate_bio: base_year=%d acts_in=%d min_amount=%g use_td=%s",
+                int(base_year), len(supply_by_activity), float(min_amount), bool(use_temporal_distributions)
+            )
 
         if self.B is None:
-            logger.warning("accumulate_bio: B is None -> nothing to accumulate")
+            if debug:
+                logger.warning("accumulate_bio: B is None -> nothing to accumulate")
             return
 
         scenario_year = self._map_year_to_scenario_year(base_year)
         scenario_label = str(scenario_year)
         if scenario_label not in self.scenario_index:
-            logger.error(
-                "accumulate_bio: scenario_label=%s not in scenario_index (base_year=%d) -> abort",
-                scenario_label, int(base_year)
-            )
+            if debug:
+                logger.error(
+                    "accumulate_bio: scenario_label=%s not in scenario_index (base_year=%d) -> abort",
+                    scenario_label, int(base_year)
+                )
             return
         t = self.scenario_index[scenario_label]
 
-        logger.info(
-            "accumulate_bio: base_year=%d scenario_year=%d t=%d",
-            int(base_year), int(scenario_year), int(t)
-        )
+        if debug:
+            logger.info(
+                "accumulate_bio: base_year=%d scenario_year=%d t=%d",
+                int(base_year), int(scenario_year), int(t)
+            )
 
         B_t = self.B[t, :, :]
         B_t_nnz = int(getattr(B_t, "nnz", 0))
-        logger.info(
-            "accumulate_bio: B slice t=%d nnz=%d shape=%s",
-            int(t), B_t_nnz, getattr(B_t, "shape", None)
-        )
+        if debug:
+            logger.info(
+                "accumulate_bio: B slice t=%d nnz=%d shape=%s",
+                int(t), B_t_nnz, getattr(B_t, "shape", None)
+            )
         if B_t_nnz == 0:
-            logger.warning("accumulate_bio: B_t.nnz==0 -> nothing to accumulate")
+            if debug:
+                logger.warning("accumulate_bio: B_t.nnz==0 -> nothing to accumulate")
             return
 
         n_flows = int(self.B.shape[2])
@@ -470,7 +489,7 @@ class Trails:
 
             # Anchor offsets to scenario_year (because the coefficient came from B[t])
             any_pair = False
-            for offset, weight in td.iter_offsets_and_weights():
+            for offset, weight in td.iter_offsets_and_weights(debug=debug):
                 any_pair = True
 
                 raw_year = int(scenario_year + int(offset))
@@ -485,10 +504,11 @@ class Trails:
                 inventory_by_year[y_eff][flow_idx] += scaled * float(weight) * factor
 
             if not any_pair:
-                logger.warning(
-                    "accumulate_bio: TD produced no offsets/weights (template_year=%d scenario_year=%d act=%d flow=%d) -> dropped",
-                    int(template_year), int(scenario_year), act_idx, flow_idx
-                )
+                if debug:
+                    logger.warning(
+                        "accumulate_bio: TD produced no offsets/weights (template_year=%d scenario_year=%d act=%d flow=%d) -> dropped",
+                        int(template_year), int(scenario_year), act_idx, flow_idx
+                    )
 
     def _map_year_to_available(self, year: int) -> int:
         """
@@ -507,6 +527,7 @@ class Trails:
             return_provenance: bool = False,
             show_progress: bool = False,
             use_temporal_distributions: bool = True,
+            debug: bool = False,
     ):
         """
         Traverse the temporal-technosphere graph starting from (start_year, start_act_idx).
@@ -516,10 +537,11 @@ class Trails:
           - If not available, fall back to a short warm-up branching estimate.
         """
 
-        logger.info(
-            "temporal_traversal start: start_year=%d start_act=%d amount=%g max_depth=%d min_amount=%g use_td=%s",
-            start_year, start_act_idx, amount, max_depth, min_amount, use_temporal_distributions
-        )
+        if debug:
+            logger.info(
+                "temporal_traversal start: start_year=%d start_act=%d amount=%g max_depth=%d min_amount=%g use_td=%s",
+                start_year, start_act_idx, amount, max_depth, min_amount, use_temporal_distributions
+            )
 
         # ------------------------------------------------------------------
         # 1) Empirical totals by depth (YOU populate these)
@@ -671,6 +693,7 @@ class Trails:
                 act_idx=act,
                 amount=amt,
                 use_temporal_distributions=use_temporal_distributions,
+                debug=debug,
             )
 
             # Leaf: record it

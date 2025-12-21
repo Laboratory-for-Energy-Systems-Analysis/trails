@@ -33,7 +33,8 @@ def build_datapackage_for_year_from_trails(
     year: int,
     zero_biosphere: bool = False,
     collapse_bio_temporal_scaling: bool = False,
-    collapse_tech_temporal_scaling: bool = False
+    collapse_tech_temporal_scaling: bool = False,
+    debug: bool = False,
 ):
     """
     Build a bw_processing.Datapackage for a given calendar year
@@ -132,7 +133,7 @@ def build_datapackage_for_year_from_trails(
                 continue
 
             td = TemporalDistribution(tex)
-            pairs = list(td.iter_offsets_and_weights())
+            pairs = list(td.iter_offsets_and_weights(debug=debug))
             if not pairs:
                 multipliers_A[n] = 0.0
                 continue
@@ -187,7 +188,7 @@ def build_datapackage_for_year_from_trails(
             td = TemporalDistribution(tex)
 
             m = 0.0
-            for offset, weight in td.iter_offsets_and_weights():
+            for offset, weight in td.iter_offsets_and_weights(debug=debug):
                 m += float(weight) * float(td.scale_factor(int(offset)))
 
             # If something goes wrong, fall back to 1.0 instead of zeroing the exchange
@@ -316,6 +317,7 @@ def lca_static_simple(
     fu_act_idx: int,
     methods: List[str],
     amount: float = 1.0,
+    debug: bool = False,
 ) -> Dict[str, Any]:
     """
     Plain static LCA for a single FU activity in a single year:
@@ -330,6 +332,7 @@ def lca_static_simple(
         zero_biosphere=False,
         collapse_bio_temporal_scaling=True,
         collapse_tech_temporal_scaling=True,
+        debug=debug,
     )
 
     lca_obj = bc.LCA(demand={int(fu_act_idx): float(amount)}, data_objs=[dp])
@@ -348,6 +351,7 @@ def lca_static_simple(
         methods=methods,
         biosphere_matrix_dict=biosphere_matrix_dict,
         biosphere_dict=biosphere_dict_simple,
+        debug=debug,
     )
 
     inv_vec = np.asarray(lca_obj.inventory.sum(axis=1)).reshape((-1, 1))
@@ -431,6 +435,7 @@ def lca(
             fu_act_idx=fu0,
             methods=methods,
             amount=amt0,
+            debug=debug,
         )
 
     # -----------------------------
@@ -453,6 +458,7 @@ def lca(
             return_provenance=True,
             show_progress=bool(show_progress),
             use_temporal_distributions=True,
+            debug=debug,
         )
         if injected_supply_by_year_act is None:
             injected_supply_by_year_act = {}
@@ -468,6 +474,7 @@ def lca(
             return_provenance=False,
             show_progress=bool(show_progress),
             use_temporal_distributions=True,
+            debug=debug,
         )
         provenance = {}
         if injected_supply_by_year_act is None:
@@ -625,6 +632,7 @@ def lca(
                 trails=trails,
                 year=solve_year,
                 zero_biosphere=zero_bio,
+                debug=debug,
             )
             dp_cache[dp_key] = (dp, tech_idx, bio_idx, uncertain_params)
         else:
@@ -677,6 +685,7 @@ def lca(
             inventory_by_year=inventory_total_by_impact_year,
             min_amount=float(min_amount),
             use_temporal_distributions=True,
+            debug=debug,
         )
 
         # (2) injected supply for this solve_year
@@ -696,6 +705,7 @@ def lca(
                 inventory_by_year=inventory_total_by_impact_year,
                 min_amount=float(min_amount),
                 use_temporal_distributions=True,
+                debug=debug,
             )
 
         # Build injected supply by root, normalizing legacy sentinel -> fu0
@@ -722,6 +732,7 @@ def lca(
                 inventory_by_year=inventory_by_root_by_impact_year[FU_DIRECT_ROOT],
                 min_amount=float(min_amount),
                 use_temporal_distributions=True,
+                debug=debug,
             )
 
         # Per-root inventories (upstream technosphere and any injected shares attributed to that root)
@@ -745,6 +756,7 @@ def lca(
                 inventory_by_year=inventory_by_root_by_impact_year[int(root_idx)],
                 min_amount=float(min_amount),
                 use_temporal_distributions=True,
+                debug=debug,
             )
 
             root_injected = injected_supply_by_first_level_child.get(int(root_idx), {})
@@ -755,6 +767,7 @@ def lca(
                     inventory_by_year=inventory_by_root_by_impact_year[int(root_idx)],
                     min_amount=float(min_amount),
                     use_temporal_distributions=True,
+                    debug=debug,
                 )
 
         # For diagnostics: include all roots that exist either via rooted demand or injected supply (incl. FU_DIRECT_ROOT)
@@ -793,6 +806,7 @@ def lca(
                 trails=trails,
                 year=impact_year,
                 zero_biosphere=True,
+                debug=debug,
             )
             dp_cache[dp_key] = (dp, tech_idx, bio_idx, uncertain_params)
         else:
@@ -809,6 +823,7 @@ def lca(
                 methods=methods,
                 biosphere_matrix_dict=biosphere_matrix_dict,
                 biosphere_dict=biosphere_dict_simple,
+                debug=debug,
             )
             char_cache[char_key] = C
         else:
@@ -896,6 +911,7 @@ def compute_node_impact_intensities(
                 trails=trails,
                 year=year,
                 zero_biosphere=zero_bio,
+                debug=debug,
             )
             dp_cache[year] = (dp, tech_idx, bio_idx, uncertain_params)
         else:
@@ -950,4 +966,3 @@ def compute_node_impact_intensities(
             node_intensity[(year, act)] = score_scalar
 
     return node_intensity
-

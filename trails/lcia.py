@@ -93,10 +93,11 @@ def fill_characterization_factors_matrices(
     :rtype: scipy.sparse.csr_matrix
     """
 
-    logger.info(
-        "LCIA: building CF matrix for methods=%d biosphere_flows=%d",
-        len(methods), len(biosphere_matrix_dict)
-    )
+    if debug:
+        logger.info(
+            "LCIA: building CF matrix for methods=%d biosphere_flows=%d",
+            len(methods), len(biosphere_matrix_dict)
+        )
 
     lcia_data = get_lcia_methods(methods=methods)
 
@@ -126,11 +127,12 @@ def fill_characterization_factors_matrices(
                 unmatched += 1
 
 
-    logger.info("LCIA: CF nonzeros=%d", len(data))
-    if len(data) == 0:
-        logger.warning("LCIA: CF matrix has zero entries -> all scores will be zero.")
+    if debug:
+        logger.info("LCIA: CF nonzeros=%d", len(data))
+        if len(data) == 0:
+            logger.warning("LCIA: CF matrix has zero entries -> all scores will be zero.")
 
-    logger.info("LCIA: matched_flows=%d unmatched_flows=%d", matched, unmatched)
+        logger.info("LCIA: matched_flows=%d unmatched_flows=%d", matched, unmatched)
 
     # Efficiently create the sparse matrix
     matrix = sparse.csr_matrix(
@@ -144,7 +146,7 @@ def fill_characterization_factors_matrices(
         cfs = sorted(cfs, key=lambda x: (x[0], x[1]))
         for x in cfs:
             method, flow, f, value = x
-            logging.info(
+            logger.info(
                 f"LCIA method: {method}, Flow: {flow}, Index: {f}, Value: {value}"
             )
 
