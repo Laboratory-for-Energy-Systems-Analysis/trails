@@ -638,16 +638,34 @@ class Trails:
         # Progress bar setup
         # ------------------------------------------------------------------
         pbar = None
-        total_est = None
-        total_est = estimate_total_from_depth()
-        try:
-            if total_est is None:
-                # Indeterminate until warm-up can estimate
-                pbar = tqdm(total=None, desc="Temporal traversal", unit="node", dynamic_ncols=True)
-            else:
-                pbar = tqdm(total=total_est, desc="Temporal traversal", unit="node", dynamic_ncols=True)
-        except Exception:
-            pbar = None
+        nodes_processed = 0
+        branching_samples = []
+        WARMUP_LIMIT = 50
+
+        def estimate_total_from_depth():
+            return self._estimate_total_from_depth(max_depth)
+
+        def estimate_total_from_branching(samples):
+            if not samples:
+                return None
+            avg = float(sum(samples)) / float(len(samples))
+            if avg <= 1.0:
+                return max(1, len(samples))
+            total = 0.0
+            for depth in range(max_depth + 1):
+                total += avg ** depth
+            return int(total)
+
+        if show_progress:
+            total_est = estimate_total_from_depth()
+            try:
+                if total_est is None:
+                    # Indeterminate until warm-up can estimate
+                    pbar = tqdm(total=None, desc="Temporal traversal", unit="node", dynamic_ncols=True)
+                else:
+                    pbar = tqdm(total=total_est, desc="Temporal traversal", unit="node", dynamic_ncols=True)
+            except Exception:
+                pbar = None
 
         # Track actual processed count and keep tqdm sane even if total was misestimated.
         # Policy:

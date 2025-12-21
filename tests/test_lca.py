@@ -1,7 +1,8 @@
+import importlib
 import numpy as np
 import sparse
 
-import trails.lca as lca_module
+lca_module = importlib.import_module("trails.lca")
 
 
 class DummyLCA:
@@ -94,8 +95,9 @@ def test_lca_static_mode(monkeypatch):
         return_provenance=False,
         use_temporal_distributions=False,
     )
-    assert 2005 in result
-    assert result[2005]["scores"] == 3.0
+    impact = result["results_by_impact_year"]
+    assert 2005 in impact
+    assert impact[2005]["scores"] == 3.0
 
 
 def test_compute_node_impact_intensities(monkeypatch):
@@ -118,3 +120,31 @@ def test_compute_node_impact_intensities(monkeypatch):
         trails=trails, nodes=[(2005, 0)], methods=["dummy"]
     )
     assert result[(2005, 0)] == 3.0
+
+
+def test_lca_example_package_gasoline_car(example_trails):
+    method = (
+        "IPCC 2021 (incl. biogenic CO2) - climate change: total (incl. biogenic CO2) - "
+        "global warming potential (GWP100)"
+    )
+    result = lca_module.lca(
+        trails=example_trails,
+        start_year=2005,
+        start_act_idx=13,
+        methods=[method],
+        amount=1.0,
+        max_depth=2,
+        min_amount=0.0,
+        show_progress=False,
+        return_provenance=False,
+        use_temporal_distributions=True,
+    )
+
+    impact = result["results_by_impact_year"]
+    assert 2005 in impact
+    assert 2020 in impact
+
+    assert np.isclose(impact[2005]["scores"], 0.2491568943951279, rtol=1e-6)
+    assert np.isclose(impact[2020]["scores"], 0.012761818594299257, rtol=1e-6)
+    assert np.isclose(impact[2005]["scores_by_first_level_child"][13], 0.13472940237261355, rtol=1e-6)
+    assert np.isclose(impact[2020]["scores_by_first_level_child"][13], 0.008235294255428016, rtol=1e-6)
