@@ -1,5 +1,6 @@
 # utils.py
 
+
 def _parse_float_or_none(value):
     if value is None:
         return None
@@ -23,6 +24,7 @@ def _format_path_label(path, idx_to_label):
     parts = [idx_to_label.get(idx, f"Activity {idx}") for idx in path]
     return " → ".join(parts)
 
+
 def _format_path_label_with_years(path, idx_to_label):
     """
     Turn a tuple of (year, act_idx) pairs into a nice string.
@@ -32,6 +34,7 @@ def _format_path_label_with_years(path, idx_to_label):
         base = idx_to_label.get(act, f"Activity {act}")
         parts.append(f"{year}: {base}")
     return " → ".join(parts)
+
 
 def _parse_intish_or_none(v):
     f = _parse_float_or_none(v)

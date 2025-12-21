@@ -7,6 +7,7 @@ from scipy.sparse import csr_matrix
 from .filesystem_constants import DATA_DIR
 
 import logging
+
 logger = logging.getLogger(__name__)
 
 LCIA_METHODS_EI310 = DATA_DIR / "lcia_ei310.json"
@@ -14,6 +15,7 @@ LCIA_METHODS_EI311 = DATA_DIR / "lcia_ei311.json"
 
 
 _LCIA_METHODS_CACHE = {}
+
 
 def get_lcia_method_names(ei_version="3.11"):
     """List LCIA method names bundled with the specified ecoinvent version.
@@ -92,7 +94,8 @@ def fill_characterization_factors_matrices(
     if debug:
         logger.info(
             "LCIA: building CF matrix for methods=%d biosphere_flows=%d",
-            len(methods), len(biosphere_matrix_dict)
+            len(methods),
+            len(biosphere_matrix_dict),
         )
 
     lcia_data = get_lcia_methods(methods=methods)
@@ -122,11 +125,12 @@ def fill_characterization_factors_matrices(
             else:
                 unmatched += 1
 
-
     if debug:
         logger.info("LCIA: CF nonzeros=%d", len(data))
         if len(data) == 0:
-            logger.warning("LCIA: CF matrix has zero entries -> all scores will be zero.")
+            logger.warning(
+                "LCIA: CF matrix has zero entries -> all scores will be zero."
+            )
 
         logger.info("LCIA: matched_flows=%d unmatched_flows=%d", matched, unmatched)
 

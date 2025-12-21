@@ -15,7 +15,9 @@ class DummyLCA:
             {"product": {0: 0, 1: 1}, "biosphere": {0: 0, 1: 1}},
         )()
         self.inventory = np.array([[1.0], [2.0]])
-        self.supply_array = np.array([float(demand.get(0, 0.0)), float(demand.get(1, 0.0))])
+        self.supply_array = np.array(
+            [float(demand.get(0, 0.0)), float(demand.get(1, 0.0))]
+        )
 
     def lci(self):
         return None
@@ -28,12 +30,34 @@ class DummyTrails:
         self.value_dtype = np.float64
         self.A = sparse.COO(coords=[[0], [0], [0]], data=[1.0], shape=(1, 2, 2))
         self.B = sparse.COO(
-            coords=[np.array([], dtype=int), np.array([], dtype=int), np.array([], dtype=int)],
+            coords=[
+                np.array([], dtype=int),
+                np.array([], dtype=int),
+                np.array([], dtype=int),
+            ],
             data=np.array([], dtype=float),
             shape=(1, 2, 2),
         )
-        self.activity_indices = {"2005": {0: {"name": "act", "reference product": "prod", "unit": "u", "location": "GLO"}}}
-        self.biosphere_indices = {"2005": {0: {"name": "flow", "compartment": "air", "subcompartment": "low", "unit": "kg"}}}
+        self.activity_indices = {
+            "2005": {
+                0: {
+                    "name": "act",
+                    "reference product": "prod",
+                    "unit": "u",
+                    "location": "GLO",
+                }
+            }
+        }
+        self.biosphere_indices = {
+            "2005": {
+                0: {
+                    "name": "flow",
+                    "compartment": "air",
+                    "subcompartment": "low",
+                    "unit": "kg",
+                }
+            }
+        }
 
     def temporal_traversal(self, **kwargs):
         return {(2005, 0): 1.0}, {}
@@ -59,8 +83,8 @@ def test_nearest_metadata_label_for_year():
 
 
 def test_build_datapackage_for_year_from_trails(example_trails):
-    dp, tech_idx, bio_idx, uncertain = lca_module.build_datapackage_for_year_from_trails(
-        example_trails, year=2005
+    dp, tech_idx, bio_idx, uncertain = (
+        lca_module.build_datapackage_for_year_from_trails(example_trails, year=2005)
     )
     assert dp is not None
     assert any("battery electric vehicle, production" in key for key in tech_idx)
@@ -77,10 +101,14 @@ def test_lca_static_mode(monkeypatch):
     def fake_fill_characterization_factors_matrices(*args, **kwargs):
         return np.ones((1, 2))
 
-    monkeypatch.setattr(lca_module, "build_datapackage_for_year_from_trails", fake_build_dp)
+    monkeypatch.setattr(
+        lca_module, "build_datapackage_for_year_from_trails", fake_build_dp
+    )
     monkeypatch.setattr(lca_module.bc, "LCA", DummyLCA)
     monkeypatch.setattr(
-        lca_module, "fill_characterization_factors_matrices", fake_fill_characterization_factors_matrices
+        lca_module,
+        "fill_characterization_factors_matrices",
+        fake_fill_characterization_factors_matrices,
     )
 
     result = lca_module.lca(
@@ -98,4 +126,3 @@ def test_lca_static_mode(monkeypatch):
     impact = result["results_by_impact_year"]
     assert 2005 in impact
     assert impact[2005]["scores"] == 3.0
-

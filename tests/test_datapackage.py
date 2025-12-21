@@ -10,7 +10,9 @@ def test_parse_intish_or_none():
 
 
 def test_iter_inventory_resources(example_package):
-    resources = list(datapackage._iter_inventory_resources(example_package, "A_matrix.csv"))
+    resources = list(
+        datapackage._iter_inventory_resources(example_package, "A_matrix.csv")
+    )
     years = sorted({year for year, _ in resources})
     assert years == ["2005", "2020", "2050", "2100"]
 

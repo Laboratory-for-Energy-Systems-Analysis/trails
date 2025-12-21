@@ -39,7 +39,6 @@ def test_expand_temporal_exchanges_without_temporal_distributions(example_trails
     assert demand[2005][7] == pytest.approx(0.6)
 
 
-
 def test_expand_temporal_exchanges_with_temporal_distributions(example_trails):
     demand = example_trails.expand_temporal_exchanges(year=2005, act_idx=2, amount=1.0)
     assert any(0 in mapping for mapping in demand.values())
@@ -75,7 +74,6 @@ def test_temporal_traversal_basic(example_trails):
     assert (2005, 7) in demand
     assert demand[(2005, 5)] == pytest.approx(0.7)
     assert demand[(2005, 7)] == pytest.approx(0.3)
-
 
 
 def test_frontier_to_demand_vectors(example_trails):

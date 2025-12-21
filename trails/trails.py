@@ -11,12 +11,13 @@ from tqdm import tqdm
 from .datapackage import (
     load_matrices_from_package,
     interpolate_to_annual,
-    load_indices_from_package
+    load_indices_from_package,
 )
 
 from .temporal_distributions import TemporalDistribution, TemporalExchange
 
 import logging
+
 logger = logging.getLogger(__name__)
 
 
@@ -77,7 +78,9 @@ class Trails:
             )
 
         self.template_labels = list(self.scenario_labels)
-        self.template_years_int = np.array([int(lbl) for lbl in self.template_labels], dtype=int)
+        self.template_years_int = np.array(
+            [int(lbl) for lbl in self.template_labels], dtype=int
+        )
 
         self.years_int = np.array([int(lbl) for lbl in self.scenario_labels], dtype=int)
         self.min_year = int(self.years_int.min())
@@ -106,7 +109,9 @@ class Trails:
                 debug=debug,
             )
 
-            self.years_int = np.array([int(lbl) for lbl in self.scenario_labels], dtype=int)
+            self.years_int = np.array(
+                [int(lbl) for lbl in self.scenario_labels], dtype=int
+            )
             self.min_year = int(self.years_int.min())
             self.max_year = int(self.years_int.max())
 
@@ -208,9 +213,13 @@ class Trails:
         return scenario_year, scenario_label, t
 
     @staticmethod
-    def _add_demand_entry(demand, target_year: int, product_index: int, exchange_amount: float) -> None:
+    def _add_demand_entry(
+        demand, target_year: int, product_index: int, exchange_amount: float
+    ) -> None:
         demand.setdefault(target_year, {})
-        demand[target_year][product_index] = demand[target_year].get(product_index, 0.0) + exchange_amount
+        demand[target_year][product_index] = (
+            demand[target_year].get(product_index, 0.0) + exchange_amount
+        )
 
     @staticmethod
     def _child_amount(parent_amount: float, exchange_value: float) -> float:
@@ -236,7 +245,8 @@ class Trails:
             if debug:
                 logger.warning(
                     "expand_temporal_exchanges: TD produced no offsets/weights for (year=%d prod=%d) -> dropping exchange",
-                    year, product_index,
+                    year,
+                    product_index,
                 )
             return
 
@@ -297,13 +307,13 @@ class Trails:
         return TemporalDistribution(tex)
 
     def expand_temporal_exchanges(
-            self,
-            year: int,
-            act_idx: int,
-            amount: float = 1.0,
-            *,
-            use_temporal_distributions: bool = True,
-            debug: bool = False,
+        self,
+        year: int,
+        act_idx: int,
+        amount: float = 1.0,
+        *,
+        use_temporal_distributions: bool = True,
+        debug: bool = False,
     ):
         """
         Expand one activity-year demand into temporally distributed multi-year
@@ -322,12 +332,20 @@ class Trails:
         if debug:
             logger.info(
                 "expand_tech: year=%d scenario_year=%d t=%d act=%d amount=%g",
-                int(year), int(scenario_year), int(t), int(act_idx), float(amount)
+                int(year),
+                int(scenario_year),
+                int(t),
+                int(act_idx),
+                float(amount),
             )
 
             logger.debug(
                 "expand_temporal_exchanges: year=%d act=%d amount=%g scenario_year=%d use_td=%s",
-                year, act_idx, amount, scenario_year, use_temporal_distributions
+                year,
+                act_idx,
+                amount,
+                scenario_year,
+                use_temporal_distributions,
             )
 
         A_row = self.A[t, act_idx, :]
@@ -335,7 +353,10 @@ class Trails:
             if debug:
                 logger.debug(
                     "expand_temporal_exchanges: EMPTY A_row (year=%d mapped=%d t=%d act=%d) -> no children",
-                    year, scenario_year, t, act_idx
+                    year,
+                    scenario_year,
+                    t,
+                    act_idx,
                 )
             return demand
 
@@ -375,7 +396,10 @@ class Trails:
             if debug:
                 logger.debug(
                     "expand_temporal_exchanges: applying TD for (year=%d act=%d prod=%d) child_amt=%g",
-                    year, act_idx, product_index, child_amount
+                    year,
+                    act_idx,
+                    product_index,
+                    child_amount,
                 )
 
             self._apply_temporal_distribution_to_demand(
@@ -392,12 +416,15 @@ class Trails:
         if debug:
             logger.debug(
                 "expand_temporal_exchanges: produced years=%d total_children=%d",
-                len(demand), total_children
+                len(demand),
+                total_children,
             )
 
         return demand
 
-    def _get_tech_temporal_exchange(self, year: int, act_idx: int, prod_idx: int) -> Optional[TemporalExchange]:
+    def _get_tech_temporal_exchange(
+        self, year: int, act_idx: int, prod_idx: int
+    ) -> Optional[TemporalExchange]:
         """
         For technosphere TD metadata, do NOT interpolate across years.
         Instead, map to the nearest template year and do a direct lookup.
@@ -408,9 +435,13 @@ class Trails:
             return None
 
         y_tpl = self._map_year_to_template_year(year)
-        return self.temporal_technosphere_exchanges.get((str(y_tpl), int(act_idx), int(prod_idx)))
+        return self.temporal_technosphere_exchanges.get(
+            (str(y_tpl), int(act_idx), int(prod_idx))
+        )
 
-    def _get_bio_temporal_exchange(self, year: int, act_idx: int, flow_idx: int) -> Optional[TemporalExchange]:
+    def _get_bio_temporal_exchange(
+        self, year: int, act_idx: int, flow_idx: int
+    ) -> Optional[TemporalExchange]:
         """
         For biosphere TD metadata, do NOT interpolate across years.
         Instead, map to the nearest template year and do a direct lookup.
@@ -420,7 +451,9 @@ class Trails:
             return None
 
         y_tpl = self._map_year_to_template_year(year)
-        return self.temporal_biosphere_exchanges.get((str(y_tpl), int(act_idx), int(flow_idx)))
+        return self.temporal_biosphere_exchanges.get(
+            (str(y_tpl), int(act_idx), int(flow_idx))
+        )
 
     def _get_biosphere_slice(self, base_year: int, debug: bool):
         if self.B is None:
@@ -433,7 +466,7 @@ class Trails:
             if debug:
                 logger.error(
                     "accumulate_bio: scenario_label not in scenario_index (base_year=%d) -> abort",
-                    int(base_year)
+                    int(base_year),
                 )
             return None
 
@@ -443,7 +476,9 @@ class Trails:
         if debug:
             logger.info(
                 "accumulate_bio: B slice t=%d nnz=%d shape=%s",
-                int(t), B_t_nnz, getattr(B_t, "shape", None)
+                int(t),
+                B_t_nnz,
+                getattr(B_t, "shape", None),
             )
         if B_t_nnz == 0:
             if debug:
@@ -454,14 +489,14 @@ class Trails:
         return scenario_year, t, B_t, n_flows
 
     def accumulate_temporalized_biosphere_inventory(
-            self,
-            base_year: int,
-            supply_by_activity: Dict[int, float],
-            inventory_by_year: Dict[int, np.ndarray],
-            *,
-            min_amount: float = 0.0,
-            use_temporal_distributions: bool = True,
-            debug: bool = False,
+        self,
+        base_year: int,
+        supply_by_activity: Dict[int, float],
+        inventory_by_year: Dict[int, np.ndarray],
+        *,
+        min_amount: float = 0.0,
+        use_temporal_distributions: bool = True,
+        debug: bool = False,
     ) -> None:
         """
         Accumulate temporally shifted biosphere emissions resulting from a
@@ -472,7 +507,10 @@ class Trails:
         if debug:
             logger.info(
                 "accumulate_bio: base_year=%d acts_in=%d min_amount=%g use_td=%s",
-                int(base_year), len(supply_by_activity), float(min_amount), bool(use_temporal_distributions)
+                int(base_year),
+                len(supply_by_activity),
+                float(min_amount),
+                bool(use_temporal_distributions),
             )
 
         biosphere_slice = self._get_biosphere_slice(base_year, debug)
@@ -543,7 +581,10 @@ class Trails:
                 if debug:
                     logger.warning(
                         "accumulate_bio: TD produced no offsets/weights (template_year=%d scenario_year=%d act=%d flow=%d) -> dropped",
-                        int(template_year), int(scenario_year), act_idx, flow_idx
+                        int(template_year),
+                        int(scenario_year),
+                        act_idx,
+                        flow_idx,
                     )
 
     def _map_year_to_available(self, year: int) -> int:
@@ -574,8 +615,14 @@ class Trails:
         if len(depths) >= 2:
             lo = max([d for d in depths if d < max_depth], default=None)
             hi = min([d for d in depths if d > max_depth], default=None)
-            if lo is not None and hi is not None and DEPTH_TOTALS[lo] > 0 and DEPTH_TOTALS[hi] > 0:
+            if (
+                lo is not None
+                and hi is not None
+                and DEPTH_TOTALS[lo] > 0
+                and DEPTH_TOTALS[hi] > 0
+            ):
                 import math
+
                 y0 = math.log(DEPTH_TOTALS[lo])
                 y1 = math.log(DEPTH_TOTALS[hi])
                 t = (max_depth - lo) / (hi - lo)
@@ -585,43 +632,58 @@ class Trails:
         return None
 
     @staticmethod
-    def _record_frontier(frontier_total, provenance_roots, y: int, a: int, x: float, r: Optional[int],
-                         return_provenance: bool):
+    def _record_frontier(
+        frontier_total,
+        provenance_roots,
+        y: int,
+        a: int,
+        x: float,
+        r: Optional[int],
+        return_provenance: bool,
+    ):
         frontier_total[(int(y), int(a))] += float(x)
         if return_provenance and (r is not None):
             provenance_roots[(int(y), int(a))][int(r)] += float(x)
 
     @staticmethod
-    def _record_direct_bio(direct_bio_total, direct_bio_roots, y: int, a: int, x: float, r: Optional[int],
-                           return_provenance: bool):
+    def _record_direct_bio(
+        direct_bio_total,
+        direct_bio_roots,
+        y: int,
+        a: int,
+        x: float,
+        r: Optional[int],
+        return_provenance: bool,
+    ):
         direct_bio_total[(int(y), int(a))] += float(x)
         if return_provenance and (r is not None):
             direct_bio_roots[(int(y), int(a))][int(r)] += float(x)
 
-    def _has_direct_biosphere(self, scenario_year: int, act: int, bio_cache: dict) -> bool:
+    def _has_direct_biosphere(
+        self, scenario_year: int, act: int, bio_cache: dict
+    ) -> bool:
         label = str(scenario_year)
         if label in self.scenario_index and (self.B is not None):
             t = self.scenario_index[label]
             key = (scenario_year, act)
             if key in bio_cache:
                 return bio_cache[key]
-            has_direct_bio = (self.B[t, act, :].nnz > 0)
+            has_direct_bio = self.B[t, act, :].nnz > 0
             bio_cache[key] = has_direct_bio
             return has_direct_bio
         return False
 
-
     def temporal_traversal(
-            self,
-            start_year: int,
-            start_act_idx: int,
-            amount: float = 1.0,
-            max_depth: int = 3,
-            min_amount: float = 1e-12,
-            return_provenance: bool = False,
-            show_progress: bool = False,
-            use_temporal_distributions: bool = True,
-            debug: bool = False,
+        self,
+        start_year: int,
+        start_act_idx: int,
+        amount: float = 1.0,
+        max_depth: int = 3,
+        min_amount: float = 1e-12,
+        return_provenance: bool = False,
+        show_progress: bool = False,
+        use_temporal_distributions: bool = True,
+        debug: bool = False,
     ):
         """
         Traverse the temporal-technosphere graph starting from (start_year, start_act_idx).
@@ -634,7 +696,12 @@ class Trails:
         if debug:
             logger.info(
                 "temporal_traversal start: start_year=%d start_act=%d amount=%g max_depth=%d min_amount=%g use_td=%s",
-                start_year, start_act_idx, amount, max_depth, min_amount, use_temporal_distributions
+                start_year,
+                start_act_idx,
+                amount,
+                max_depth,
+                min_amount,
+                use_temporal_distributions,
             )
 
         # ------------------------------------------------------------------
@@ -669,9 +736,19 @@ class Trails:
         try:
             if total_est is None:
                 # Indeterminate until warm-up can estimate
-                pbar = tqdm(total=None, desc="Temporal traversal", unit="node", dynamic_ncols=True)
+                pbar = tqdm(
+                    total=None,
+                    desc="Temporal traversal",
+                    unit="node",
+                    dynamic_ncols=True,
+                )
             else:
-                pbar = tqdm(total=total_est, desc="Temporal traversal", unit="node", dynamic_ncols=True)
+                pbar = tqdm(
+                    total=total_est,
+                    desc="Temporal traversal",
+                    unit="node",
+                    dynamic_ncols=True,
+                )
         except Exception:
             pbar = None
 
@@ -717,10 +794,15 @@ class Trails:
         queue.append((int(start_year), int(start_act_idx), float(amount), 0, (), None))
 
         frontier_total = defaultdict(float)  # (year, act) -> amt
-        provenance_roots = defaultdict(lambda: defaultdict(float))  # (year, act) -> {root_act: amt}
+        provenance_roots = defaultdict(
+            lambda: defaultdict(float)
+        )  # (year, act) -> {root_act: amt}
         direct_bio_total = defaultdict(
-            float)  # (year, act) -> amt (nodes with direct biosphere we do NOT want to solve)
-        direct_bio_roots = defaultdict(lambda: defaultdict(float))  # same but by root, if provenance requested
+            float
+        )  # (year, act) -> amt (nodes with direct biosphere we do NOT want to solve)
+        direct_bio_roots = defaultdict(
+            lambda: defaultdict(float)
+        )  # same but by root, if provenance requested
 
         bio_cache: dict[tuple[int, int], bool] = {}
 
@@ -755,7 +837,15 @@ class Trails:
             # Helper: record a node into frontier + provenance
             # Stop expanding at max_depth
             if depth >= max_depth:
-                self._record_frontier(frontier_total, provenance_roots, year, act, amt, root_act, return_provenance)
+                self._record_frontier(
+                    frontier_total,
+                    provenance_roots,
+                    year,
+                    act,
+                    amt,
+                    root_act,
+                    return_provenance,
+                )
                 continue
 
             # Expand this node
@@ -793,10 +883,17 @@ class Trails:
                     pbar.total = est
                     pbar.refresh()
 
-
             # Leaf: record it
             if not child_demands:
-                self._record_frontier(frontier_total, provenance_roots, year, act, amt, root_act, return_provenance)
+                self._record_frontier(
+                    frontier_total,
+                    provenance_roots,
+                    year,
+                    act,
+                    amt,
+                    root_act,
+                    return_provenance,
+                )
                 continue
 
             # IMPORTANT BEHAVIOR:
@@ -834,7 +931,16 @@ class Trails:
                         child_root = root_act
                         child_path = path + ((child_year, child_act),)
 
-                    queue.append((child_year, child_act, child_amt, depth + 1, child_path, child_root))
+                    queue.append(
+                        (
+                            child_year,
+                            child_act,
+                            child_amt,
+                            depth + 1,
+                            child_path,
+                            child_root,
+                        )
+                    )
 
         _pbar_finalize()
 
@@ -842,7 +948,12 @@ class Trails:
         if return_provenance:
             provenance_roots = {k: dict(v) for k, v in provenance_roots.items()}
             direct_bio_roots = {k: dict(v) for k, v in direct_bio_roots.items()}
-            return dict(frontier_total), provenance_roots, dict(direct_bio_total), direct_bio_roots
+            return (
+                dict(frontier_total),
+                provenance_roots,
+                dict(direct_bio_total),
+                direct_bio_roots,
+            )
 
         return dict(frontier_total), dict(direct_bio_total)
 
@@ -862,10 +973,14 @@ class Trails:
 
         for key, amt in frontier.items():
             if not isinstance(key, tuple):
-                raise ValueError(f"Frontier key must be a tuple (year, act). Got {type(key)}: {key}")
+                raise ValueError(
+                    f"Frontier key must be a tuple (year, act). Got {type(key)}: {key}"
+                )
 
             if len(key) != 2:
-                raise ValueError(f"Frontier key must be (year, act). Got len={len(key)}: {key}")
+                raise ValueError(
+                    f"Frontier key must be (year, act). Got len={len(key)}: {key}"
+                )
 
             year, act_idx = key
             y = int(year)
@@ -879,12 +994,12 @@ class Trails:
         return f_by_year
 
     def collect_traversal_edges(
-            self,
-            start_year: int,
-            start_act_idx: int,
-            amount: float = 1.0,
-            max_depth: int = 3,
-            min_amount: float = 1e-12,
+        self,
+        start_year: int,
+        start_act_idx: int,
+        amount: float = 1.0,
+        max_depth: int = 3,
+        min_amount: float = 1e-12,
     ) -> dict[int, dict[tuple[tuple[int, int], tuple[int, int]], float]]:
         """
         Traverse the temporal-technosphere graph starting from
@@ -902,9 +1017,9 @@ class Trails:
         queue = deque()
         queue.append((int(start_year), int(start_act_idx), float(amount), 0))
 
-        edges_by_depth: dict[int, dict[tuple[tuple[int, int], tuple[int, int]], float]] = (
-            defaultdict(lambda: defaultdict(float))
-        )
+        edges_by_depth: dict[
+            int, dict[tuple[tuple[int, int], tuple[int, int]], float]
+        ] = defaultdict(lambda: defaultdict(float))
 
         while queue:
             year, act, amt, depth = queue.popleft()
@@ -932,6 +1047,8 @@ class Trails:
                     child_node = (int(child_year), int(child_act))
                     edges_by_depth[int(depth)][(parent_node, child_node)] += child_amt
 
-                    queue.append((int(child_year), int(child_act), child_amt, int(depth) + 1))
+                    queue.append(
+                        (int(child_year), int(child_act), child_amt, int(depth) + 1)
+                    )
 
         return {d: dict(edges) for d, edges in edges_by_depth.items()}
