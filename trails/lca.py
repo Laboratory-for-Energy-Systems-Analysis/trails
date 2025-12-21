@@ -4,6 +4,7 @@ from typing import Dict, Tuple, List, Any
 from collections import defaultdict
 
 import bw2calc as bc
+import pyprind
 
 from .trails import Trails
 from .lcia import fill_characterization_factors_matrices
@@ -25,142 +26,6 @@ def _nearest_metadata_label_for_year(trails: Trails, year: int) -> str:
     years = np.array([int(lbl) for lbl in labels])
     idx = int(np.argmin(np.abs(years - year)))
     return labels[idx]
-
-
-def _resolve_matrix_label(trails: Trails, year: int) -> str:
-    """
-    Return the exact or nearest scenario label for a requested year.
-    """
-    label_for_matrix = str(year)
-    if label_for_matrix in trails.scenario_index:
-        return label_for_matrix
-
-    years = np.array([int(lbl) for lbl in trails.scenario_labels])
-    idx = int(np.argmin(np.abs(years - year)))
-    nearest_label = trails.scenario_labels[idx]
-    print(
-        f"⚠️ Matrix slice for year {year} not found in A/B; "
-        f"using nearest available matrix year {nearest_label}."
-    )
-    return nearest_label
-
-
-def _ij_from_coords(matrix_slice: Any) -> Tuple[np.ndarray, np.ndarray]:
-    """
-    Return (row_idx, col_idx) from a sparse.COO with either:
-      - 3D coords: [t, i, j]
-      - 2D coords: [i, j]
-    """
-    coords = matrix_slice.coords
-    if coords.shape[0] == 3:
-        row_idx = np.asarray(coords[1], dtype=np.int64)
-        col_idx = np.asarray(coords[2], dtype=np.int64)
-    elif coords.shape[0] == 2:
-        row_idx = np.asarray(coords[0], dtype=np.int64)
-        col_idx = np.asarray(coords[1], dtype=np.int64)
-    else:
-        raise ValueError(f"Unsupported coords ndim={coords.shape[0]} for sparse array")
-    return row_idx, col_idx
-
-
-def _make_bw_indices_rowcol(row_idx: np.ndarray, col_idx: np.ndarray) -> np.ndarray:
-    indices = np.empty(len(row_idx), dtype=bwp.INDICES_DTYPE)
-    indices["row"] = row_idx.astype(np.uint32, copy=False)
-    indices["col"] = col_idx.astype(np.uint32, copy=False)
-    return indices
-
-
-def _apply_technosphere_temporal_scaling(
-    trails: Trails,
-    year: int,
-    signed_data: np.ndarray,
-    act_indices: np.ndarray,
-    prod_indices: np.ndarray,
-) -> np.ndarray:
-    """
-    Collapse temporal distribution metadata into technosphere coefficients.
-    """
-    multipliers = np.ones_like(signed_data, dtype=np.float64)
-    for idx in range(len(signed_data)):
-        act = int(act_indices[idx])
-        prod = int(prod_indices[idx])
-
-        if prod == act and abs(float(signed_data[idx])) == 1.0:
-            continue
-
-        tex = trails._get_tech_temporal_exchange(int(year), act, prod)
-        if tex is None:
-            continue
-
-        td = TemporalDistribution(tex)
-        offsets_and_weights = list(td.iter_offsets_and_weights())
-        if not offsets_and_weights:
-            multipliers[idx] = 0.0
-            continue
-
-        expected = 0.0
-        for offset, weight in offsets_and_weights:
-            expected += float(weight) * float(td.scale_factor(offset))
-        multipliers[idx] = float(expected)
-
-    return np.asarray(signed_data, dtype=np.float64) * multipliers
-
-
-def _apply_biosphere_temporal_scaling(
-    trails: Trails,
-    year: int,
-    signed_data: np.ndarray,
-    act_indices: np.ndarray,
-    flow_indices: np.ndarray,
-) -> np.ndarray:
-    """
-    Collapse temporal distribution metadata into biosphere coefficients.
-    """
-    multipliers = np.ones_like(signed_data, dtype=np.float64)
-    for idx in range(len(signed_data)):
-        act = int(act_indices[idx])
-        flow = int(flow_indices[idx])
-
-        tex = trails._get_bio_temporal_exchange(int(year), act, flow)
-        if tex is None:
-            continue
-
-        td = TemporalDistribution(tex)
-
-        expected = 0.0
-        for offset, weight in td.iter_offsets_and_weights():
-            expected += float(weight) * float(td.scale_factor(int(offset)))
-
-        multipliers[idx] = expected if (np.isfinite(expected) and expected > 0.0) else 1.0
-
-    return signed_data * multipliers
-
-
-def _warn_missing_indices(
-    label_for_matrix: str,
-    meta_label: str,
-    act_meta: Dict[int, Dict[str, str]],
-    bio_meta: Dict[int, Dict[str, str]],
-    technosphere_activity_indices: set,
-    biosphere_flow_indices: set,
-) -> None:
-    missing_activities = technosphere_activity_indices - set(act_meta.keys())
-    if missing_activities:
-        print(
-            f"⚠️ WARNING: A[{label_for_matrix}] uses {len(missing_activities)} "
-            f"activity indices not present in activity_indices[{meta_label}]. "
-            f"Examples: {sorted(list(missing_activities))[:10]}"
-            f"{' ...' if len(missing_activities) > 10 else ''}"
-        )
-
-    missing_flows = biosphere_flow_indices - set(bio_meta.keys())
-    if missing_flows:
-        print(
-            f"⚠️ WARNING: B[{label_for_matrix}] uses {len(missing_flows)} "
-            f"biosphere flow indices not present in biosphere_indices[{meta_label}]. "
-            f"Examples: {sorted(list(missing_flows))[:10]}"
-            f"{' ...' if len(missing_flows) > 10 else ''}"
-        )
 
 
 def build_datapackage_for_year_from_trails(
@@ -194,13 +59,39 @@ def build_datapackage_for_year_from_trails(
     # ------------------------------------------------------------------
     # 1) Map `year` to the matrix slice we actually use
     # ------------------------------------------------------------------
-    label_for_matrix = _resolve_matrix_label(trails, year)
+    label_for_matrix = str(year)
+    if label_for_matrix not in trails.scenario_index:
+        # If you used interpolation, this might be rare; still, handle safely.
+        years = np.array([int(lbl) for lbl in trails.scenario_labels])
+        idx = int(np.argmin(np.abs(years - year)))
+        label_for_matrix = trails.scenario_labels[idx]
+        print(
+            f"⚠️ Matrix slice for year {year} not found in A/B; "
+            f"using nearest available matrix year {label_for_matrix}."
+        )
 
     t = trails.scenario_index[label_for_matrix]
 
     # Extract 2D slices
     A_t = trails.A[t, :, :]  # sparse.COO (activities x products)
     B_t = trails.B[t, :, :]  # sparse.COO (activities x flows)
+
+    def _ij_from_coords(X_t):
+        """
+        Return (i_idx, j_idx) from a sparse.COO with either:
+          - 3D coords: [t, i, j]
+          - 2D coords: [i, j]
+        """
+        coords = X_t.coords
+        if coords.shape[0] == 3:
+            i_idx = np.asarray(coords[1], dtype=np.int64)
+            j_idx = np.asarray(coords[2], dtype=np.int64)
+        elif coords.shape[0] == 2:
+            i_idx = np.asarray(coords[0], dtype=np.int64)
+            j_idx = np.asarray(coords[1], dtype=np.int64)
+        else:
+            raise ValueError(f"Unsupported coords ndim={coords.shape[0]} for sparse array")
+        return i_idx, j_idx
 
     # ------------------------------------------------------------------
     # 2) Choose metadata year: prefer exact, else nearest with warning
@@ -221,13 +112,38 @@ def build_datapackage_for_year_from_trails(
     # --- Optional: collapse temporal scaling metadata into the static A coefficients ---
     if collapse_tech_temporal_scaling:
         A_act_idx, A_prod_idx = _ij_from_coords(A_t)
-        A_signed = _apply_technosphere_temporal_scaling(
-            trails=trails,
-            year=year,
-            signed_data=A_signed,
-            act_indices=A_act_idx,
-            prod_indices=A_prod_idx,
-        )
+
+        multipliers_A = np.ones_like(A_signed, dtype=np.float64)
+
+        # Use template year for metadata lookup (same policy as Trails)
+        template_year = trails._map_year_to_template_year(int(year))
+
+        for n in range(len(A_signed)):
+            act = int(A_act_idx[n])
+            prod = int(A_prod_idx[n])
+
+            # Skip diagonal production exchange if present (same logic as traversal)
+            # NOTE: keep consistent with your A convention; adjust if needed.
+            if prod == act and abs(float(A_signed[n])) == 1.0:
+                continue
+
+            tex = trails._get_tech_temporal_exchange(int(year), act, prod)
+            if tex is None:
+                continue
+
+            td = TemporalDistribution(tex)
+            pairs = list(td.iter_offsets_and_weights())
+            if not pairs:
+                multipliers_A[n] = 0.0
+                continue
+
+            # Expected scaling under the temporal distribution
+            m = 0.0
+            for offset, w in pairs:
+                m += float(w) * float(td.scale_factor(offset))
+            multipliers_A[n] = float(m)
+
+        A_signed = np.asarray(A_signed, dtype=np.float64) * multipliers_A
 
     # Brightway convention via bw_processing:
     # - data must be non-negative
@@ -254,13 +170,30 @@ def build_datapackage_for_year_from_trails(
     if collapse_bio_temporal_scaling and (not zero_biosphere):
         # We need (act, flow) coordinates aligned with B_signed
         B_act_idx, B_flow_idx = _ij_from_coords(B_t)
-        B_signed = _apply_biosphere_temporal_scaling(
-            trails=trails,
-            year=year,
-            signed_data=B_signed,
-            act_indices=B_act_idx,
-            flow_indices=B_flow_idx,
-        )
+
+        multipliers = np.ones_like(B_signed, dtype=np.float64)
+
+        # Use template year for metadata lookup, consistent with Trails design
+        template_year = trails._map_year_to_template_year(int(year))
+
+        for i in range(len(B_signed)):
+            act = int(B_act_idx[i])
+            flow = int(B_flow_idx[i])
+
+            tex = trails._get_bio_temporal_exchange(int(year), act, flow)
+            if tex is None:
+                continue
+
+            td = TemporalDistribution(tex)
+
+            m = 0.0
+            for offset, weight in td.iter_offsets_and_weights():
+                m += float(weight) * float(td.scale_factor(int(offset)))
+
+            # If something goes wrong, fall back to 1.0 instead of zeroing the exchange
+            multipliers[i] = m if (np.isfinite(m) and m > 0.0) else 1.0
+
+        B_signed = B_signed * multipliers
 
     # bw_processing convention: biosphere also needs abs+flip (same as technosphere)
     flip_B = (B_signed < 0)
@@ -289,6 +222,12 @@ def build_datapackage_for_year_from_trails(
     # All activity indices used anywhere in A (row/col in your internal orientation)
     A_all_activities = A_act_indices | A_prod_indices
 
+    def _make_bw_indices_rowcol(row_idx: np.ndarray, col_idx: np.ndarray) -> np.ndarray:
+        idx = np.empty(len(row_idx), dtype=bwp.INDICES_DTYPE)
+        idx["row"] = row_idx.astype(np.uint32, copy=False)
+        idx["col"] = col_idx.astype(np.uint32, copy=False)
+        return idx
+
     # Correct for bw2calc:
     # Technosphere is (product rows, activity cols)
     indices_A = _make_bw_indices_rowcol(A_prod_idx, A_act_idx)
@@ -296,14 +235,24 @@ def build_datapackage_for_year_from_trails(
     # Biosphere is (flow rows, activity cols)
     indices_B = _make_bw_indices_rowcol(B_flow_idx, B_act_idx)
 
-    _warn_missing_indices(
-        label_for_matrix=label_for_matrix,
-        meta_label=meta_label,
-        act_meta=act_meta,
-        bio_meta=bio_meta,
-        technosphere_activity_indices=A_all_activities,
-        biosphere_flow_indices=B_flow_indices,
-    )
+    missing_activities = A_all_activities - meta_act_indices
+    if missing_activities:
+        print(
+            f"⚠️ WARNING: A[{label_for_matrix}] uses {len(missing_activities)} "
+            f"activity indices not present in activity_indices[{meta_label}]. "
+            f"Examples: {sorted(list(missing_activities))[:10]}"
+            f"{' ...' if len(missing_activities) > 10 else ''}"
+        )
+
+
+    missing_flows = B_flow_indices - meta_bio_indices
+    if missing_flows:
+        print(
+            f"⚠️ WARNING: B[{label_for_matrix}] uses {len(missing_flows)} "
+            f"biosphere flow indices not present in biosphere_indices[{meta_label}]. "
+            f"Examples: {sorted(list(missing_flows))[:10]}"
+            f"{' ...' if len(missing_flows) > 10 else ''}"
+        )
 
 
     # ------------------------------------------------------------------
@@ -446,6 +395,10 @@ def lca(
       - injected_supply_by_first_level_child: same, but attributed to a root bucket
       - FU_DIRECT_ROOT: sentinel bucket for FU-direct biosphere only (never upstream technosphere)
     """
+
+    import numpy as np
+    import bw2calc as bc
+    from collections import defaultdict
 
     FU_DIRECT_ROOT = -1
     ROOT_CLOSURE_TOL = 1e-12
@@ -894,7 +847,6 @@ def compute_node_impact_intensities(
         nodes: List[Tuple[int, int]],
         methods: List[str],
         debug: bool = False,
-        use_temporal_distributions: bool | None = None,
 ) -> Dict[Tuple[int, int], float]:
     """
     Compute LCIA impact intensity for a set of (year, act_idx) nodes.
@@ -913,9 +865,6 @@ def compute_node_impact_intensities(
         For now, we assume a single method and return a scalar per node.
     debug : bool
         Print debug info if True.
-    use_temporal_distributions : bool | None
-        Whether to use temporal distributions when building datapackages.
-        If None, falls back to a module-level flag (for backward compatibility).
 
     Returns
     -------
@@ -923,9 +872,6 @@ def compute_node_impact_intensities(
     """
     if not nodes:
         return {}
-
-    if use_temporal_distributions is None:
-        use_temporal_distributions = bool(globals().get("use_temporal_distributions", False))
 
     if len(methods) != 1:
         raise ValueError(
@@ -1008,3 +954,4 @@ def compute_node_impact_intensities(
             node_intensity[(year, act)] = score_scalar
 
     return node_intensity
+
