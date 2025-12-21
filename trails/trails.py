@@ -639,16 +639,50 @@ class Trails:
         # ------------------------------------------------------------------
         pbar = None
         total_est = None
-        if show_progress:
-            total_est = self._estimate_total_from_depth(int(max_depth))
+        total_est = estimate_total_from_depth()
+        try:
+            if total_est is None:
+                # Indeterminate until warm-up can estimate
+                pbar = tqdm(total=None, desc="Temporal traversal", unit="node", dynamic_ncols=True)
+            else:
+                pbar = tqdm(total=total_est, desc="Temporal traversal", unit="node", dynamic_ncols=True)
+        except Exception:
+            pbar = None
+
+        # Track actual processed count and keep tqdm sane even if total was misestimated.
+        # Policy:
+        #  - If we exceed total, expand total so the bar never runs beyond 100%.
+        #  - At the end, snap total to exactly nodes_processed so the bar finishes at 100%.
+        def _pbar_step():
+            nonlocal nodes_processed, pbar
+            nodes_processed += 1
+            if pbar is None:
+                return
+
+            # If total is unknown, just advance.
+            if pbar.total is None:
+                pbar.update(1)
+                return
+
+            # If we're about to exceed the total, expand it with some headroom.
+            if pbar.n + 1 > pbar.total:
+                new_total = int(max(pbar.n + 1, pbar.total * 1.2, pbar.total + 100))
+                pbar.total = new_total
+                pbar.refresh()
+
+            pbar.update(1)
+
+        def _pbar_finalize():
+            nonlocal pbar
+            if pbar is None:
+                return
             try:
-                if total_est is None:
-                    # Indeterminate until warm-up can estimate
-                    pbar = tqdm(total=None, desc="Temporal traversal", unit="node", dynamic_ncols=True)
-                else:
-                    pbar = tqdm(total=total_est, desc="Temporal traversal", unit="node", dynamic_ncols=True)
+                # Snap to actual processed count so we end at 100%
+                pbar.total = int(pbar.n)
+                pbar.refresh()
+                pbar.close()
             except Exception:
-                pbar = None
+                pass
 
         # ------------------------------------------------------------------
         # Traversal state
@@ -686,8 +720,7 @@ class Trails:
             if abs(amt) < min_amount:
                 continue
 
-            if pbar is not None:
-                pbar.update(1)
+            _pbar_step()
 
             # Map to scenario year for "has direct biosphere" test (fast cutoff logic)
             scenario_year = self._map_year_to_scenario_year(year)
@@ -707,6 +740,33 @@ class Trails:
                 use_temporal_distributions=use_temporal_distributions,
                 debug=debug,
             )
+
+            # --------------------------------------------------------------
+            # Warm-up: if tqdm started indeterminate (total=None),
+            # estimate a total after WARMUP_LIMIT processed nodes using
+            # observed branching and then set pbar.total.
+            # --------------------------------------------------------------
+            if show_progress and pbar is not None and pbar.total is None:
+                # Branching sample = number of children edges we would enqueue
+                # for this node (after min_amount filtering, consistent with traversal).
+                if nodes_processed <= WARMUP_LIMIT:
+                    # Count children that would actually be enqueued
+                    cnt = 0
+                    if child_demands:
+                        for _cy, _mapping in child_demands.items():
+                            for _ca, _camt in _mapping.items():
+                                if abs(float(_camt)) >= float(min_amount):
+                                    cnt += 1
+                    branching_samples.append(cnt)
+
+                # Once warm-up complete, set a total estimate
+                if nodes_processed == WARMUP_LIMIT:
+                    est = estimate_total_from_branching(branching_samples)
+                    # Keep a bit conservative so it doesn't finish early
+                    est = int(max(est, pbar.n + 1) * EMPIRICAL_SAFETY_FACTOR)
+                    pbar.total = est
+                    pbar.refresh()
+
 
             # Leaf: record it
             if not child_demands:
@@ -750,11 +810,7 @@ class Trails:
 
                     queue.append((child_year, child_act, child_amt, depth + 1, child_path, child_root))
 
-        if pbar is not None:
-            try:
-                pbar.close()
-            except Exception:
-                pass
+        _pbar_finalize()
 
         # Normalize provenance to plain dicts
         if return_provenance:

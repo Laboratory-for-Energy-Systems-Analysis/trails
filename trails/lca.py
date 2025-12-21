@@ -5,6 +5,8 @@ from collections import defaultdict
 
 import bw2calc as bc
 import pyprind
+from tqdm.auto import tqdm
+
 
 from .trails import Trails
 from .lcia import fill_characterization_factors_matrices
@@ -866,7 +868,10 @@ def lca(
     # -----------------------------
     # 2) Solve-year loop
     # -----------------------------
-    for solve_year in candidate_years:
+    solve_iter = candidate_years
+    if show_progress:
+        solve_iter = tqdm(candidate_years, desc="Temporal LCA: solve years", unit="year")
+    for solve_year in solve_iter:
         solve_year = int(solve_year)
         arr = np.asarray(f_by_year[solve_year])
 
@@ -988,12 +993,12 @@ def lca(
         )
 
         results_by_solve_year[solve_year] = {
-            "fu_activity": fu0,
-            "FU_DIRECT_ROOT": FU_DIRECT_ROOT,  # now equals fu0
-            "fu_demand": fu_demand,
-            "demand_by_first_level_child": demand_by_first_level_child,
-            "injected_supply": injected_supply,
-            "injected_supply_by_first_level_child": injected_supply_by_first_level_child,
+            # "fu_activity": fu0,
+            # "FU_DIRECT_ROOT": FU_DIRECT_ROOT,  # now equals fu0
+            # "fu_demand": fu_demand,
+            # "demand_by_first_level_child": demand_by_first_level_child,
+            # "injected_supply": injected_supply,
+            # "injected_supply_by_first_level_child": injected_supply_by_first_level_child,
             "lca": lca_total,
             "scores": 0.0,
             "scores_by_first_level_child": {int(k): 0.0 for k in sorted(all_diag_roots)},

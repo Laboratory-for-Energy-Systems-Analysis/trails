@@ -71,8 +71,8 @@ def configure_trails_logging(
         for extra in file_handlers[1:]:
             root.removeHandler(extra)
     else:
-        fh = logging.handlers.RotatingFileHandler(
-            log_path, maxBytes=5_000_000, backupCount=3, encoding="utf-8", mode=mode
+        fh = logging.FileHandler(
+            log_path, mode=mode, encoding="utf-8"
         )
         fh.setLevel(file_level)
         fh.setFormatter(formatter)
