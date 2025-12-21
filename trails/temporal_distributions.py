@@ -8,6 +8,7 @@ import numpy as np
 from math import erf, sqrt, exp, pi
 
 import logging
+
 logger = logging.getLogger(__name__)
 
 
@@ -32,6 +33,7 @@ class TemporalExchange:
     :param scale_base: Base scaling factor (default 1.0).
     :param scale_rate: Rate of scaling per offset (default 0.0).
     """
+
     distribution: int
     loc: Optional[float]
     scale: Optional[float]
@@ -48,7 +50,9 @@ class TemporalDistribution:
     def __init__(self, tex: TemporalExchange):
         self.tex = tex
 
-    def iter_offsets_and_weights(self, debug: bool = False) -> Iterable[Tuple[int, float]]:
+    def iter_offsets_and_weights(
+        self, debug: bool = False
+    ) -> Iterable[Tuple[int, float]]:
         """
         Yield (offset_k, weight_k) for integer offsets k in
         [offset_min, offset_max].
@@ -62,7 +66,9 @@ class TemporalDistribution:
         offsets = np.arange(t.offset_min, t.offset_max + 1, dtype=int)
         if offsets.size == 0:
             if debug:
-                logger.warning("TemporalDistribution: total weight <= 0 -> returning empty distribution")
+                logger.warning(
+                    "TemporalDistribution: total weight <= 0 -> returning empty distribution"
+                )
             return iter(())
 
         dist = t.distribution
@@ -110,10 +116,10 @@ class TemporalDistribution:
             weights = scaled
             if float(weights.sum()) <= 0.0:
                 if debug:
-                    logger.warning("TemporalDistribution: total scaled weight <= 0 -> returning empty distribution")
+                    logger.warning(
+                        "TemporalDistribution: total scaled weight <= 0 -> returning empty distribution"
+                    )
                 return iter(())
-
-
 
         # ------------------------------------------------------------
         # 3) Renormalize so total mass is preserved
@@ -131,7 +137,9 @@ class TemporalDistribution:
             if w != 0.0:
                 yield int(k), float(w)
 
-    def scale_factor(self, offset: int, *, clip: Optional[Tuple[float, float]] = None) -> float:
+    def scale_factor(
+        self, offset: int, *, clip: Optional[Tuple[float, float]] = None
+    ) -> float:
         t = self.tex
         raw_mode = getattr(t, "scale_mode", None)
         mode = (raw_mode or "").strip().lower()
@@ -155,7 +163,6 @@ class TemporalDistribution:
             lo, hi = clip
             f = max(lo, min(hi, f))
         return f
-
 
     # ------------------------------------------------------------------
     # Individual distribution helpers

@@ -15,6 +15,7 @@ _case: ContextVar[str] = ContextVar("case", default="-")
 _year: ContextVar[str] = ContextVar("year", default="-")
 _depth: ContextVar[str] = ContextVar("depth", default="-")
 
+
 class TrailsContextFilter(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
         record.run_id = _run_id.get()
@@ -22,6 +23,7 @@ class TrailsContextFilter(logging.Filter):
         record.year = _year.get()
         record.depth = _depth.get()
         return True
+
 
 def configure_trails_logging(
     file_level: int = logging.DEBUG,
@@ -52,11 +54,15 @@ def configure_trails_logging(
 
     # Helper to detect "our" handlers
     def _is_trails_file_handler(h: logging.Handler) -> bool:
-        return isinstance(h, logging.FileHandler) and getattr(h, "baseFilename", "") == str(log_path)
+        return isinstance(h, logging.FileHandler) and getattr(
+            h, "baseFilename", ""
+        ) == str(log_path)
 
     def _is_console_handler(h: logging.Handler) -> bool:
         # StreamHandler that is not a FileHandler
-        return isinstance(h, logging.StreamHandler) and not isinstance(h, logging.FileHandler)
+        return isinstance(h, logging.StreamHandler) and not isinstance(
+            h, logging.FileHandler
+        )
 
     # --- Ensure exactly one file handler for this log_path ---
     file_handlers = [h for h in root.handlers if _is_trails_file_handler(h)]
@@ -71,9 +77,7 @@ def configure_trails_logging(
         for extra in file_handlers[1:]:
             root.removeHandler(extra)
     else:
-        fh = logging.FileHandler(
-            log_path, mode=mode, encoding="utf-8"
-        )
+        fh = logging.FileHandler(log_path, mode=mode, encoding="utf-8")
         fh.setLevel(file_level)
         fh.setFormatter(formatter)
         fh.addFilter(TrailsContextFilter())
@@ -87,7 +91,9 @@ def configure_trails_logging(
             ch = console_handlers[0]
             ch.setLevel(console_level)
             ch.setFormatter(formatter)
-            ch.filters = [f for f in ch.filters if not isinstance(f, TrailsContextFilter)]
+            ch.filters = [
+                f for f in ch.filters if not isinstance(f, TrailsContextFilter)
+            ]
             ch.addFilter(TrailsContextFilter())
             # Remove extra duplicates if any
             for extra in console_handlers[1:]:

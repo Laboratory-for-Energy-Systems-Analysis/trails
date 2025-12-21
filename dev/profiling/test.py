@@ -9,7 +9,9 @@ configure_trails_logging(file_level=logging.DEBUG)
 dp = Package("/Users/romain/GitHub/premise/dev/trails_2025-12-16.zip")
 trails = Trails(dp, interpolate_annual=True)
 
-methods = ["IPCC 2021 (incl. biogenic CO2) - climate change: total (incl. biogenic CO2) - global warming potential (GWP100)",]
+methods = [
+    "IPCC 2021 (incl. biogenic CO2) - climate change: total (incl. biogenic CO2) - global warming potential (GWP100)",
+]
 
 ref_year = 2050
 

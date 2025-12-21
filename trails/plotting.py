@@ -65,11 +65,13 @@ def _select_years_from_results(results_by_year, year_range):
 
 
 def _collect_root_scores(results_by_year, years):
-    all_roots = sorted({
-        root
-        for year in years
-        for root in results_by_year[year].get("scores_by_first_level_child", {})
-    })
+    all_roots = sorted(
+        {
+            root
+            for year in years
+            for root in results_by_year[year].get("scores_by_first_level_child", {})
+        }
+    )
     if not all_roots:
         raise ValueError("No scores_by_first_level_child found.")
     return all_roots
@@ -102,16 +104,22 @@ def _add_root_traces(fig, years, Y, all_roots, idx_to_label, method_label, stack
                     "Year: %{x}<br>"
                     f"{method_label}: %{{y:.6g}}<extra></extra>"
                 ),
-                **({"stackgroup": "one"} if stacked else {
-                    "fill": "tozeroy",
-                    "line": dict(width=2),
-                    "opacity": alpha,
-                }),
+                **(
+                    {"stackgroup": "one"}
+                    if stacked
+                    else {
+                        "fill": "tozeroy",
+                        "line": dict(width=2),
+                        "opacity": alpha,
+                    }
+                ),
             )
         )
 
 
-def _add_cumulative_trace(fig, years, total_raw, cumulative_axis_label, yaxis_type, log_eps):
+def _add_cumulative_trace(
+    fig, years, total_raw, cumulative_axis_label, yaxis_type, log_eps
+):
     cum_vals = np.cumsum(total_raw)
     if yaxis_type == "log":
         cum_vals = np.where(cum_vals > 0, cum_vals, log_eps)
@@ -136,8 +144,15 @@ def _add_cumulative_trace(fig, years, total_raw, cumulative_axis_label, yaxis_ty
     return cum_vals
 
 
-def _add_static_score_trace(fig, years, static_score, static_score_label, static_score_dash, static_score_color,
-                            method_label):
+def _add_static_score_trace(
+    fig,
+    years,
+    static_score,
+    static_score_label,
+    static_score_dash,
+    static_score_color,
+    method_label,
+):
     fig.add_trace(
         go.Scatter(
             x=[years[0], years[-1]],
@@ -167,8 +182,20 @@ def _compute_layout_dimensions(width, legend_entrywidth, legend_row_height, n_it
     return entry_w, top_margin
 
 
-def _apply_base_layout(fig, width, height, title, legend_y, entry_w, top_margin, method_label, yaxis_type,
-                       show_cumulative_axis, static_score, cumulative_axis_label):
+def _apply_base_layout(
+    fig,
+    width,
+    height,
+    title,
+    legend_y,
+    entry_w,
+    top_margin,
+    method_label,
+    yaxis_type,
+    show_cumulative_axis,
+    static_score,
+    cumulative_axis_label,
+):
     fig.update_layout(
         width=width,
         height=height,
@@ -214,7 +241,9 @@ def _apply_base_layout(fig, width, height, title, legend_y, entry_w, top_margin,
         )
 
 
-def _apply_linear_yaxis_alignment(fig, Y, cum_vals, static_score, y_max, y2_max, y2_headroom):
+def _apply_linear_yaxis_alignment(
+    fig, Y, cum_vals, static_score, y_max, y2_max, y2_headroom
+):
     y1_min = float(np.nanmin(Y))
     y1_max_data = float(np.nanmax(Y))
     y1_min = min(y1_min, 0.0)
@@ -260,7 +289,7 @@ def _apply_linear_yaxis_alignment(fig, Y, cum_vals, static_score, y_max, y2_max,
     elif p >= 1.0:
         y2_range = [y2_min_data, 0.0]
     else:
-        y2_min_eff = - (p / (1.0 - p)) * y2_max_eff
+        y2_min_eff = -(p / (1.0 - p)) * y2_max_eff
         y2_min_eff = min(y2_min_eff, y2_min_data)
         y2_range = [y2_min_eff, y2_max_eff]
 
@@ -291,7 +320,9 @@ def _add_reference_year_line(fig, reference_year):
         )
 
 
-def to_impact_year_results(results: Dict[int, Dict[str, Any]] | Dict[str, Any]) -> Dict[int, Dict[str, Any]]:
+def to_impact_year_results(
+    results: Dict[int, Dict[str, Any]] | Dict[str, Any],
+) -> Dict[int, Dict[str, Any]]:
     """
     Normalize different result structures into the "impact-year" format expected by plot_temporal_scores:
 
@@ -323,7 +354,11 @@ def to_impact_year_results(results: Dict[int, Dict[str, Any]] | Dict[str, Any]) 
     if isinstance(results, dict) and results:
         k0 = next(iter(results.keys()))
         v0 = results[k0]
-        if isinstance(k0, int) and isinstance(v0, dict) and ("scores_per_root" in v0 or "scores" in v0):
+        if (
+            isinstance(k0, int)
+            and isinstance(v0, dict)
+            and ("scores_per_root" in v0 or "scores" in v0)
+        ):
             return results  # already normalized
 
     # --- Case 3: Legacy duplicated timeline under each solve-year
@@ -347,8 +382,12 @@ def to_impact_year_results(results: Dict[int, Dict[str, Any]] | Dict[str, Any]) 
     for solve_year, entry in results.items():
         if not isinstance(entry, dict):
             continue
-        tspr = entry.get("temporal_scores_per_root_by_year", {})  # impact_year -> {root: score}
-        tst  = entry.get("temporal_scores_by_year", {})           # impact_year -> total score (optional)
+        tspr = entry.get(
+            "temporal_scores_per_root_by_year", {}
+        )  # impact_year -> {root: score}
+        tst = entry.get(
+            "temporal_scores_by_year", {}
+        )  # impact_year -> total score (optional)
 
         for impact_year, per_root in tspr.items():
             impact_year = int(impact_year)
@@ -356,9 +395,9 @@ def to_impact_year_results(results: Dict[int, Dict[str, Any]] | Dict[str, Any]) 
 
             # per-root sums
             for root, val in (per_root or {}).items():
-                out[impact_year]["scores_per_root"][int(root)] = (
-                    out[impact_year]["scores_per_root"].get(int(root), 0.0) + float(val)
-                )
+                out[impact_year]["scores_per_root"][int(root)] = out[impact_year][
+                    "scores_per_root"
+                ].get(int(root), 0.0) + float(val)
 
         # total scores (if present)
         for impact_year, total in (tst or {}).items():
@@ -367,6 +406,7 @@ def to_impact_year_results(results: Dict[int, Dict[str, Any]] | Dict[str, Any]) 
             out[impact_year]["scores"] += float(total)
 
     return out
+
 
 def plot_temporal_scores(
     results_by_year: Dict[int, Dict[str, Any]],
@@ -510,6 +550,7 @@ def plot_temporal_scores(
 
     return fig
 
+
 def plot_top_paths_for_year(
     provenance: Dict[tuple[int, int], Dict[tuple[int, ...], float]],
     trails: Trails,
@@ -570,8 +611,7 @@ def plot_top_paths_for_year(
                 y=labels,
                 orientation="h",
                 hovertemplate=(
-                    "<b>%{y}</b><br>"
-                    f"{amount_label}: %{{x:.6g}}<extra></extra>"
+                    "<b>%{y}</b><br>" f"{amount_label}: %{{x:.6g}}<extra></extra>"
                 ),
             )
         ]
@@ -652,10 +692,12 @@ def _build_depth_map(selected_paths):
 
 
 def _aggregate_link_impacts(selected_paths, depth_map, node_intensity):
-    link_impact_agg: Dict[Tuple[Tuple[int, int], Tuple[int, int]], float] = defaultdict(float)
-    edge_activity_contrib: Dict[Tuple[Tuple[int, int], Tuple[int, int]], Dict[int, float]] = defaultdict(
-        lambda: defaultdict(float)
+    link_impact_agg: Dict[Tuple[Tuple[int, int], Tuple[int, int]], float] = defaultdict(
+        float
     )
+    edge_activity_contrib: Dict[
+        Tuple[Tuple[int, int], Tuple[int, int]], Dict[int, float]
+    ] = defaultdict(lambda: defaultdict(float))
 
     for full_path, amt in selected_paths:
         if len(full_path) < 2:
@@ -714,16 +756,14 @@ def _compute_sankey_layout(agg_nodes):
         depth_to_x = {depths[0]: 0.5}
     else:
         depth_to_x = {
-            d: 0.05 + 0.9 * (i / (len(depths) - 1))
-            for i, d in enumerate(depths)
+            d: 0.05 + 0.9 * (i / (len(depths) - 1)) for i, d in enumerate(depths)
         }
 
     if len(years) == 1:
         year_to_y = {years[0]: 0.5}
     else:
         year_to_y = {
-            y: 0.05 + 0.9 * (i / (len(years) - 1))
-            for i, y in enumerate(years)
+            y: 0.05 + 0.9 * (i / (len(years) - 1)) for i, y in enumerate(years)
         }
 
     node_x = [depth_to_x[d] for (d, y) in agg_nodes]
@@ -734,11 +774,10 @@ def _compute_sankey_layout(agg_nodes):
 
 def _build_node_labels(agg_nodes, node_total_impact, amount_label):
     node_labels: List[str] = []
-    for (d, y) in agg_nodes:
+    for d, y in agg_nodes:
         total_imp = node_total_impact.get((d, y), 0.0)
         node_labels.append(
-            f"Depth {d}, Year {y}<br>"
-            f"Incoming {amount_label}: {total_imp:.3g}"
+            f"Depth {d}, Year {y}<br>" f"Incoming {amount_label}: {total_imp:.3g}"
         )
     return node_labels
 
@@ -751,14 +790,18 @@ def _assign_year_colors(years):
     else:
         full_year_palette = year_palette[: len(years)]
 
-    year_to_color = {
-        y: col for y, col in zip(years, full_year_palette)
-    }
+    year_to_color = {y: col for y, col in zip(years, full_year_palette)}
     return year_to_color
 
 
-def _build_link_arrays(link_impact_agg, edge_activity_contrib, node_index_agg, year_to_color, amount_label,
-                       activity_label):
+def _build_link_arrays(
+    link_impact_agg,
+    edge_activity_contrib,
+    node_index_agg,
+    year_to_color,
+    amount_label,
+    activity_label,
+):
     link_sources: List[int] = []
     link_targets: List[int] = []
     link_values: List[float] = []
@@ -853,7 +896,9 @@ def plot_temporal_sankey(
     selected_paths = _select_paths(full_path_amounts, top_n_paths)
     node_keys, depth_map = _build_depth_map(selected_paths)
     if node_intensity is None:
-        raise ValueError("node_intensity is required; provide impact intensities keyed by (year, act_idx).")
+        raise ValueError(
+            "node_intensity is required; provide impact intensities keyed by (year, act_idx)."
+        )
 
     act_meta = _collect_activity_meta(trails)
     activity_label = lambda act_idx: _activity_label_from_meta(act_meta, act_idx)
@@ -872,13 +917,15 @@ def plot_temporal_sankey(
     year_to_color = _assign_year_colors(years)
     node_colors = [year_to_color[y] for (d, y) in agg_nodes]
 
-    link_sources, link_targets, link_values, link_colors, link_hovertemplates = _build_link_arrays(
-        link_impact_agg=link_impact_agg,
-        edge_activity_contrib=edge_activity_contrib,
-        node_index_agg=node_index_agg,
-        year_to_color=year_to_color,
-        amount_label=amount_label,
-        activity_label=activity_label,
+    link_sources, link_targets, link_values, link_colors, link_hovertemplates = (
+        _build_link_arrays(
+            link_impact_agg=link_impact_agg,
+            edge_activity_contrib=edge_activity_contrib,
+            node_index_agg=node_index_agg,
+            year_to_color=year_to_color,
+            amount_label=amount_label,
+            activity_label=activity_label,
+        )
     )
 
     sankey = go.Sankey(
@@ -1013,14 +1060,18 @@ def _configure_flow_axes(fig, n_panels, ncols, acts, year_min, year_max):
 
 
 def _merge_all_edges(edges_by_depth, depths_list):
-    merged_edges_all: dict[tuple[tuple[int, int], tuple[int, int]], float] = defaultdict(float)
+    merged_edges_all: dict[tuple[tuple[int, int], tuple[int, int]], float] = (
+        defaultdict(float)
+    )
     for d in depths_list:
         for key, amt in edges_by_depth.get(d, {}).items():
             merged_edges_all[key] += float(amt)
     return merged_edges_all
 
 
-def _add_flow_panel_traces(fig, edges, act_to_row, idx_to_label, dot_size, row, col, show_legend):
+def _add_flow_panel_traces(
+    fig, edges, act_to_row, idx_to_label, dot_size, row, col, show_legend
+):
     consumer_nodes = set()
     supplier_nodes = set()
 
@@ -1034,12 +1085,12 @@ def _add_flow_panel_traces(fig, edges, act_to_row, idx_to_label, dot_size, row, 
     cons_x, cons_y, cons_text = [], [], []
     sup_x, sup_y, sup_text = [], [], []
 
-    for (year, act) in sorted(consumer_nodes):
+    for year, act in sorted(consumer_nodes):
         cons_x.append(year)
         cons_y.append(act_to_row.get(act, -1))
         cons_text.append(idx_to_label.get(act, f"Activity {act}"))
 
-    for (year, act) in sorted(supplier_nodes):
+    for year, act in sorted(supplier_nodes):
         sup_x.append(year)
         sup_y.append(act_to_row.get(act, -1))
         sup_text.append(idx_to_label.get(act, f"Activity {act}"))
@@ -1174,6 +1225,7 @@ def _apply_flow_layout(fig, title, base_width, base_height, nrows):
         ),
     )
 
+
 def plot_traversal_grid_flow(
     edges_by_depth: dict[int, dict[tuple[tuple[int, int], tuple[int, int]], float]],
     trails: Trails,
@@ -1202,11 +1254,15 @@ def plot_traversal_grid_flow(
     depths_list = _select_depths(edges_by_depth, depths)
     panel_labels: List[str] = [f"Depth {d}" for d in depths_list] + ["All depths"]
 
-    acts = _collect_activities(edges_by_depth, trails, depths_list, include_all_activities)
+    acts = _collect_activities(
+        edges_by_depth, trails, depths_list, include_all_activities
+    )
     idx_to_label = _activity_label_map(trails)
     act_to_row = {act: i for i, act in enumerate(acts)}
 
-    year_min, year_max, years_global = _collect_global_years(edges_by_depth, depths_list)
+    year_min, year_max, years_global = _collect_global_years(
+        edges_by_depth, depths_list
+    )
 
     ncols = 2
     fig, nrows = _init_flow_subplots(panel_labels, ncols)

@@ -12,6 +12,7 @@ from .lcia import fill_characterization_factors_matrices, get_lcia_methods
 from .temporal_distributions import TemporalDistribution
 
 import logging
+
 logger = logging.getLogger(__name__)
 
 
@@ -129,7 +130,9 @@ def _make_bw_indices_rowcol(row_idx: np.ndarray, col_idx: np.ndarray) -> np.ndar
     return idx
 
 
-def _warn_on_missing_metadata(label_for_matrix, meta_label, A_act_idx, A_prod_idx, B_flow_idx, act_meta, bio_meta):
+def _warn_on_missing_metadata(
+    label_for_matrix, meta_label, A_act_idx, A_prod_idx, B_flow_idx, act_meta, bio_meta
+):
     meta_act_indices = set(act_meta.keys())
     meta_bio_indices = set(bio_meta.keys())
 
@@ -256,7 +259,7 @@ def build_datapackage_for_year_from_trails(
     # Brightway convention via bw_processing:
     # - data must be non-negative
     # - flip marks entries that should be negated
-    flip_A = (A_signed < 0)
+    flip_A = A_signed < 0
     A_data = np.abs(A_signed)
 
     # Build indices array for bw_processing
@@ -282,7 +285,7 @@ def build_datapackage_for_year_from_trails(
     )
 
     # bw_processing convention: biosphere also needs abs+flip (same as technosphere)
-    flip_B = (B_signed < 0)
+    flip_B = B_signed < 0
     data_B = np.abs(B_signed)
 
     if zero_biosphere:
@@ -307,7 +310,6 @@ def build_datapackage_for_year_from_trails(
         act_meta=act_meta,
         bio_meta=bio_meta,
     )
-
 
     # ------------------------------------------------------------------
     # 6) Create bw_processing datapackage
@@ -337,7 +339,9 @@ def build_datapackage_for_year_from_trails(
     # 7) Build technosphere_indices / biosphere_indices dictionaries
     #     (respecting CSV indices exactly)
     # ------------------------------------------------------------------
-    technosphere_indices, biosphere_indices = _build_metadata_indices(act_meta, bio_meta)
+    technosphere_indices, biosphere_indices = _build_metadata_indices(
+        act_meta, bio_meta
+    )
 
     uncertain_parameters: List[Tuple[int, int]] = []  # none for now
 
@@ -373,7 +377,9 @@ def lca_static_simple(
 
     # Build characterization matrix in BW order (static)
     bw_bio_map = lca_obj.dicts.biosphere  # flow_id -> row position
-    biosphere_matrix_dict = {int(flow_id): int(pos) for flow_id, pos in bw_bio_map.items()}
+    biosphere_matrix_dict = {
+        int(flow_id): int(pos) for flow_id, pos in bw_bio_map.items()
+    }
 
     biosphere_dict_simple = {
         (name, comp, subcomp): int(flow_id)
@@ -445,7 +451,12 @@ def _run_temporal_traversal(
     if injected_supply_prov_by_year_act is None:
         injected_supply_prov_by_year_act = {}
 
-    return frontier, provenance, injected_supply_by_year_act, injected_supply_prov_by_year_act
+    return (
+        frontier,
+        provenance,
+        injected_supply_by_year_act,
+        injected_supply_prov_by_year_act,
+    )
 
 
 def _apply_fu_direct_injection(
@@ -456,7 +467,9 @@ def _apply_fu_direct_injection(
     amt0: float,
     legacy_root: int,
 ):
-    injected_supply_by_year_act[(y0, fu0)] = float(injected_supply_by_year_act.get((y0, fu0), 0.0)) + amt0
+    injected_supply_by_year_act[(y0, fu0)] = (
+        float(injected_supply_by_year_act.get((y0, fu0), 0.0)) + amt0
+    )
 
     injected_supply_prov_by_year_act.setdefault((y0, fu0), {})
     injected_supply_prov_by_year_act[(y0, fu0)][fu0] = (
@@ -464,10 +477,9 @@ def _apply_fu_direct_injection(
     )
 
     if legacy_root in injected_supply_prov_by_year_act[(y0, fu0)]:
-        injected_supply_prov_by_year_act[(y0, fu0)][fu0] = (
-            float(injected_supply_prov_by_year_act[(y0, fu0)].get(fu0, 0.0))
-            + float(injected_supply_prov_by_year_act[(y0, fu0)].pop(legacy_root))
-        )
+        injected_supply_prov_by_year_act[(y0, fu0)][fu0] = float(
+            injected_supply_prov_by_year_act[(y0, fu0)].get(fu0, 0.0)
+        ) + float(injected_supply_prov_by_year_act[(y0, fu0)].pop(legacy_root))
 
 
 def _build_rooted_frontier(frontier, provenance, fu0: int, root_tol: float):
@@ -529,13 +541,17 @@ def _build_rooted_frontier(frontier, provenance, fu0: int, root_tol: float):
     return rooted_frontier, roots_seen
 
 
-def _extend_roots_with_injected_supply(roots_seen, injected_supply_prov_by_year_act, normalize_root):
+def _extend_roots_with_injected_supply(
+    roots_seen, injected_supply_prov_by_year_act, normalize_root
+):
     for (_y, _a), roots_map in injected_supply_prov_by_year_act.items():
         for r in roots_map.keys():
             roots_seen.add(normalize_root(int(r)))
 
 
-def _build_root_demand_vectors(trails: Trails, rooted_frontier, roots_seen, normalize_root):
+def _build_root_demand_vectors(
+    trails: Trails, rooted_frontier, roots_seen, normalize_root
+):
     n_activities = int(trails.A.shape[1])
     dtype = trails.value_dtype
     f_by_year_by_root = {r: {} for r in roots_seen}
@@ -555,11 +571,13 @@ def _build_root_demand_vectors(trails: Trails, rooted_frontier, roots_seen, norm
 def _get_datapackage(dp_cache, trails: Trails, year: int, zero_bio: bool, debug: bool):
     dp_key = (year, zero_bio)
     if dp_key not in dp_cache:
-        dp, tech_idx, bio_idx, uncertain_params = build_datapackage_for_year_from_trails(
-            trails=trails,
-            year=year,
-            zero_biosphere=zero_bio,
-            debug=debug,
+        dp, tech_idx, bio_idx, uncertain_params = (
+            build_datapackage_for_year_from_trails(
+                trails=trails,
+                year=year,
+                zero_biosphere=zero_bio,
+                debug=debug,
+            )
         )
         dp_cache[dp_key] = (dp, tech_idx, bio_idx, uncertain_params)
     return dp_cache[dp_key]
@@ -575,7 +593,9 @@ def _build_demand_by_first_level_child(f_by_year_by_root, solve_year, min_amount
         nz_r = np.where(np.abs(arr_r) > float(min_amount))[0]
         if nz_r.size == 0:
             continue
-        demand_by_first_level_child[int(root_idx)] = {int(i): float(arr_r[i]) for i in nz_r}
+        demand_by_first_level_child[int(root_idx)] = {
+            int(i): float(arr_r[i]) for i in nz_r
+        }
     return demand_by_first_level_child
 
 
@@ -689,6 +709,7 @@ def _build_global_biosphere_dict_simple(trails: Trails) -> Dict[tuple, int]:
 
     return out
 
+
 def _build_flowkey_to_flowid(trails: Trails) -> Dict[tuple, int]:
     """
     Build (name, compartment, subcompartment) -> flow_id mapping,
@@ -720,6 +741,7 @@ def _build_flowkey_to_flowid(trails: Trails) -> Dict[tuple, int]:
             )
 
     return out
+
 
 def _build_cf_vector_flowid_space(
     trails: Trails,
@@ -801,11 +823,15 @@ def _characterize_impact_years(
         scores_by_first_level_child: Dict[int, float] = {}
         for root_idx, inv_map in inventory_by_root_by_impact_year.items():
             root_norm = normalize_root(int(root_idx))
-            inv_root = inv_map.get(impact_year, np.zeros(n_flows, dtype=trails.value_dtype))
+            inv_root = inv_map.get(
+                impact_year, np.zeros(n_flows, dtype=trails.value_dtype)
+            )
             s = float(np.dot(cf, inv_root.astype(np.float64, copy=False)))
             if abs(s) <= float(min_amount):
                 continue
-            scores_by_first_level_child[root_norm] = scores_by_first_level_child.get(root_norm, 0.0) + s
+            scores_by_first_level_child[root_norm] = (
+                scores_by_first_level_child.get(root_norm, 0.0) + s
+            )
 
         results_by_impact_year[impact_year] = {
             "scores": total_score,
@@ -969,14 +995,18 @@ def lca(
     char_cache: Dict[tuple, Any] = {}
 
     inventory_total_by_impact_year: Dict[int, np.ndarray] = {}
-    inventory_by_root_by_impact_year: Dict[int, Dict[int, np.ndarray]] = defaultdict(dict)
+    inventory_by_root_by_impact_year: Dict[int, Dict[int, np.ndarray]] = defaultdict(
+        dict
+    )
 
     # -----------------------------
     # 2) Solve-year loop
     # -----------------------------
     solve_iter = candidate_years
     if show_progress:
-        solve_iter = tqdm(candidate_years, desc="Temporal LCA: solve years", unit="year")
+        solve_iter = tqdm(
+            candidate_years, desc="Temporal LCA: solve years", unit="year"
+        )
     for solve_year in solve_iter:
         solve_year = int(solve_year)
         arr = np.asarray(f_by_year[solve_year])
@@ -1047,7 +1077,9 @@ def lca(
         )
 
         # Book FU-direct inventory under FU activity root (fu0)
-        fu_direct_injected = injected_supply_by_first_level_child.get(FU_DIRECT_ROOT, {})
+        fu_direct_injected = injected_supply_by_first_level_child.get(
+            FU_DIRECT_ROOT, {}
+        )
         if fu_direct_injected:
             trails.accumulate_temporalized_biosphere_inventory(
                 base_year=solve_year,
@@ -1103,18 +1135,14 @@ def lca(
             "n_nonzero_demand": int(len(fu_demand)),
             "sum_abs_demand": float(np.sum(np.abs(arr[nz_idx]))),
             "max_abs_demand": float(np.max(np.abs(arr[nz_idx]))),
-
             "n_injected_supply": int(len(injected_supply)),
             "injected_supply": injected_supply,  # keep if you want detail
-
             "roots": sorted(int(k) for k in all_diag_roots),
             "demand_by_first_level_child": demand_by_first_level_child,
             "injected_supply_by_first_level_child": injected_supply_by_first_level_child,
-
             # Optional but often useful:
             "n_supply_total": int(len(supply_total)),
             "supply_total": supply_total if debug else None,  # can be huge; gate it
-
             "lca": lca_total,
         }
 
@@ -1134,9 +1162,14 @@ def lca(
     )
 
     if not results_by_impact_year:
-        out = {"results_by_solve_year": results_by_solve_year, "results_by_impact_year": {}}
+        out = {
+            "results_by_solve_year": results_by_solve_year,
+            "results_by_impact_year": {},
+        }
         return (out, provenance) if return_provenance else out
 
-    out = {"results_by_solve_year": results_by_solve_year, "results_by_impact_year": results_by_impact_year}
+    out = {
+        "results_by_solve_year": results_by_solve_year,
+        "results_by_impact_year": results_by_impact_year,
+    }
     return (out, provenance) if return_provenance else out
-

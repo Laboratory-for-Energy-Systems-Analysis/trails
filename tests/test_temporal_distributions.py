@@ -30,7 +30,9 @@ def test_normal_weights_truncated():
 
 
 def test_lognormal_weights_fallback():
-    tex = TemporalExchange(distribution=2, loc=None, scale=None, offset_min=-1, offset_max=1)
+    tex = TemporalExchange(
+        distribution=2, loc=None, scale=None, offset_min=-1, offset_max=1
+    )
     dist = TemporalDistribution(tex)
     weights = dist._lognormal_weights(np.array([-1, 0, 1]), loc=None, scale=None)
     assert weights[0] == 0.0

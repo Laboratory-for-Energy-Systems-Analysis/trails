@@ -46,7 +46,9 @@ def test_debug_dir(request, debug_base: Path):
 
 @pytest.fixture(scope="session")
 def example_package() -> Package:
-    package_path = Path(__file__).resolve().parents[1] / "dev" / "example" / "datapackage.json"
+    package_path = (
+        Path(__file__).resolve().parents[1] / "dev" / "example" / "datapackage.json"
+    )
     return Package(str(package_path))
 
 

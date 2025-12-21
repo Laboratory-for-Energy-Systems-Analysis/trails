@@ -10,7 +10,9 @@ from .utils import _parse_float_or_none, _parse_int_or_none
 from .temporal_distributions import TemporalExchange
 
 import logging
+
 logger = logging.getLogger(__name__)
+
 
 def _parse_intish_or_none(value):
     """Parse an integer from values that may be given as '3', '3.0', 3.0, etc."""
@@ -23,7 +25,6 @@ def _parse_intish_or_none(value):
         return int(float(s))
     except ValueError:
         return None
-
 
 
 # ----------------------------------------------------------------------
@@ -46,7 +47,6 @@ def _iter_inventory_resources(package, filename: str):
 
         path = PurePosixPath(path_str)
         parts = path.parts
-
 
         if (
             len(parts) >= 5
@@ -100,7 +100,9 @@ def _build_sparse_matrix(coords, data, shape, idx_dtype, val_dtype) -> sparse.CO
     )
 
 
-def _parse_a_exchange_row(row, scenario_label, t, temporal_exchanges, A_coords, max_indices):
+def _parse_a_exchange_row(
+    row, scenario_label, t, temporal_exchanges, A_coords, max_indices
+):
     act_idx = int(row["index of activity"])
     prod_idx = int(row["index of product"])
     value = float(row["value"])
@@ -114,7 +116,9 @@ def _parse_a_exchange_row(row, scenario_label, t, temporal_exchanges, A_coords, 
     A_coords["j"].append(prod_idx)
     A_coords["data"].append(value)
 
-    max_indices["max_activity_idx_for_A"] = max(max_indices["max_activity_idx_for_A"], act_idx)
+    max_indices["max_activity_idx_for_A"] = max(
+        max_indices["max_activity_idx_for_A"], act_idx
+    )
     max_indices["max_product_idx"] = max(max_indices["max_product_idx"], prod_idx)
 
     tex = _parse_temporal_exchange_row(row)
@@ -122,7 +126,9 @@ def _parse_a_exchange_row(row, scenario_label, t, temporal_exchanges, A_coords, 
         temporal_exchanges[(scenario_label, act_idx, prod_idx)] = tex
 
 
-def _parse_b_exchange_row(row, scenario_label, t, temporal_biosphere_exchanges, B_coords, max_indices):
+def _parse_b_exchange_row(
+    row, scenario_label, t, temporal_biosphere_exchanges, B_coords, max_indices
+):
     act_idx = int(row["index of activity"])
     flow_idx = int(row["index of biosphere flow"])
     value = float(row["value"])
@@ -132,13 +138,14 @@ def _parse_b_exchange_row(row, scenario_label, t, temporal_biosphere_exchanges, 
     B_coords["j"].append(flow_idx)
     B_coords["data"].append(value)
 
-    max_indices["max_activity_idx_for_B"] = max(max_indices["max_activity_idx_for_B"], act_idx)
+    max_indices["max_activity_idx_for_B"] = max(
+        max_indices["max_activity_idx_for_B"], act_idx
+    )
     max_indices["max_flow_idx"] = max(max_indices["max_flow_idx"], flow_idx)
 
     tex = _parse_temporal_exchange_row(row)
     if tex is not None:
         temporal_biosphere_exchanges[(scenario_label, act_idx, flow_idx)] = tex
-
 
 
 def _label_to_year(label: str) -> int:
@@ -152,12 +159,12 @@ def _label_to_year(label: str) -> int:
     tail = str(label).split("/")[-1]
     return int(tail)
 
+
 def _years_and_sorted_indices(scenario_labels: List[str]):
     """Return numeric years and indices that sort scenario_labels by year."""
     years = np.array([_label_to_year(lbl) for lbl in scenario_labels], dtype=int)
     order = np.argsort(years)
     return years[order], order
-
 
 
 # ----------------------------------------------------------------------
@@ -168,7 +175,14 @@ def load_matrices_from_package(
     value_dtype=np.float32,
     index_dtype=np.int32,
     debug: bool = False,
-) -> Tuple[sparse.COO, sparse.COO, List[str], Dict[str, int], Dict[Tuple[str, int, int], TemporalExchange], Dict[Tuple[str, int, int], TemporalExchange]]:
+) -> Tuple[
+    sparse.COO,
+    sparse.COO,
+    List[str],
+    Dict[str, int],
+    Dict[Tuple[str, int, int], TemporalExchange],
+    Dict[Tuple[str, int, int], TemporalExchange],
+]:
     """
     Collect all technosphere and biosphere exchanges across scenarios and
     build sparse 3D matrices A and B.
@@ -232,11 +246,16 @@ def load_matrices_from_package(
 
     # ---------- Deduce shapes ----------
     n_scenarios = len(scenario_labels)
-    n_activities = max(
-        max_indices["max_activity_idx_for_A"],
-        max_indices["max_activity_idx_for_B"],
-    ) + 1
-    n_products = max_indices["max_product_idx"] + 1 if max_indices["max_product_idx"] >= 0 else 0
+    n_activities = (
+        max(
+            max_indices["max_activity_idx_for_A"],
+            max_indices["max_activity_idx_for_B"],
+        )
+        + 1
+    )
+    n_products = (
+        max_indices["max_product_idx"] + 1 if max_indices["max_product_idx"] >= 0 else 0
+    )
     n_flows = max_indices["max_flow_idx"] + 1 if max_indices["max_flow_idx"] >= 0 else 0
 
     idx_dtype = index_dtype
@@ -262,14 +281,22 @@ def load_matrices_from_package(
     if debug:
         logger.info(
             "Datapackage: loaded A shape=%s nnz=%d | B shape=%s nnz=%d | scenarios=%d | temporal_exchanges=%d",
-            getattr(A, "shape", None), int(getattr(A, "nnz", 0)),
-            getattr(B, "shape", None), int(getattr(B, "nnz", 0)),
+            getattr(A, "shape", None),
+            int(getattr(A, "nnz", 0)),
+            getattr(B, "shape", None),
+            int(getattr(B, "nnz", 0)),
             len(scenario_labels),
             len(temporal_exchanges),
         )
 
-    return A, B, scenario_labels, scenario_index, temporal_exchanges, temporal_biosphere_exchanges
-
+    return (
+        A,
+        B,
+        scenario_labels,
+        scenario_index,
+        temporal_exchanges,
+        temporal_biosphere_exchanges,
+    )
 
 
 def interpolate_to_annual(
