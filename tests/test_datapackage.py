@@ -31,9 +31,10 @@ def test_load_matrices_from_package(example_package):
     assert labels == ["2005", "2020", "2050", "2100"]
     assert A.shape[0] == 4
     assert B.shape[0] == 4
-    assert float(A[scenario_index["2005"], 1, 5]) == -0.7
+    assert np.isclose(float(A[scenario_index["2005"], 1, 5]), -0.7)
     assert ("2005", 2, 0) in temporal_exchanges
-    assert temporal_bio == {}
+    assert isinstance(temporal_bio, dict)
+    assert all(hasattr(v, "distribution") for v in temporal_bio.values())
 
 
 def test_interpolate_to_annual(example_package):

@@ -352,6 +352,9 @@ class Trails:
             exchange_value = float(exchange_value)
             product_index = int(product_index)
 
+            if exchange_value == 0.0:
+                continue
+
             # Always skip the canonical production exchange, if present in your data
             # (common convention: A[act, act] = 1)
             if product_index == act_idx and abs(exchange_value) == 1.0:
@@ -897,8 +900,7 @@ class Trails:
           at that depth, starting from a functional unit of `amount` at the root.
         """
         queue = deque()
-        # root_act is the first-level child activity (not year), or None for the FU itself
-        queue.append((start_year, start_act_idx, float(amount), 0, (), None))
+        queue.append((int(start_year), int(start_act_idx), float(amount), 0))
 
         edges_by_depth: dict[int, dict[tuple[tuple[int, int], tuple[int, int]], float]] = (
             defaultdict(lambda: defaultdict(float))
@@ -911,30 +913,25 @@ class Trails:
                 continue
 
             if depth >= max_depth:
-                # We still record the node as existing at this depth,
-                # but we don't expand children anymore.
                 continue
 
-            # Expand this node
             child_demands = self.expand_temporal_exchanges(
-                year=year, act_idx=act, amount=amt
+                year=int(year), act_idx=int(act), amount=float(amt)
             )
-
             if not child_demands:
                 continue
 
-            parent_node = (year, act)
+            parent_node = (int(year), int(act))
 
             for child_year, mapping in child_demands.items():
                 for child_act, child_amt in mapping.items():
+                    child_amt = float(child_amt)
                     if abs(child_amt) < min_amount:
                         continue
-                    child_node = (child_year, int(child_act))
-                    # edge stored at depth of the parent
-                    edges_by_depth[depth][(parent_node, child_node)] += float(child_amt)
 
-                    # enqueue child at next depth
-                    queue.append((child_year, child_act, child_amt, depth + 1))
+                    child_node = (int(child_year), int(child_act))
+                    edges_by_depth[int(depth)][(parent_node, child_node)] += child_amt
 
-        # make inner dicts plain dicts
+                    queue.append((int(child_year), int(child_act), child_amt, int(depth) + 1))
+
         return {d: dict(edges) for d, edges in edges_by_depth.items()}

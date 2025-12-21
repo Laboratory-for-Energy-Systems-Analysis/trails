@@ -94,6 +94,26 @@ class TemporalDistribution:
         if weights.sum() <= 0.0:
             return iter(())
 
+        # ------------------------------------------------------------
+        # 2) Optional offset-dependent scaling (applies to weights)
+        #    Then renormalize.
+        # ------------------------------------------------------------
+        mode = (getattr(t, "scale_mode", None) or "").strip()
+        if mode:
+            # Apply scale factors to weights
+            scaled = np.empty_like(weights, dtype=float)
+            for i, k in enumerate(offsets):
+                # scale_factor raises ValueError for unknown modes (desired by tests)
+                sf = float(self.scale_factor(int(k)))
+                scaled[i] = float(weights[i]) * sf
+
+            weights = scaled
+            if float(weights.sum()) <= 0.0:
+                if debug:
+                    logger.warning("TemporalDistribution: total scaled weight <= 0 -> returning empty distribution")
+                return iter(())
+
+
 
         # ------------------------------------------------------------
         # 3) Renormalize so total mass is preserved
@@ -113,7 +133,8 @@ class TemporalDistribution:
 
     def scale_factor(self, offset: int, *, clip: Optional[Tuple[float, float]] = None) -> float:
         t = self.tex
-        mode = (getattr(t, "scale_mode", None) or "").lower()
+        raw_mode = getattr(t, "scale_mode", None)
+        mode = (raw_mode or "").strip().lower()
         if mode:
             base = float(getattr(t, "scale_base", 1.0))
             rate = float(getattr(t, "scale_rate", 0.0))

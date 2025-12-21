@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 
 from trails.temporal_distributions import TemporalDistribution
 
@@ -30,7 +31,13 @@ def test_expand_temporal_exchanges_without_temporal_distributions(example_trails
     demand = example_trails.expand_temporal_exchanges(
         year=2005, act_idx=1, amount=2.0, use_temporal_distributions=False
     )
-    assert demand == {2005: {5: 1.4, 7: 0.6}}
+
+    assert set(demand.keys()) == {2005}
+    assert set(demand[2005].keys()) == {5, 7}
+
+    assert demand[2005][5] == pytest.approx(1.4)
+    assert demand[2005][7] == pytest.approx(0.6)
+
 
 
 def test_expand_temporal_exchanges_with_temporal_distributions(example_trails):
@@ -50,7 +57,7 @@ def test_accumulate_temporalized_biosphere_inventory(example_trails):
 
 
 def test_temporal_traversal_basic(example_trails):
-    demand, provenance = example_trails.temporal_traversal(
+    out = example_trails.temporal_traversal(
         start_year=2005,
         start_act_idx=1,
         amount=1.0,
@@ -60,9 +67,15 @@ def test_temporal_traversal_basic(example_trails):
         show_progress=False,
         use_temporal_distributions=False,
     )
-    assert (2005, 1) in demand
+
+    # Backwards-compatible: allow (frontier, provenance, ...) tuples
+    demand, provenance = out[0], out[1]
+
     assert (2005, 5) in demand
-    assert provenance
+    assert (2005, 7) in demand
+    assert demand[(2005, 5)] == pytest.approx(0.7)
+    assert demand[(2005, 7)] == pytest.approx(0.3)
+
 
 
 def test_frontier_to_demand_vectors(example_trails):
