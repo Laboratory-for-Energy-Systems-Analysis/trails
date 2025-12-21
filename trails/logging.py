@@ -29,6 +29,7 @@ def configure_trails_logging(
     also_console: bool = False,
     console_level: int = logging.WARNING,
     mode: str = "w",
+    debug: bool = False,
 ) -> Path:
     """
     Configure root logging so all modules using logging.getLogger(__name__)
@@ -107,9 +108,13 @@ def configure_trails_logging(
     logging.getLogger("matplotlib").setLevel(logging.WARNING)
     logging.getLogger("numba").setLevel(logging.WARNING)
 
-    root.info("Logging configured. File=%s (level=%s) Console=%s",
-              str(log_path), logging.getLevelName(file_level),
-              logging.getLevelName(console_level) if also_console else "OFF")
+    if debug:
+        root.info(
+            "Logging configured. File=%s (level=%s) Console=%s",
+            str(log_path),
+            logging.getLevelName(file_level),
+            logging.getLevelName(console_level) if also_console else "OFF",
+        )
 
     return log_path
 

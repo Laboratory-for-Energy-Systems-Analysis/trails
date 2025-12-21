@@ -48,7 +48,7 @@ class TemporalDistribution:
     def __init__(self, tex: TemporalExchange):
         self.tex = tex
 
-    def iter_offsets_and_weights(self) -> Iterable[Tuple[int, float]]:
+    def iter_offsets_and_weights(self, debug: bool = False) -> Iterable[Tuple[int, float]]:
         """
         Yield (offset_k, weight_k) for integer offsets k in
         [offset_min, offset_max].
@@ -61,7 +61,8 @@ class TemporalDistribution:
         t = self.tex
         offsets = np.arange(t.offset_min, t.offset_max + 1, dtype=int)
         if offsets.size == 0:
-            logger.warning("TemporalDistribution: total weight <= 0 -> returning empty distribution")
+            if debug:
+                logger.warning("TemporalDistribution: total weight <= 0 -> returning empty distribution")
             return iter(())
 
         dist = t.distribution

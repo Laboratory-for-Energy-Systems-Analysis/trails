@@ -84,6 +84,7 @@ def load_matrices_from_package(
     package,
     value_dtype=np.float32,
     index_dtype=np.int32,
+    debug: bool = False,
 ) -> Tuple[sparse.COO, sparse.COO, List[str], Dict[str, int], Dict[Tuple[str, int, int], TemporalExchange], Dict[Tuple[str, int, int], TemporalExchange]]:
     """
     Collect all technosphere and biosphere exchanges across scenarios and
@@ -270,13 +271,14 @@ def load_matrices_from_package(
             shape=(n_scenarios, n_activities, n_flows),
         )
 
-    logger.info(
-        "Datapackage: loaded A shape=%s nnz=%d | B shape=%s nnz=%d | scenarios=%d | temporal_exchanges=%d",
-        getattr(A, "shape", None), int(getattr(A, "nnz", 0)),
-        getattr(B, "shape", None), int(getattr(B, "nnz", 0)),
-        len(scenario_labels),
-        len(temporal_exchanges),
-    )
+    if debug:
+        logger.info(
+            "Datapackage: loaded A shape=%s nnz=%d | B shape=%s nnz=%d | scenarios=%d | temporal_exchanges=%d",
+            getattr(A, "shape", None), int(getattr(A, "nnz", 0)),
+            getattr(B, "shape", None), int(getattr(B, "nnz", 0)),
+            len(scenario_labels),
+            len(temporal_exchanges),
+        )
 
     return A, B, scenario_labels, scenario_index, temporal_exchanges, temporal_biosphere_exchanges
 
@@ -287,6 +289,7 @@ def interpolate_to_annual(
     B: sparse.COO,
     scenario_labels: List[str],
     value_dtype=np.float32,
+    debug: bool = False,
 ):
     """
     Linearly interpolate A and B to annual slices between min and max year.
@@ -311,7 +314,8 @@ def interpolate_to_annual(
     """
     years_sorted, order = _years_and_sorted_indices(scenario_labels)
 
-    logger.info("Datapackage: discovered inventory years=%s", years_sorted)
+    if debug:
+        logger.info("Datapackage: discovered inventory years=%s", years_sorted)
 
     # Reorder A and B to chronological order
     A_sorted = A[order, :, :]
@@ -421,5 +425,4 @@ def load_indices_from_package(package):
         biosphere_indices[scenario_label] = mapping
 
     return activity_indices, biosphere_indices
-
 
