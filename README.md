@@ -17,6 +17,45 @@ and technological transitions**.
 
 ---
 
+## Usage
+
+Below is a minimal example that loads a Frictionless data package, runs a
+temporal LCA, and plots the resulting impact time series.
+
+```python
+from datapackage import Package
+
+from trails import Trails, lca, get_lcia_method_names, plot_temporal_scores
+
+# Load a Frictionless data package exported by premise (or compatible tooling)
+package = Package("path/to/datapackage.json")
+
+# Initialize the TRAILS wrapper (with optional annual interpolation)
+trails = Trails(package, interpolate_annual=True)
+
+# Pick an activity index from the metadata
+activity_indices = next(iter(trails.activity_indices.values()))
+start_act_idx = next(iter(activity_indices.keys()))
+
+# Choose an LCIA method bundled with TRAILS
+method = get_lcia_method_names(ei_version="3.11")[0]
+
+# Run a temporal LCA
+results = lca(
+    trails=trails,
+    start_year=2030,
+    start_act_idx=start_act_idx,
+    methods=[method],
+    max_depth=2,
+)
+
+# Plot temporal impact scores
+fig = plot_temporal_scores(results, trails, method_label=method)
+fig.show()
+```
+
+---
+
 ## Motivation
 
 Conventional LCA frameworks treat time implicitly or exogenously. Impacts are typically 
