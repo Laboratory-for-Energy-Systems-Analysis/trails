@@ -659,7 +659,8 @@ def _characterize_impact_years(
 
     impact_years = sorted(set(inventory_total_by_impact_year.keys()))
 
-    for impact_year in impact_years:
+    impact_iter = tqdm(impact_years, desc="Temporal LCA: impact years", unit="year")
+    for impact_year in impact_iter:
         impact_year = int(impact_year)
 
         _, _, bio_idx, _ = _get_datapackage(

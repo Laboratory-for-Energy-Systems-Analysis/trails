@@ -1,7 +1,8 @@
+import importlib
 import numpy as np
 import sparse
 
-import trails.lca as lca_module
+lca_module = importlib.import_module("trails.lca")
 
 
 class DummyLCA:
@@ -94,6 +95,7 @@ def test_lca_static_mode(monkeypatch):
         return_provenance=False,
         use_temporal_distributions=False,
     )
-    assert 2005 in result
-    assert result[2005]["scores"] == 3.0
+    impact = result["results_by_impact_year"]
+    assert 2005 in impact
+    assert impact[2005]["scores"] == 3.0
 

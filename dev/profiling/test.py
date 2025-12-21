@@ -1,0 +1,23 @@
+import logging
+from trails import Trails, lca, get_lcia_method_names, plot_temporal_scores
+from datapackage import Package
+from trails.logging import configure_trails_logging, trails_log_context
+
+configure_trails_logging(file_level=logging.DEBUG)
+
+dp = Package("../example/datapackage.json")
+trails = Trails(dp, interpolate_annual=True)
+
+methods = ["IPCC 2021 (incl. biogenic CO2) - climate change: total (incl. biogenic CO2) - global warming potential (GWP100)",]
+
+ref_year = 2050
+
+results_by_year_ICEV, provenance = lca(
+    trails,
+    start_year=ref_year,
+    start_act_idx=13,
+    methods=methods,
+    max_depth=4,
+    return_provenance=True,
+    min_amount=1e-18,
+)
