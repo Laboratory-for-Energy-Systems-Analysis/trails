@@ -97,24 +97,3 @@ def test_lca_static_mode(monkeypatch):
     assert 2005 in result
     assert result[2005]["scores"] == 3.0
 
-
-def test_compute_node_impact_intensities(monkeypatch):
-    trails = DummyTrails()
-
-    def fake_build_dp(*args, **kwargs):
-        return object(), {}, {}, []
-
-    def fake_fill_characterization_factors_matrices(*args, **kwargs):
-        return np.ones((1, 2))
-
-    monkeypatch.setattr(lca_module, "build_datapackage_for_year_from_trails", fake_build_dp)
-    monkeypatch.setattr(lca_module.bc, "LCA", DummyLCA)
-    monkeypatch.setattr(
-        lca_module, "fill_characterization_factors_matrices", fake_fill_characterization_factors_matrices
-    )
-    lca_module.use_temporal_distributions = False
-
-    result = lca_module.compute_node_impact_intensities(
-        trails=trails, nodes=[(2005, 0)], methods=["dummy"]
-    )
-    assert result[(2005, 0)] == 3.0

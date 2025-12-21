@@ -9,7 +9,6 @@ import plotly.express as px
 from plotly.subplots import make_subplots
 
 from .trails import Trails
-from .lca import compute_node_impact_intensities
 from .utils import _format_path_label, _format_path_label_with_years
 
 
@@ -809,7 +808,7 @@ def plot_temporal_sankey(
     trails: Trails,
     start_year: int,
     start_act_idx: int,
-    methods: List[str],
+    node_intensity: Optional[Dict[Tuple[int, int], float]] = None,
     top_n_paths: int | None = 30,
     title: str = "Temporal Sankey (impact-weighted, aggregated by year)",
     amount_label: str = "Impact score",
@@ -818,8 +817,6 @@ def plot_temporal_sankey(
     node_thickness: int = 20,
     node_pad: int = 15,
     font_size: int = 11,
-    remove_uncertainty: bool = True,
-    debug: bool = False,
 ):
     """
     Impact-weighted temporal Sankey, simplified:
@@ -846,8 +843,8 @@ def plot_temporal_sankey(
         Root demand year.
     start_act_idx : int
         Root activity index.
-    methods : list[str]
-        Single LCIA method to use for impact intensities.
+    node_intensity : dict[(year, act_idx), impact_score]
+        Impact intensities for each (year, activity) node.
     top_n_paths : int | None
         If None, use all paths. If int, keep only the top-N by |amount|.
     """
@@ -855,14 +852,8 @@ def plot_temporal_sankey(
     full_path_amounts = _build_full_path_amounts(provenance, start_year, start_act_idx)
     selected_paths = _select_paths(full_path_amounts, top_n_paths)
     node_keys, depth_map = _build_depth_map(selected_paths)
-
-    node_intensity = compute_node_impact_intensities(
-        trails=trails,
-        nodes=list(node_keys),
-        methods=methods,
-        remove_uncertainty=remove_uncertainty,
-        debug=debug,
-    )
+    if node_intensity is None:
+        raise ValueError("node_intensity is required; provide impact intensities keyed by (year, act_idx).")
 
     act_meta = _collect_activity_meta(trails)
     activity_label = lambda act_idx: _activity_label_from_meta(act_meta, act_idx)

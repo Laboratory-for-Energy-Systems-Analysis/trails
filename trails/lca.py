@@ -4,7 +4,6 @@ from typing import Dict, Tuple, List, Any
 from collections import defaultdict
 
 import bw2calc as bc
-import pyprind
 from tqdm.auto import tqdm
 
 
@@ -360,7 +359,7 @@ def lca_static_simple(
       includes that activity's direct biosphere and upstream biosphere
     """
     # Build datapackage for that year with biosphere enabled
-    dp, tech_idx, bio_idx, uncertain_params = build_datapackage_for_year_from_trails(
+    dp, _, bio_idx, _ = build_datapackage_for_year_from_trails(
         trails=trails,
         year=int(year),
         zero_biosphere=False,
@@ -663,7 +662,7 @@ def _characterize_impact_years(
     for impact_year in impact_years:
         impact_year = int(impact_year)
 
-        dp, tech_idx, bio_idx, uncertain_params = _get_datapackage(
+        _, _, bio_idx, _ = _get_datapackage(
             dp_cache=dp_cache,
             trails=trails,
             year=impact_year,
@@ -882,7 +881,7 @@ def lca(
         fu_demand = {int(i): float(arr[i]) for i in nz_idx}
 
         zero_bio = True
-        dp, tech_idx, bio_idx, uncertain_params = _get_datapackage(
+        dp, _, _, _ = _get_datapackage(
             dp_cache=dp_cache,
             trails=trails,
             year=solve_year,
@@ -1026,117 +1025,3 @@ def lca(
     out = {"results_by_solve_year": results_by_solve_year, "results_by_impact_year": results_by_impact_year}
     return (out, provenance) if return_provenance else out
 
-
-def compute_node_impact_intensities(
-        trails: Trails,
-        nodes: List[Tuple[int, int]],
-        methods: List[str],
-        debug: bool = False,
-) -> Dict[Tuple[int, int], float]:
-    """
-    Compute LCIA impact intensity for a set of (year, act_idx) nodes.
-
-    Impact intensity = LCIA score for 1 unit of that activity in that year,
-    including upstream supply chain (i.e., full LCA for {act_idx: 1}).
-
-    Parameters
-    ----------
-    trails : Trails
-        Trails wrapper with A/B matrices and scenario info.
-    nodes : list[(year, act_idx)]
-        Nodes for which we want impact intensities.
-    methods : list[str]
-        LCIA methods (as in fill_characterization_factors_matrices).
-        For now, we assume a single method and return a scalar per node.
-    debug : bool
-        Print debug info if True.
-
-    Returns
-    -------
-    node_intensity : dict[(year, act_idx), impact_score]
-    """
-    if not nodes:
-        return {}
-
-    if len(methods) != 1:
-        raise ValueError(
-            "compute_node_impact_intensities currently assumes a single LCIA "
-            "method. Got methods=%r" % (methods,)
-        )
-
-    # Group nodes by year
-    nodes_by_year: Dict[int, set[int]] = {}
-    for year, act in nodes:
-        year = int(year)
-        nodes_by_year.setdefault(year, set()).add(int(act))
-
-    node_intensity: Dict[Tuple[int, int], float] = {}
-
-    # Simple caches for datapackage and C matrix per year
-    dp_cache: Dict[int, Any] = {}
-    char_cache: Dict[int, Any] = {}
-
-    for year, acts in sorted(nodes_by_year.items()):
-        # 1) Datapackage for this year
-        cache_key = (year, bool(use_temporal_distributions))
-        if cache_key not in dp_cache:
-            zero_bio = use_temporal_distributions
-            dp, tech_idx, bio_idx, uncertain_params = build_datapackage_for_year_from_trails(
-                trails=trails,
-                year=year,
-                zero_biosphere=zero_bio,
-                debug=debug,
-            )
-            dp_cache[year] = (dp, tech_idx, bio_idx, uncertain_params)
-        else:
-            dp, tech_idx, bio_idx, uncertain_params = dp_cache[year]
-
-        # 2) Temporary LCA to get biosphere mapping and C matrix
-        if year not in char_cache:
-            # Use a dummy FU: all activities at 0 except maybe one,
-            # we just need biosphere_matrix_dict from bw2calc.
-            # Here we pick an arbitrary activity id if available.
-            any_act = next(iter(acts))
-            dummy_lca = bc.LCA(demand={any_act: 1.0}, data_objs=[dp])
-            dummy_lca.lci()  # build technosphere & biosphere matrices
-
-            biosphere_matrix_dict = dummy_lca.dicts.biosphere
-
-            # bio_idx keys: (name, compartment, subcompartment, unit) -> idx
-            # We need a simplified mapping (name, comp, subcomp) -> idx
-            _, _, bio_meta = None, None, None
-
-            # We can re-use the biosphere_indices built in dp helper,
-            # but we only have bio_idx here if we return it from helper.
-            # However, build_datapackage_for_year_from_trails already returned bio_idx:
-            #   biosphere_indices: Dict[(name, comp, subcomp, unit), int]
-            bio_idx = dp_cache[year][2]
-
-            biosphere_dict_simple = {
-                (name, comp, subcomp): idx
-                for (name, comp, subcomp, unit), idx in bio_idx.items()
-            }
-
-            C = fill_characterization_factors_matrices(
-                methods=methods,
-                biosphere_matrix_dict=biosphere_matrix_dict,
-                biosphere_dict=biosphere_dict_simple,
-                debug=debug,
-            )
-            char_cache[year] = C
-        else:
-            C = char_cache[year]
-
-        # 3) For each activity in this year, run a 1-unit LCA
-        for act in sorted(acts):
-            lca_node = bc.LCA(demand={act: 1.0}, data_objs=[dp])
-            lca_node.lci()
-            inv = lca_node.inventory  # biosphere vector
-
-            scores_vec = C.dot(inv)
-            # Single method -> scalar
-            score_scalar = float(np.sum(scores_vec))
-
-            node_intensity[(year, act)] = score_scalar
-
-    return node_intensity
