@@ -393,19 +393,33 @@ def lca(
       - demand_by_first_level_child: technosphere demand split by first-level child under the FU
       - injected_supply: extra "supply pulses" to book direct biosphere without re-solving technosphere
       - injected_supply_by_first_level_child: same, but attributed to a root bucket
-      - FU_DIRECT_ROOT: sentinel bucket for FU-direct biosphere only (never upstream technosphere)
+
+    IMPORTANT BEHAVIOR (FIX):
+      - FU-direct biosphere is attributed to the *FU activity index* (fu0),
+        not to a synthetic bucket like -1.
+      - Any legacy occurrences of -1 are normalized into fu0 during bookkeeping.
     """
 
     import numpy as np
     import bw2calc as bc
     from collections import defaultdict
 
-    FU_DIRECT_ROOT = -1
+    # Legacy sentinel (may still appear in some provenance artifacts)
+    LEGACY_FU_DIRECT_ROOT = -1
+
     ROOT_CLOSURE_TOL = 1e-12
 
     fu0 = int(start_act_idx)
     y0 = int(start_year)
     amt0 = float(amount)
+
+    # All FU-direct biosphere will be booked under this root:
+    FU_DIRECT_ROOT = fu0
+
+    def _normalize_root(r: int) -> int:
+        """Collapse any legacy sentinel to FU activity index."""
+        r = int(r)
+        return fu0 if r == LEGACY_FU_DIRECT_ROOT else r
 
     # ---------------------------------------------------------
     # STATIC SHORTCUT
@@ -463,11 +477,21 @@ def lca(
     # -----------------------------
     # 1a) Inject FU self-supply for FU-direct biosphere only
     # -----------------------------
+    # We keep the injected supply pulse on (y0, fu0) ...
     injected_supply_by_year_act[(y0, fu0)] = float(injected_supply_by_year_act.get((y0, fu0), 0.0)) + amt0
+
+    # ... but provenance root MUST be fu0 (not -1).
     injected_supply_prov_by_year_act.setdefault((y0, fu0), {})
     injected_supply_prov_by_year_act[(y0, fu0)][FU_DIRECT_ROOT] = (
         float(injected_supply_prov_by_year_act[(y0, fu0)].get(FU_DIRECT_ROOT, 0.0)) + amt0
     )
+
+    # If any earlier logic injected the legacy sentinel, normalize it immediately.
+    if LEGACY_FU_DIRECT_ROOT in injected_supply_prov_by_year_act[(y0, fu0)]:
+        injected_supply_prov_by_year_act[(y0, fu0)][FU_DIRECT_ROOT] = (
+            float(injected_supply_prov_by_year_act[(y0, fu0)].get(FU_DIRECT_ROOT, 0.0))
+            + float(injected_supply_prov_by_year_act[(y0, fu0)].pop(LEGACY_FU_DIRECT_ROOT))
+        )
 
     # -----------------------------
     # 1b) Frontier -> per-year demand vectors
@@ -479,7 +503,7 @@ def lca(
     # 1c) Rooted frontier using provenance paths
     # -----------------------------
     rooted_frontier = defaultdict(float)
-    roots_seen = set([FU_DIRECT_ROOT])
+    roots_seen = set()  # <-- do not pre-seed with -1; FU_DIRECT_ROOT is a real activity idx now
 
     def _iter_path_nodes(path):
         """
@@ -495,13 +519,11 @@ def lca(
         if isinstance(path, (int, np.integer)):
             yield int(path)
             return
-        # path expected iterable
         try:
             for node in path:
                 if isinstance(node, (int, np.integer)):
                     yield int(node)
                 elif isinstance(node, (tuple, list)) and len(node) >= 2:
-                    # (year, act)
                     yield int(node[1])
         except TypeError:
             return
@@ -510,14 +532,11 @@ def lca(
         """
         FIRST-LEVEL CHILD root:
           return the first act in the path that is NOT the FU activity.
-        This prevents upstream contributions being incorrectly attributed to the FU root bucket.
         """
-        # If provenance stores root directly
         if isinstance(path, (int, np.integer)):
             r = int(path)
             return r if r != fu_act else int(fallback_root)
 
-        # If provenance stores a path, skip FU occurrences
         for act in _iter_path_nodes(path):
             if act != fu_act:
                 return int(act)
@@ -532,7 +551,6 @@ def lca(
         prov = provenance.get((year, act), {})
 
         if not prov:
-            # If no provenance, do not dump into FU; attribute to activity itself.
             rooted_frontier[(year, act, act)] += total_amt
             roots_seen.add(act)
             continue
@@ -548,28 +566,29 @@ def lca(
 
         residual = total_amt - prov_sum
         if abs(residual) > ROOT_CLOSURE_TOL:
-            # put residual on "self" (least misleading) instead of FU
             rooted_frontier[(year, act, act)] += residual
             roots_seen.add(act)
 
     # Include roots that appear only in injected supply provenance
     for (_y, _a), roots_map in injected_supply_prov_by_year_act.items():
         for r in roots_map.keys():
-            roots_seen.add(int(r))
+            roots_seen.add(_normalize_root(int(r)))
 
     roots_seen = sorted(roots_seen)
 
     # Convert rooted frontier to per-year demand vectors by root (technosphere only)
     n_activities = int(trails.A.shape[1])
     dtype = trails.value_dtype
-    f_by_year_by_root = {r: {} for r in roots_seen if r != FU_DIRECT_ROOT}
+    f_by_year_by_root = {r: {} for r in roots_seen}
 
     for (year, act, root_act), amt in rooted_frontier.items():
         y = int(year)
         a = int(act)
         r = int(root_act)
-        if r == FU_DIRECT_ROOT:
-            continue
+        # Technosphere rooting should never use the legacy FU-direct sentinel;
+        # but normalize defensively anyway.
+        r = _normalize_root(r)
+
         if y not in f_by_year_by_root[r]:
             f_by_year_by_root[r][y] = np.zeros(n_activities, dtype=dtype)
         f_by_year_by_root[r][y][a] += dtype(amt)
@@ -585,37 +604,6 @@ def lca(
 
     inventory_total_by_impact_year: Dict[int, np.ndarray] = {}
     inventory_by_root_by_impact_year: Dict[int, Dict[int, np.ndarray]] = defaultdict(dict)
-
-    # -----------------------------
-    # Helpers
-    # -----------------------------
-    def _get_C_static(year: int, lca_obj, bio_idx: Dict[tuple, int], zero_bio: bool):
-        key = (int(year), bool(zero_bio), "static_bw_order")
-        if key in char_cache:
-            return char_cache[key]
-
-        bw_bio_map = lca_obj.dicts.biosphere
-        biosphere_matrix_dict = {int(flow_id): int(pos) for flow_id, pos in bw_bio_map.items()}
-
-        biosphere_dict_simple = {
-            (name, comp, subcomp): int(flow_id)
-            for (name, comp, subcomp, unit), flow_id in bio_idx.items()
-        }
-
-        C = fill_characterization_factors_matrices(
-            methods=methods,
-            biosphere_matrix_dict=biosphere_matrix_dict,
-            biosphere_dict=biosphere_dict_simple,
-        )
-        char_cache[key] = C
-        return C
-
-    def _score_from_lca_inventory(lca_obj, C) -> float:
-        inv = lca_obj.inventory
-        inv_vec = np.asarray(inv.sum(axis=1)).reshape((-1, 1))
-        if C.shape[1] != inv_vec.shape[0]:
-            raise ValueError(f"C columns ({C.shape[1]}) != inventory rows ({inv_vec.shape[0]})")
-        return float(np.sum(C.dot(inv_vec)))
 
     # -----------------------------
     # 2) Solve-year loop
@@ -710,12 +698,13 @@ def lca(
                 use_temporal_distributions=True,
             )
 
+        # Build injected supply by root, normalizing legacy sentinel -> fu0
         injected_supply_by_first_level_child: Dict[int, Dict[int, float]] = {}
         for (y, act), roots_map in injected_supply_prov_by_year_act.items():
             if int(y) != solve_year:
                 continue
             for r, share in roots_map.items():
-                r = int(r)
+                r = _normalize_root(int(r))
                 share = float(share)
                 if abs(share) <= float(min_amount):
                     continue
@@ -724,7 +713,7 @@ def lca(
                     injected_supply_by_first_level_child[r].get(int(act), 0.0) + share
                 )
 
-        # Book FU-direct only inventory to FU_DIRECT_ROOT bucket
+        # Book FU-direct inventory under FU activity root (fu0)
         fu_direct_injected = injected_supply_by_first_level_child.get(FU_DIRECT_ROOT, {})
         if fu_direct_injected:
             trails.accumulate_temporalized_biosphere_inventory(
@@ -735,7 +724,7 @@ def lca(
                 use_temporal_distributions=True,
             )
 
-        # Per-root inventories (upstream technosphere)
+        # Per-root inventories (upstream technosphere and any injected shares attributed to that root)
         for root_idx, root_demand in demand_by_first_level_child.items():
             lca_root = bc.LCA(demand=root_demand, data_objs=[dp])
             lca_root.lci()
@@ -758,7 +747,6 @@ def lca(
                 use_temporal_distributions=True,
             )
 
-            # add injected shares attributed to this root (if any)
             root_injected = injected_supply_by_first_level_child.get(int(root_idx), {})
             if root_injected:
                 trails.accumulate_temporalized_biosphere_inventory(
@@ -769,16 +757,21 @@ def lca(
                     use_temporal_distributions=True,
                 )
 
+        # For diagnostics: include all roots that exist either via rooted demand or injected supply (incl. FU_DIRECT_ROOT)
+        all_diag_roots = set(int(k) for k in demand_by_first_level_child.keys()) | set(
+            int(k) for k in injected_supply_by_first_level_child.keys()
+        )
+
         results_by_solve_year[solve_year] = {
             "fu_activity": fu0,
-            "FU_DIRECT_ROOT": FU_DIRECT_ROOT,
+            "FU_DIRECT_ROOT": FU_DIRECT_ROOT,  # now equals fu0
             "fu_demand": fu_demand,
             "demand_by_first_level_child": demand_by_first_level_child,
             "injected_supply": injected_supply,
             "injected_supply_by_first_level_child": injected_supply_by_first_level_child,
             "lca": lca_total,
             "scores": 0.0,
-            "scores_by_first_level_child": {int(k): 0.0 for k in demand_by_first_level_child.keys()},
+            "scores_by_first_level_child": {int(k): 0.0 for k in sorted(all_diag_roots)},
         }
 
     # -----------------------------
@@ -826,12 +819,15 @@ def lca(
         )
         total_score = float(np.sum(C.dot(inv_total.reshape((-1, 1)))))
 
+        # Merge scores by root, normalizing any legacy -1 into fu0
         scores_by_first_level_child: Dict[int, float] = {}
         for root_idx, inv_map in inventory_by_root_by_impact_year.items():
+            root_norm = _normalize_root(int(root_idx))
             inv_root = inv_map.get(impact_year, np.zeros(n_flows, dtype=trails.value_dtype))
             s = float(np.sum(C.dot(inv_root.reshape((-1, 1)))))
-            if abs(s) > float(min_amount):
-                scores_by_first_level_child[int(root_idx)] = s
+            if abs(s) <= float(min_amount):
+                continue
+            scores_by_first_level_child[root_norm] = scores_by_first_level_child.get(root_norm, 0.0) + s
 
         results_by_impact_year[impact_year] = {
             "scores": total_score,
