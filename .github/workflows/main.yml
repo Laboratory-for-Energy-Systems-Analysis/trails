@@ -58,13 +58,6 @@ jobs:
           pip install pytest pytest-forked
           pip install -e . --verbose
 
-      - name: Set up test database
-        env:
-          EI_USERNAME: ${{ secrets.EI_USERNAME }}
-          EI_PASSWORD: ${{ secrets.EI_PASSWORD }}
-        run: |
-          python tests/setup_testdb.py
-
       # Create debug dir in a cross-platform way
       - name: Create debug directory
         run: python -c "import pathlib; p=pathlib.Path('pytest-debug'); p.mkdir(parents=True, exist_ok=True); print('Created', p.resolve())"
