@@ -57,6 +57,89 @@ def _iter_inventory_resources(package, filename: str):
             yield year_label, res
 
 
+def _parse_temporal_exchange_row(row) -> TemporalExchange | None:
+    dist_code = _parse_intish_or_none(row.get("temporal_distribution"))
+    if dist_code is None:
+        return None
+
+    loc = _parse_float_or_none(row.get("temporal_loc"))
+    scale = _parse_float_or_none(row.get("temporal_scale"))
+    off_min = _parse_intish_or_none(row.get("temporal_min")) or 0
+    off_max = _parse_intish_or_none(row.get("temporal_max")) or 0
+
+    scale_mode = row.get("temporal_scale_mode")
+    scale_base = _parse_float_or_none(row.get("temporal_scale_base", 1.0))
+    scale_rate = _parse_float_or_none(row.get("temporal_scale_rate", 0.0))
+
+    return TemporalExchange(
+        distribution=dist_code,
+        loc=loc,
+        scale=scale,
+        offset_min=int(off_min),
+        offset_max=int(off_max),
+        scale_mode=scale_mode,
+        scale_base=scale_base,
+        scale_rate=scale_rate,
+    )
+
+
+def _build_sparse_matrix(coords, data, shape, idx_dtype, val_dtype) -> sparse.COO:
+    if data:
+        coords_arrays = [np.array(axis, dtype=idx_dtype) for axis in coords]
+        return sparse.COO(
+            coords=coords_arrays,
+            data=np.array(data, dtype=val_dtype),
+            shape=shape,
+        )
+
+    empty_coords = [np.array([], dtype=idx_dtype) for _ in coords]
+    return sparse.COO(
+        coords=empty_coords,
+        data=np.array([], dtype=val_dtype),
+        shape=shape,
+    )
+
+
+def _parse_a_exchange_row(row, scenario_label, t, temporal_exchanges, A_coords, max_indices):
+    act_idx = int(row["index of activity"])
+    prod_idx = int(row["index of product"])
+    value = float(row["value"])
+
+    flip_flag = _parse_intish_or_none(row.get("flip")) or 0
+    if flip_flag == 1:
+        value = -value
+
+    A_coords["t"].append(t)
+    A_coords["i"].append(act_idx)
+    A_coords["j"].append(prod_idx)
+    A_coords["data"].append(value)
+
+    max_indices["max_activity_idx_for_A"] = max(max_indices["max_activity_idx_for_A"], act_idx)
+    max_indices["max_product_idx"] = max(max_indices["max_product_idx"], prod_idx)
+
+    tex = _parse_temporal_exchange_row(row)
+    if tex is not None:
+        temporal_exchanges[(scenario_label, act_idx, prod_idx)] = tex
+
+
+def _parse_b_exchange_row(row, scenario_label, t, temporal_biosphere_exchanges, B_coords, max_indices):
+    act_idx = int(row["index of activity"])
+    flow_idx = int(row["index of biosphere flow"])
+    value = float(row["value"])
+
+    B_coords["t"].append(t)
+    B_coords["i"].append(act_idx)
+    B_coords["j"].append(flow_idx)
+    B_coords["data"].append(value)
+
+    max_indices["max_activity_idx_for_B"] = max(max_indices["max_activity_idx_for_B"], act_idx)
+    max_indices["max_flow_idx"] = max(max_indices["max_flow_idx"], flow_idx)
+
+    tex = _parse_temporal_exchange_row(row)
+    if tex is not None:
+        temporal_biosphere_exchanges[(scenario_label, act_idx, flow_idx)] = tex
+
+
 
 def _label_to_year(label: str) -> int:
     """
@@ -111,165 +194,70 @@ def load_matrices_from_package(
     temporal_exchanges: Dict[Tuple[str, int, int], TemporalExchange] = {}
     temporal_biosphere_exchanges: Dict[Tuple[str, int, int], TemporalExchange] = {}
 
-    # Collect triplets for A and B: (scenario, row, col, value)
-    A_t, A_i, A_j, A_data = [], [], [], []
-    B_t, B_i, B_j, B_data = [], [], [], []
+    A_coords = {"t": [], "i": [], "j": [], "data": []}
+    B_coords = {"t": [], "i": [], "j": [], "data": []}
 
-    max_activity_idx_for_A = -1
-    max_product_idx = -1
-    max_activity_idx_for_B = -1
-    max_flow_idx = -1
+    max_indices = {
+        "max_activity_idx_for_A": -1,
+        "max_product_idx": -1,
+        "max_activity_idx_for_B": -1,
+        "max_flow_idx": -1,
+    }
 
     for scenario_label, res in _iter_inventory_resources(package, "A_matrix.csv"):
 
         t = get_scenario_idx(scenario_label)
         for row in res.iter(keyed=True):
-            act_idx = int(row["index of activity"])
-            prod_idx = int(row["index of product"])
-            value = float(row["value"])
-
-            # Apply sign flip if requested by the datapackage row
-            flip_flag = _parse_intish_or_none(row.get("flip")) or 0
-            if flip_flag == 1:
-                value = -value
-
-            A_t.append(t)
-            A_i.append(act_idx)
-            A_j.append(prod_idx)
-            A_data.append(value)
-
-            if act_idx > max_activity_idx_for_A:
-                max_activity_idx_for_A = act_idx
-            if prod_idx > max_product_idx:
-                max_product_idx = prod_idx
-
-            td_raw = row.get("temporal_distribution")
-            if td_raw is not None and str(td_raw).strip() != "":
-                try:
-                    dist_code = int(float(td_raw))
-                except ValueError:
-                    dist_code = None
-            else:
-                dist_code = None
-
-            if dist_code is not None:
-                loc = _parse_float_or_none(row.get("temporal_loc"))
-                scale = _parse_float_or_none(row.get("temporal_scale"))
-                off_min = _parse_intish_or_none(row.get("temporal_min")) or 0
-                off_max = _parse_intish_or_none(row.get("temporal_max")) or 0
-
-                scale_mode = row.get("temporal_scale_mode")
-                scale_base = _parse_float_or_none(row.get("temporal_scale_base", 1.0))
-                scale_rate = _parse_float_or_none(row.get("temporal_scale_rate", 0.0))
-
-                temporal_exchanges[(scenario_label, act_idx, prod_idx)] = TemporalExchange(
-                    distribution=dist_code,
-                    loc=loc,
-                    scale=scale,
-                    offset_min=int(off_min),
-                    offset_max=int(off_max),
-                    scale_mode=scale_mode,
-                    scale_base=scale_base,
-                    scale_rate=scale_rate,
-                )
+            _parse_a_exchange_row(
+                row=row,
+                scenario_label=scenario_label,
+                t=t,
+                temporal_exchanges=temporal_exchanges,
+                A_coords=A_coords,
+                max_indices=max_indices,
+            )
 
     # ---------- Load all B_matrix.csv ----------
     for scenario_label, res in _iter_inventory_resources(package, "B_matrix.csv"):
         t = get_scenario_idx(scenario_label)
         for row in res.iter(keyed=True):
-            act_idx = int(row["index of activity"])
-            flow_idx = int(row["index of biosphere flow"])
-            value = float(row["value"])
-
-            B_t.append(t)
-            B_i.append(act_idx)
-            B_j.append(flow_idx)
-            B_data.append(value)
-
-            if act_idx > max_activity_idx_for_B:
-                max_activity_idx_for_B = act_idx
-            if flow_idx > max_flow_idx:
-                max_flow_idx = flow_idx
-
-            # Optional temporal metadata for biosphere exchanges (same columns as A_matrix.csv)
-            td_raw = row.get("temporal_distribution")
-            if td_raw is not None and str(td_raw).strip() != "":
-                dist_code = _parse_intish_or_none(td_raw)
-            else:
-                dist_code = None
-
-            if dist_code is not None:
-                loc = _parse_float_or_none(row.get("temporal_loc"))
-                scale = _parse_float_or_none(row.get("temporal_scale"))
-                off_min = _parse_intish_or_none(row.get("temporal_min")) or 0
-                off_max = _parse_intish_or_none(row.get("temporal_max")) or 0
-
-                scale_mode = row.get("temporal_scale_mode")
-                scale_base = _parse_float_or_none(row.get("temporal_scale_base", 1.0))
-                scale_rate = _parse_float_or_none(row.get("temporal_scale_rate", 0.0))
-
-                temporal_biosphere_exchanges[(scenario_label, act_idx, flow_idx)] = TemporalExchange(
-                    distribution=dist_code,
-                    loc=loc,
-                    scale=scale,
-                    offset_min=int(off_min),
-                    offset_max=int(off_max),
-                    scale_mode=scale_mode,
-                    scale_base=scale_base,
-                    scale_rate=scale_rate,
-                )
+            _parse_b_exchange_row(
+                row=row,
+                scenario_label=scenario_label,
+                t=t,
+                temporal_biosphere_exchanges=temporal_biosphere_exchanges,
+                B_coords=B_coords,
+                max_indices=max_indices,
+            )
 
     # ---------- Deduce shapes ----------
     n_scenarios = len(scenario_labels)
-    n_activities = max(max_activity_idx_for_A, max_activity_idx_for_B) + 1
-    n_products = max_product_idx + 1 if max_product_idx >= 0 else 0
-    n_flows = max_flow_idx + 1 if max_flow_idx >= 0 else 0
+    n_activities = max(
+        max_indices["max_activity_idx_for_A"],
+        max_indices["max_activity_idx_for_B"],
+    ) + 1
+    n_products = max_indices["max_product_idx"] + 1 if max_indices["max_product_idx"] >= 0 else 0
+    n_flows = max_indices["max_flow_idx"] + 1 if max_indices["max_flow_idx"] >= 0 else 0
 
     idx_dtype = index_dtype
     val_dtype = value_dtype
 
     # ---------- Build sparse 3D matrices ----------
-    if A_data:
-        A = sparse.COO(
-            coords=[
-                np.array(A_t, dtype=idx_dtype),
-                np.array(A_i, dtype=idx_dtype),
-                np.array(A_j, dtype=idx_dtype),
-            ],
-            data=np.array(A_data, dtype=val_dtype),
-            shape=(n_scenarios, n_activities, n_products),
-        )
-    else:
-        A = sparse.COO(
-            coords=[
-                np.array([], dtype=idx_dtype),
-                np.array([], dtype=idx_dtype),
-                np.array([], dtype=idx_dtype),
-            ],
-            data=np.array([], dtype=val_dtype),
-            shape=(n_scenarios, n_activities, n_products),
-        )
+    A = _build_sparse_matrix(
+        coords=[A_coords["t"], A_coords["i"], A_coords["j"]],
+        data=A_coords["data"],
+        shape=(n_scenarios, n_activities, n_products),
+        idx_dtype=idx_dtype,
+        val_dtype=val_dtype,
+    )
 
-    if B_data:
-        B = sparse.COO(
-            coords=[
-                np.array(B_t, dtype=idx_dtype),
-                np.array(B_i, dtype=idx_dtype),
-                np.array(B_j, dtype=idx_dtype),
-            ],
-            data=np.array(B_data, dtype=val_dtype),
-            shape=(n_scenarios, n_activities, n_flows),
-        )
-    else:
-        B = sparse.COO(
-            coords=[
-                np.array([], dtype=idx_dtype),
-                np.array([], dtype=idx_dtype),
-                np.array([], dtype=idx_dtype),
-            ],
-            data=np.array([], dtype=val_dtype),
-            shape=(n_scenarios, n_activities, n_flows),
-        )
+    B = _build_sparse_matrix(
+        coords=[B_coords["t"], B_coords["i"], B_coords["j"]],
+        data=B_coords["data"],
+        shape=(n_scenarios, n_activities, n_flows),
+        idx_dtype=idx_dtype,
+        val_dtype=val_dtype,
+    )
 
     if debug:
         logger.info(
@@ -317,17 +305,33 @@ def interpolate_to_annual(
     if debug:
         logger.info("Datapackage: discovered inventory years=%s", years_sorted)
 
-    # Reorder A and B to chronological order
     A_sorted = A[order, :, :]
     B_sorted = B[order, :, :]
 
+    new_As, new_Bs, new_labels = _interpolate_annual_slices(
+        years_sorted=years_sorted,
+        A_sorted=A_sorted,
+        B_sorted=B_sorted,
+        val_dtype=value_dtype,
+    )
+
+    A_interp = sparse.stack(new_As, axis=0).astype(value_dtype)
+    B_interp = sparse.stack(new_Bs, axis=0).astype(value_dtype)
+    new_index = {label: i for i, label in enumerate(new_labels)}
+
+    return A_interp, B_interp, new_labels, new_index
+
+
+def _interpolate_annual_slices(
+    years_sorted: np.ndarray,
+    A_sorted: sparse.COO,
+    B_sorted: sparse.COO,
+    val_dtype,
+) -> tuple[list[sparse.COO], list[sparse.COO], list[str]]:
     new_As = []
     new_Bs = []
     new_labels: List[str] = []
 
-    val_dtype = value_dtype
-
-    # Start with the first year exactly as in the data
     y0 = years_sorted[0]
     A0 = A_sorted[0].astype(val_dtype)
     B0 = B_sorted[0].astype(val_dtype)
@@ -336,7 +340,6 @@ def interpolate_to_annual(
     new_Bs.append(B0)
     new_labels.append(str(y0))
 
-    # Loop over each subsequent *provided* year
     for k in range(len(years_sorted) - 1):
         y0 = years_sorted[k]
         y1 = years_sorted[k + 1]
@@ -349,49 +352,28 @@ def interpolate_to_annual(
         if dt <= 0:
             continue
 
-        # Fill intermediate years y0+1, ..., y1 (inclusive)
         for y in range(y0 + 1, y1 + 1):
             w = val_dtype((y - y0) / dt)
             one_minus_w = val_dtype(1.0) - w
 
-            A_y = one_minus_w * A0 + w * A1
-            B_y = one_minus_w * B0 + w * B1
-
-            A_y = A_y.astype(val_dtype)
-            B_y = B_y.astype(val_dtype)
+            A_y = (one_minus_w * A0 + w * A1).astype(val_dtype)
+            B_y = (one_minus_w * B0 + w * B1).astype(val_dtype)
 
             new_As.append(A_y)
             new_Bs.append(B_y)
             new_labels.append(str(y))
 
-
-    A_interp = sparse.stack(new_As, axis=0).astype(val_dtype)
-    B_interp = sparse.stack(new_Bs, axis=0).astype(val_dtype)
-    new_index = {label: i for i, label in enumerate(new_labels)}
-
-    return A_interp, B_interp, new_labels, new_index
+    return new_As, new_Bs, new_labels
 
 
-def load_indices_from_package(package):
-    """
-    Load scenario-specific dictionaries mapping index -> activity metadata
-    and index -> biosphere-flow metadata.
-
-    Returns
-    -------
-    activity_indices : {scenario_label: {index: row_dict}}
-    biosphere_indices : {scenario_label: {index: row_dict}}
-    """
+def _load_activity_indices(package):
     activity_indices: Dict[str, Dict[int, dict]] = {}
-    biosphere_indices: Dict[str, Dict[int, dict]] = {}
 
-    # ---- Activities (A_matrix_index.csv) ----
     for scenario_label, res in _iter_inventory_resources(package, "A_matrix_index.csv"):
         rows = res.read(keyed=True)
 
         mapping = {}
         for row in rows:
-            # headers: name;reference product;unit;location;index
             try:
                 idx = int(row["index"])
             except (KeyError, TypeError, ValueError):
@@ -406,13 +388,17 @@ def load_indices_from_package(package):
 
         activity_indices[scenario_label] = mapping
 
-    # ---- Biosphere flows (B_matrix_index.csv) ----
+    return activity_indices
+
+
+def _load_biosphere_indices(package):
+    biosphere_indices: Dict[str, Dict[int, dict]] = {}
+
     for scenario_label, res in _iter_inventory_resources(package, "B_matrix_index.csv"):
         rows = res.read(keyed=True)
 
         mapping = {}
         for row in rows:
-            # headers: name;compartment;subcompartment;unit;index
             idx = int(row["index"])
 
             mapping[idx] = {
@@ -424,5 +410,19 @@ def load_indices_from_package(package):
 
         biosphere_indices[scenario_label] = mapping
 
-    return activity_indices, biosphere_indices
+    return biosphere_indices
 
+
+def load_indices_from_package(package):
+    """
+    Load scenario-specific dictionaries mapping index -> activity metadata
+    and index -> biosphere-flow metadata.
+
+    Returns
+    -------
+    activity_indices : {scenario_label: {index: row_dict}}
+    biosphere_indices : {scenario_label: {index: row_dict}}
+    """
+    activity_indices = _load_activity_indices(package)
+    biosphere_indices = _load_biosphere_indices(package)
+    return activity_indices, biosphere_indices
