@@ -8,6 +8,7 @@ import pyprind
 
 from .trails import Trails
 from .lcia import fill_characterization_factors_matrices
+from .temporal_distributions import TemporalDistribution
 
 import logging
 logger = logging.getLogger(__name__)
@@ -31,6 +32,8 @@ def build_datapackage_for_year_from_trails(
     trails: Trails,
     year: int,
     zero_biosphere: bool = False,
+    collapse_bio_temporal_scaling: bool = False,
+    collapse_tech_temporal_scaling: bool = False
 ):
     """
     Build a bw_processing.Datapackage for a given calendar year
@@ -73,6 +76,23 @@ def build_datapackage_for_year_from_trails(
     A_t = trails.A[t, :, :]  # sparse.COO (activities x products)
     B_t = trails.B[t, :, :]  # sparse.COO (activities x flows)
 
+    def _ij_from_coords(X_t):
+        """
+        Return (i_idx, j_idx) from a sparse.COO with either:
+          - 3D coords: [t, i, j]
+          - 2D coords: [i, j]
+        """
+        coords = X_t.coords
+        if coords.shape[0] == 3:
+            i_idx = np.asarray(coords[1], dtype=np.int64)
+            j_idx = np.asarray(coords[2], dtype=np.int64)
+        elif coords.shape[0] == 2:
+            i_idx = np.asarray(coords[0], dtype=np.int64)
+            j_idx = np.asarray(coords[1], dtype=np.int64)
+        else:
+            raise ValueError(f"Unsupported coords ndim={coords.shape[0]} for sparse array")
+        return i_idx, j_idx
+
     # ------------------------------------------------------------------
     # 2) Choose metadata year: prefer exact, else nearest with warning
     # ------------------------------------------------------------------
@@ -88,6 +108,42 @@ def build_datapackage_for_year_from_trails(
     # 3) Build technosphere entries from A_t
     # ------------------------------------------------------------------
     A_signed = A_t.data
+
+    # --- Optional: collapse temporal scaling metadata into the static A coefficients ---
+    if collapse_tech_temporal_scaling:
+        A_act_idx, A_prod_idx = _ij_from_coords(A_t)
+
+        multipliers_A = np.ones_like(A_signed, dtype=np.float64)
+
+        # Use template year for metadata lookup (same policy as Trails)
+        template_year = trails._map_year_to_template_year(int(year))
+
+        for n in range(len(A_signed)):
+            act = int(A_act_idx[n])
+            prod = int(A_prod_idx[n])
+
+            # Skip diagonal production exchange if present (same logic as traversal)
+            # NOTE: keep consistent with your A convention; adjust if needed.
+            if prod == act and abs(float(A_signed[n])) == 1.0:
+                continue
+
+            tex = trails._get_tech_temporal_exchange(int(year), act, prod)
+            if tex is None:
+                continue
+
+            td = TemporalDistribution(tex)
+            pairs = list(td.iter_offsets_and_weights())
+            if not pairs:
+                multipliers_A[n] = 0.0
+                continue
+
+            # Expected scaling under the temporal distribution
+            m = 0.0
+            for offset, w in pairs:
+                m += float(w) * float(td.scale_factor(offset))
+            multipliers_A[n] = float(m)
+
+        A_signed = np.asarray(A_signed, dtype=np.float64) * multipliers_A
 
     # Brightway convention via bw_processing:
     # - data must be non-negative
@@ -108,11 +164,44 @@ def build_datapackage_for_year_from_trails(
     # 4) Build biosphere entries from B_t
     # ------------------------------------------------------------------
 
-    B_data = B_t.data
-    data_B = np.asarray(B_data, dtype=np.float64)  # or trails.value_dtype if you prefer
+    B_signed = B_t.data.astype(np.float64, copy=False)
+
+    # --- Optional: collapse temporal scaling metadata into the static B coefficients ---
+    if collapse_bio_temporal_scaling and (not zero_biosphere):
+        # We need (act, flow) coordinates aligned with B_signed
+        B_act_idx, B_flow_idx = _ij_from_coords(B_t)
+
+        multipliers = np.ones_like(B_signed, dtype=np.float64)
+
+        # Use template year for metadata lookup, consistent with Trails design
+        template_year = trails._map_year_to_template_year(int(year))
+
+        for i in range(len(B_signed)):
+            act = int(B_act_idx[i])
+            flow = int(B_flow_idx[i])
+
+            tex = trails._get_bio_temporal_exchange(int(year), act, flow)
+            if tex is None:
+                continue
+
+            td = TemporalDistribution(tex)
+
+            m = 0.0
+            for offset, weight in td.iter_offsets_and_weights():
+                m += float(weight) * float(td.scale_factor(int(offset)))
+
+            # If something goes wrong, fall back to 1.0 instead of zeroing the exchange
+            multipliers[i] = m if (np.isfinite(m) and m > 0.0) else 1.0
+
+        B_signed = B_signed * multipliers
+
+    # bw_processing convention: biosphere also needs abs+flip (same as technosphere)
+    flip_B = (B_signed < 0)
+    data_B = np.abs(B_signed)
+
     if zero_biosphere:
         data_B = np.zeros_like(data_B)
-    flip_B = None
+        flip_B = np.zeros_like(flip_B, dtype=bool)
 
     # ------------------------------------------------------------------
     # 5) SAFETY CHECK: matrix indices compatible with metadata
@@ -122,22 +211,6 @@ def build_datapackage_for_year_from_trails(
 
     # ---- Extract index vectors from sparse coords (COO: coords[0]=t, coords[1]=i, coords[2]=j) ----
 
-    def _ij_from_coords(X_t):
-        """
-        Return (i_idx, j_idx) from a sparse.COO with either:
-          - 3D coords: [t, i, j]
-          - 2D coords: [i, j]
-        """
-        coords = X_t.coords
-        if coords.shape[0] == 3:
-            i_idx = np.asarray(coords[1], dtype=np.int64)
-            j_idx = np.asarray(coords[2], dtype=np.int64)
-        elif coords.shape[0] == 2:
-            i_idx = np.asarray(coords[0], dtype=np.int64)
-            j_idx = np.asarray(coords[1], dtype=np.int64)
-        else:
-            raise ValueError(f"Unsupported coords ndim={coords.shape[0]} for sparse array")
-        return i_idx, j_idx
 
     A_act_idx, A_prod_idx = _ij_from_coords(A_t)  # act, prod
     B_act_idx, B_flow_idx = _ij_from_coords(B_t)  # act, flow
@@ -236,6 +309,67 @@ def build_datapackage_for_year_from_trails(
 
     return dp, technosphere_indices, biosphere_indices, uncertain_parameters
 
+
+def lca_static_simple(
+    trails: Trails,
+    year: int,
+    fu_act_idx: int,
+    methods: List[str],
+    amount: float = 1.0,
+) -> Dict[str, Any]:
+    """
+    Plain static LCA for a single FU activity in a single year:
+      demand = {fu_act_idx: amount}
+      solves full upstream supply chain
+      includes that activity's direct biosphere and upstream biosphere
+    """
+    # Build datapackage for that year with biosphere enabled
+    dp, tech_idx, bio_idx, uncertain_params = build_datapackage_for_year_from_trails(
+        trails=trails,
+        year=int(year),
+        zero_biosphere=False,
+        collapse_bio_temporal_scaling=True,
+        collapse_tech_temporal_scaling=True,
+    )
+
+    lca_obj = bc.LCA(demand={int(fu_act_idx): float(amount)}, data_objs=[dp])
+    lca_obj.lci()
+
+    # Build characterization matrix in BW order (static)
+    bw_bio_map = lca_obj.dicts.biosphere  # flow_id -> row position
+    biosphere_matrix_dict = {int(flow_id): int(pos) for flow_id, pos in bw_bio_map.items()}
+
+    biosphere_dict_simple = {
+        (name, comp, subcomp): int(flow_id)
+        for (name, comp, subcomp, unit), flow_id in bio_idx.items()
+    }
+
+    C = fill_characterization_factors_matrices(
+        methods=methods,
+        biosphere_matrix_dict=biosphere_matrix_dict,
+        biosphere_dict=biosphere_dict_simple,
+    )
+
+    inv_vec = np.asarray(lca_obj.inventory.sum(axis=1)).reshape((-1, 1))
+    score = float(np.sum(C.dot(inv_vec)))
+
+    return {
+        "results_by_solve_year": {
+            int(year): {
+                "fu": {int(fu_act_idx): float(amount)},
+                "lca": lca_obj,
+                "scores": score,
+                "scores_per_root": {int(fu_act_idx): score},  # trivial "root"
+            }
+        },
+        "results_by_impact_year": {
+            int(year): {
+                "scores": score,
+                "scores_per_root": {int(fu_act_idx): score},
+            }
+        },
+    }
+
 def lca(
     trails: Trails,
     start_year: int,
@@ -253,158 +387,214 @@ def lca(
     Option A output:
       - results_by_solve_year: diagnostic per-year solves
       - results_by_impact_year: time series of impacts booked in impact years (for plotting)
+
+    Naming conventions:
+      - fu_demand: the full demand vector solved in a given solve_year (sparse dict form)
+      - demand_by_first_level_child: technosphere demand split by first-level child under the FU
+      - injected_supply: extra "supply pulses" to book direct biosphere without re-solving technosphere
+      - injected_supply_by_first_level_child: same, but attributed to a root bucket
+      - FU_DIRECT_ROOT: sentinel bucket for FU-direct biosphere only (never upstream technosphere)
     """
 
     import numpy as np
     import bw2calc as bc
     from collections import defaultdict
 
+    FU_DIRECT_ROOT = -1
+    ROOT_CLOSURE_TOL = 1e-12
+
+    fu0 = int(start_act_idx)
+    y0 = int(start_year)
+    amt0 = float(amount)
+
+    # ---------------------------------------------------------
+    # STATIC SHORTCUT
+    # ---------------------------------------------------------
+    if not use_temporal_distributions:
+        return lca_static_simple(
+            trails=trails,
+            year=y0,
+            fu_act_idx=fu0,
+            methods=methods,
+            amount=amt0,
+        )
+
     # -----------------------------
-    # 1) Traversal frontier (+ provenance if we need roots)
+    # 1) Temporal traversal (+ provenance for rooting)
     # -----------------------------
-    need_roots = True  # because Option A wants first-level children as roots
+    need_roots = True
 
     if return_provenance or need_roots:
-        frontier, provenance = trails.temporal_traversal(
-            start_year=start_year,
-            start_act_idx=start_act_idx,
-            amount=amount,
-            max_depth=max_depth,
-            min_amount=min_amount,
+        (
+            frontier,
+            provenance,
+            injected_supply_by_year_act,
+            injected_supply_prov_by_year_act,
+        ) = trails.temporal_traversal(
+            start_year=y0,
+            start_act_idx=fu0,
+            amount=amt0,
+            max_depth=int(max_depth),
+            min_amount=float(min_amount),
             return_provenance=True,
-            show_progress=show_progress,
-            use_temporal_distributions=use_temporal_distributions,
+            show_progress=bool(show_progress),
+            use_temporal_distributions=True,
         )
+        if injected_supply_by_year_act is None:
+            injected_supply_by_year_act = {}
+        if injected_supply_prov_by_year_act is None:
+            injected_supply_prov_by_year_act = {}
     else:
-        frontier, _prov = trails.temporal_traversal(
-            start_year=start_year,
-            start_act_idx=start_act_idx,
-            amount=amount,
-            max_depth=max_depth,
-            min_amount=min_amount,
+        frontier, injected_supply_by_year_act = trails.temporal_traversal(
+            start_year=y0,
+            start_act_idx=fu0,
+            amount=amt0,
+            max_depth=int(max_depth),
+            min_amount=float(min_amount),
             return_provenance=False,
-            show_progress=show_progress,
-            use_temporal_distributions=use_temporal_distributions,
+            show_progress=bool(show_progress),
+            use_temporal_distributions=True,
         )
         provenance = {}
+        if injected_supply_by_year_act is None:
+            injected_supply_by_year_act = {}
+        injected_supply_prov_by_year_act = {}
 
-    # Frontier -> per-year demand vectors (calendar years preserved)
+    # -----------------------------
+    # 1a) Inject FU self-supply for FU-direct biosphere only
+    # -----------------------------
+    injected_supply_by_year_act[(y0, fu0)] = float(injected_supply_by_year_act.get((y0, fu0), 0.0)) + amt0
+    injected_supply_prov_by_year_act.setdefault((y0, fu0), {})
+    injected_supply_prov_by_year_act[(y0, fu0)][FU_DIRECT_ROOT] = (
+        float(injected_supply_prov_by_year_act[(y0, fu0)].get(FU_DIRECT_ROOT, 0.0)) + amt0
+    )
+
+    # -----------------------------
+    # 1b) Frontier -> per-year demand vectors
+    # -----------------------------
     f_by_year = trails.frontier_to_demand_vectors(frontier)
+    candidate_years = sorted(f_by_year.keys())
 
     # -----------------------------
-    # 1b) Build per-root frontier using provenance paths
-    #     Root = first activity inside FU (first node in path)
+    # 1c) Rooted frontier using provenance paths
     # -----------------------------
-    from collections import defaultdict
-    import numpy as np
+    rooted_frontier = defaultdict(float)
+    roots_seen = set([FU_DIRECT_ROOT])
 
-    # frontier_rooted[(year, act, root_act)] = amount share
-    frontier_rooted = defaultdict(float)
+    def _iter_path_nodes(path):
+        """
+        Normalize provenance keys into an iterator of (year, act) or act.
+        Supported:
+          - int root
+          - tuple/list path whose elements are either:
+              * (year, act) tuples/lists
+              * act ints
+        """
+        if path is None:
+            return
+        if isinstance(path, (int, np.integer)):
+            yield int(path)
+            return
+        # path expected iterable
+        try:
+            for node in path:
+                if isinstance(node, (int, np.integer)):
+                    yield int(node)
+                elif isinstance(node, (tuple, list)) and len(node) >= 2:
+                    # (year, act)
+                    yield int(node[1])
+        except TypeError:
+            return
 
-    # Collect roots seen
-    roots_seen = set()
+    def _root_from_path(path, fu_act: int, fallback_root: int) -> int:
+        """
+        FIRST-LEVEL CHILD root:
+          return the first act in the path that is NOT the FU activity.
+        This prevents upstream contributions being incorrectly attributed to the FU root bucket.
+        """
+        # If provenance stores root directly
+        if isinstance(path, (int, np.integer)):
+            r = int(path)
+            return r if r != fu_act else int(fallback_root)
 
-    FALLBACK_ROOT = int(start_act_idx)
-    TOL = 1e-12  # numeric closure tolerance for the residual allocation
+        # If provenance stores a path, skip FU occurrences
+        for act in _iter_path_nodes(path):
+            if act != fu_act:
+                return int(act)
 
-    for (year_act, total_amt) in frontier.items():
-        year, act = year_act
+        return int(fallback_root)
+
+    for (year, act), total_amt in frontier.items():
         year = int(year)
         act = int(act)
         total_amt = float(total_amt)
 
         prov = provenance.get((year, act), {})
 
-        # If no provenance, we cannot split; put everything in fallback bucket
         if not prov:
-            frontier_rooted[(year, act, FALLBACK_ROOT)] += total_amt
-            roots_seen.add(FALLBACK_ROOT)
+            # If no provenance, do not dump into FU; attribute to activity itself.
+            rooted_frontier[(year, act, act)] += total_amt
+            roots_seen.add(act)
             continue
-
-        # Split by paths; each path begins at first-level child
-        # provenance[(year,act)] is {path_tuple_or_root: amt}
-        def _root_from_path(path, fallback_root: int) -> int:
-            if not path:
-                return int(fallback_root)
-
-            # If provenance stores the root directly as an int
-            if isinstance(path, (int, np.integer)):
-                return int(path)
-
-            # If provenance stores a path tuple/list, look at first element
-            first = path[0]
-
-            # Case A: first element is (year, act)
-            if isinstance(first, (tuple, list)) and len(first) >= 2:
-                return int(first[1])
-
-            # Case B: first element is act (int)
-            if isinstance(first, (int, np.integer)):
-                return int(first)
-
-            return int(fallback_root)
 
         prov_sum = 0.0
         for path, amt_share in prov.items():
             amt_share = float(amt_share)
             prov_sum += amt_share
 
-            root_act = _root_from_path(path, fallback_root=FALLBACK_ROOT)
-            frontier_rooted[(year, act, int(root_act))] += amt_share
+            root_act = _root_from_path(path, fu_act=fu0, fallback_root=act)
+            rooted_frontier[(year, act, int(root_act))] += amt_share
             roots_seen.add(int(root_act))
 
-        # Critical: enforce closure by assigning any residual to fallback root
         residual = total_amt - prov_sum
-        if abs(residual) > TOL:
-            frontier_rooted[(year, act, FALLBACK_ROOT)] += residual
-            roots_seen.add(FALLBACK_ROOT)
+        if abs(residual) > ROOT_CLOSURE_TOL:
+            # put residual on "self" (least misleading) instead of FU
+            rooted_frontier[(year, act, act)] += residual
+            roots_seen.add(act)
+
+    # Include roots that appear only in injected supply provenance
+    for (_y, _a), roots_map in injected_supply_prov_by_year_act.items():
+        for r in roots_map.keys():
+            roots_seen.add(int(r))
 
     roots_seen = sorted(roots_seen)
 
-    # -----------------------------
-    # 1c) Convert rooted frontier to per-year demand vectors by root
-    #     f_by_year_by_root[root][year] = demand vector
-    # -----------------------------
-    n_activities = trails.A.shape[1]
+    # Convert rooted frontier to per-year demand vectors by root (technosphere only)
+    n_activities = int(trails.A.shape[1])
     dtype = trails.value_dtype
+    f_by_year_by_root = {r: {} for r in roots_seen if r != FU_DIRECT_ROOT}
 
-    f_by_year_by_root = {r: {} for r in roots_seen}
-
-    for (year, act, root_act), amt in frontier_rooted.items():
+    for (year, act, root_act), amt in rooted_frontier.items():
         y = int(year)
         a = int(act)
         r = int(root_act)
-
+        if r == FU_DIRECT_ROOT:
+            continue
         if y not in f_by_year_by_root[r]:
             f_by_year_by_root[r][y] = np.zeros(n_activities, dtype=dtype)
-
         f_by_year_by_root[r][y][a] += dtype(amt)
 
-    candidate_years = sorted(f_by_year.keys())
-
+    # -----------------------------
+    # Results + caches
+    # -----------------------------
     results_by_solve_year: Dict[int, Dict[str, Any]] = {}
+    results_by_impact_year: Dict[int, Dict[str, Any]] = {}
 
-    # -----------------------------
-    # Caches
-    # -----------------------------
     dp_cache: Dict[tuple, Any] = {}
     char_cache: Dict[tuple, Any] = {}
 
-    # -----------------------------
-    # Temporal-mode accumulators (flow-id space)
-    # -----------------------------
     inventory_total_by_impact_year: Dict[int, np.ndarray] = {}
-    inventory_per_root_by_impact_year: Dict[int, Dict[int, np.ndarray]] = defaultdict(dict)
+    inventory_by_root_by_impact_year: Dict[int, Dict[int, np.ndarray]] = defaultdict(dict)
 
     # -----------------------------
     # Helpers
     # -----------------------------
     def _get_C_static(year: int, lca_obj, bio_idx: Dict[tuple, int], zero_bio: bool):
-        key = (year, zero_bio, "static_bw_order")
+        key = (int(year), bool(zero_bio), "static_bw_order")
         if key in char_cache:
             return char_cache[key]
 
-        bw_bio_map = lca_obj.dicts.biosphere  # flow_id -> row position
+        bw_bio_map = lca_obj.dicts.biosphere
         biosphere_matrix_dict = {int(flow_id): int(pos) for flow_id, pos in bw_bio_map.items()}
 
         biosphere_dict_simple = {
@@ -428,21 +618,19 @@ def lca(
         return float(np.sum(C.dot(inv_vec)))
 
     # -----------------------------
-    # 2) Per-solve-year loop (CRITICAL: loop over f_by_year)
+    # 2) Solve-year loop
     # -----------------------------
     for solve_year in candidate_years:
-        f_vec = f_by_year[solve_year]
-        arr = np.asarray(f_vec)
+        solve_year = int(solve_year)
+        arr = np.asarray(f_by_year[solve_year])
 
-        nz_idx = np.where(np.abs(arr) > min_amount)[0]
+        nz_idx = np.where(np.abs(arr) > float(min_amount))[0]
         if nz_idx.size == 0:
             continue
 
-        # IMPORTANT: solve the whole demand vector for this solve_year
-        fu_total = {int(i): float(arr[i]) for i in nz_idx}
+        fu_demand = {int(i): float(arr[i]) for i in nz_idx}
 
-        # Build dp for this solve_year
-        zero_bio = bool(use_temporal_distributions)
+        zero_bio = True
         dp_key = (solve_year, zero_bio)
         if dp_key not in dp_cache:
             dp, tech_idx, bio_idx, uncertain_params = build_datapackage_for_year_from_trails(
@@ -454,164 +642,158 @@ def lca(
         else:
             dp, tech_idx, bio_idx, uncertain_params = dp_cache[dp_key]
 
-        lca_total = bc.LCA(demand=fu_total, data_objs=[dp])
+        lca_total = bc.LCA(demand=fu_demand, data_objs=[dp])
         lca_total.lci()
 
-        # -----------------------------
-        # First-level supplier roots (only based on start activity in THIS solve_year)
-        # -----------------------------
-        # -----------------------------
-        # Roots: demand vectors restricted to this solve_year
-        # -----------------------------
-        fu_per_root: Dict[int, Dict[int, float]] = {}
-
+        # demand split by first-level child roots for this solve_year
+        demand_by_first_level_child: Dict[int, Dict[int, float]] = {}
         for root_idx, by_year in f_by_year_by_root.items():
-            vec = by_year.get(int(solve_year), None)
+            vec = by_year.get(solve_year)
             if vec is None:
                 continue
-
             arr_r = np.asarray(vec)
-            nz_r = np.where(np.abs(arr_r) > min_amount)[0]
+            nz_r = np.where(np.abs(arr_r) > float(min_amount))[0]
             if nz_r.size == 0:
                 continue
+            demand_by_first_level_child[int(root_idx)] = {int(i): float(arr_r[i]) for i in nz_r}
 
-            fu_per_root[int(root_idx)] = {int(i): float(arr_r[i]) for i in nz_r}
-
-        # Ensure a "direct-only / unassigned" bucket exists if you rely on it downstream
-        fu_per_root.setdefault(int(start_act_idx), {})
-
-        # Sanity check: sum of rooted FU vectors equals total FU vector (within tolerance)
+        # closure check
         summed = np.zeros_like(arr, dtype=float)
-        for fu_root in fu_per_root.values():
-            for i, v in fu_root.items():
+        for dct in demand_by_first_level_child.values():
+            for i, v in dct.items():
                 summed[i] += v
-        if np.max(np.abs(summed - arr)) > 1e-9:
-            raise ValueError(f"Rooted FU does not sum to total FU in year {solve_year}")
+        abs_err = float(np.max(np.abs(summed - arr))) if arr.size else 0.0
+        scale = float(np.max(np.abs(arr))) if arr.size else 0.0
+        tol = max(1e-9, 1e-6 * max(1.0, scale))
+        if abs_err > tol:
+            raise ValueError(
+                f"Rooted demand does not sum to total demand in year {solve_year} (abs_err={abs_err:g}, tol={tol:g})."
+            )
 
-
-        # -----------------------------
-        # STATIC MODE: score immediately and book into impact_year == solve_year
-        # -----------------------------
-        if not use_temporal_distributions:
-            C = _get_C_static(year=solve_year, lca_obj=lca_total, bio_idx=bio_idx, zero_bio=zero_bio)
-
-            total_score = _score_from_lca_inventory(lca_total, C)
-
-            scores_per_root: Dict[int, float] = {}
-
-            # Supplier roots: full upstream burdens
-            for root_idx, fu_root in fu_per_root.items():
-                if root_idx == int(start_act_idx):
-                    # optional: compute direct-only separately; keep 0 if you prefer
-                    continue
-                lca_root = bc.LCA(demand=fu_root, data_objs=[dp])
-                lca_root.lci()
-                s = _score_from_lca_inventory(lca_root, C)
-                if abs(s) > min_amount:
-                    scores_per_root[int(root_idx)] = float(s)
-
-            # If you want start root shown, compute it; otherwise omit it.
-            # Here we omit if it is zero/unknown in static mode.
-
-            results_by_solve_year[solve_year] = {
-                "fu": fu_total,
-                "fu_per_root": fu_per_root,
-                "lca": lca_total,
-                "scores": float(total_score),
-                "scores_per_root": scores_per_root,
-            }
-
-            continue
-
-        # -----------------------------
-        # TEMPORAL MODE: accumulate temporalized biosphere inventories
-        # -----------------------------
-        n_acts = trails.B.shape[1]
-        supply_by_act_idx: Dict[int, float] = {}
-
+        # supply extraction (total)
+        n_acts = int(trails.B.shape[1])
+        supply_total: Dict[int, float] = {}
         for act_idx in range(n_acts):
             try:
-                prod_pos = lca_total.dicts.product[act_idx]
+                act_pos = lca_total.dicts.activity[act_idx]
             except KeyError:
                 continue
-            supply = float(lca_total.supply_array[prod_pos])
-            if abs(supply) > min_amount:
-                supply_by_act_idx[int(act_idx)] = supply
+            s = float(lca_total.supply_array[act_pos])
+            if abs(s) > float(min_amount):
+                supply_total[int(act_idx)] = s
 
+        # (1) solved-supply contribution
         trails.accumulate_temporalized_biosphere_inventory(
             base_year=solve_year,
-            supply_by_activity=supply_by_act_idx,
+            supply_by_activity=supply_total,
             inventory_by_year=inventory_total_by_impact_year,
-            min_amount=min_amount,
+            min_amount=float(min_amount),
             use_temporal_distributions=True,
         )
 
-        # Per-root inventories
-        for root_idx, fu_root in fu_per_root.items():
-            if not fu_root:
+        # (2) injected supply for this solve_year
+        injected_supply: Dict[int, float] = {}
+        for (y, a), v in injected_supply_by_year_act.items():
+            if int(y) != solve_year:
                 continue
+            v = float(v)
+            if abs(v) <= float(min_amount):
+                continue
+            injected_supply[int(a)] = injected_supply.get(int(a), 0.0) + v
 
-            lca_root = bc.LCA(demand=fu_root, data_objs=[dp])
-            lca_root.lci()
-
-            supply_by_act_root = {}
-            for act_idx in range(n_acts):
-                try:
-                    prod_pos = lca_root.dicts.product[act_idx]
-                except KeyError:
-                    continue
-                supply = float(lca_root.supply_array[prod_pos])
-                if abs(supply) > min_amount:
-                    supply_by_act_root[int(act_idx)] = supply
-
+        if injected_supply:
             trails.accumulate_temporalized_biosphere_inventory(
                 base_year=solve_year,
-                supply_by_activity=supply_by_act_root,
-                inventory_by_year=inventory_per_root_by_impact_year[int(root_idx)],
-                min_amount=min_amount,
+                supply_by_activity=injected_supply,
+                inventory_by_year=inventory_total_by_impact_year,
+                min_amount=float(min_amount),
                 use_temporal_distributions=True,
             )
 
-        # Store solve-year diagnostics; leave scores empty until second pass
+        injected_supply_by_first_level_child: Dict[int, Dict[int, float]] = {}
+        for (y, act), roots_map in injected_supply_prov_by_year_act.items():
+            if int(y) != solve_year:
+                continue
+            for r, share in roots_map.items():
+                r = int(r)
+                share = float(share)
+                if abs(share) <= float(min_amount):
+                    continue
+                injected_supply_by_first_level_child.setdefault(r, {})
+                injected_supply_by_first_level_child[r][int(act)] = (
+                    injected_supply_by_first_level_child[r].get(int(act), 0.0) + share
+                )
+
+        # Book FU-direct only inventory to FU_DIRECT_ROOT bucket
+        fu_direct_injected = injected_supply_by_first_level_child.get(FU_DIRECT_ROOT, {})
+        if fu_direct_injected:
+            trails.accumulate_temporalized_biosphere_inventory(
+                base_year=solve_year,
+                supply_by_activity=fu_direct_injected,
+                inventory_by_year=inventory_by_root_by_impact_year[FU_DIRECT_ROOT],
+                min_amount=float(min_amount),
+                use_temporal_distributions=True,
+            )
+
+        # Per-root inventories (upstream technosphere)
+        for root_idx, root_demand in demand_by_first_level_child.items():
+            lca_root = bc.LCA(demand=root_demand, data_objs=[dp])
+            lca_root.lci()
+
+            supply_root: Dict[int, float] = {}
+            for act_idx in range(n_acts):
+                try:
+                    act_pos = lca_root.dicts.activity[act_idx]
+                except KeyError:
+                    continue
+                s = float(lca_root.supply_array[act_pos])
+                if abs(s) > float(min_amount):
+                    supply_root[int(act_idx)] = s
+
+            trails.accumulate_temporalized_biosphere_inventory(
+                base_year=solve_year,
+                supply_by_activity=supply_root,
+                inventory_by_year=inventory_by_root_by_impact_year[int(root_idx)],
+                min_amount=float(min_amount),
+                use_temporal_distributions=True,
+            )
+
+            # add injected shares attributed to this root (if any)
+            root_injected = injected_supply_by_first_level_child.get(int(root_idx), {})
+            if root_injected:
+                trails.accumulate_temporalized_biosphere_inventory(
+                    base_year=solve_year,
+                    supply_by_activity=root_injected,
+                    inventory_by_year=inventory_by_root_by_impact_year[int(root_idx)],
+                    min_amount=float(min_amount),
+                    use_temporal_distributions=True,
+                )
+
         results_by_solve_year[solve_year] = {
-            "fu": fu_total,
-            "fu_per_root": fu_per_root,
+            "fu_activity": fu0,
+            "FU_DIRECT_ROOT": FU_DIRECT_ROOT,
+            "fu_demand": fu_demand,
+            "demand_by_first_level_child": demand_by_first_level_child,
+            "injected_supply": injected_supply,
+            "injected_supply_by_first_level_child": injected_supply_by_first_level_child,
             "lca": lca_total,
             "scores": 0.0,
-            "scores_per_root": {int(k): 0.0 for k in fu_per_root.keys()},
+            "scores_by_first_level_child": {int(k): 0.0 for k in demand_by_first_level_child.keys()},
         }
 
     # -----------------------------
-    # 3) Build results_by_impact_year
+    # 3) Impact-year characterization
     # -----------------------------
-    results_by_impact_year: Dict[int, Dict[str, Any]] = {}
-
-    # STATIC MODE: just mirror solve-year results into impact-year space
-    if not use_temporal_distributions:
-        for y, r in results_by_solve_year.items():
-            results_by_impact_year[int(y)] = {
-                "scores": float(r.get("scores", 0.0)),
-                "scores_per_root": dict(r.get("scores_per_root", {})),
-            }
-        out = {
-            "results_by_solve_year": results_by_solve_year,
-            "results_by_impact_year": results_by_impact_year,
-        }
-        return (out, provenance) if return_provenance else out
-
-    # TEMPORAL MODE: characterize inventories booked in impact years
     n_flows = int(trails.B.shape[2]) if trails.B is not None else 0
     if n_flows <= 0:
-        out = {
-            "results_by_solve_year": results_by_solve_year,
-            "results_by_impact_year": {},
-        }
+        out = {"results_by_solve_year": results_by_solve_year, "results_by_impact_year": {}}
         return (out, provenance) if return_provenance else out
 
     impact_years = sorted(set(inventory_total_by_impact_year.keys()))
 
     for impact_year in impact_years:
-        # dp/bio mapping for characterization (flow-id space)
+        impact_year = int(impact_year)
+
         dp_key = (impact_year, True)
         if dp_key not in dp_cache:
             dp, tech_idx, bio_idx, uncertain_params = build_datapackage_for_year_from_trails(
@@ -644,26 +826,20 @@ def lca(
         )
         total_score = float(np.sum(C.dot(inv_total.reshape((-1, 1)))))
 
-        scores_per_root: Dict[int, float] = {}
-        for root_idx, inv_map in inventory_per_root_by_impact_year.items():
-            inv_root = inv_map.get(
-                impact_year, np.zeros(n_flows, dtype=trails.value_dtype)
-            )
+        scores_by_first_level_child: Dict[int, float] = {}
+        for root_idx, inv_map in inventory_by_root_by_impact_year.items():
+            inv_root = inv_map.get(impact_year, np.zeros(n_flows, dtype=trails.value_dtype))
             s = float(np.sum(C.dot(inv_root.reshape((-1, 1)))))
-            if abs(s) > min_amount:
-                scores_per_root[int(root_idx)] = s
+            if abs(s) > float(min_amount):
+                scores_by_first_level_child[int(root_idx)] = s
 
-        results_by_impact_year[int(impact_year)] = {
+        results_by_impact_year[impact_year] = {
             "scores": total_score,
-            "scores_per_root": scores_per_root,
+            "scores_by_first_level_child": scores_by_first_level_child,
         }
 
-    out = {
-        "results_by_solve_year": results_by_solve_year,
-        "results_by_impact_year": results_by_impact_year,
-    }
+    out = {"results_by_solve_year": results_by_solve_year, "results_by_impact_year": results_by_impact_year}
     return (out, provenance) if return_provenance else out
-
 
 
 def compute_node_impact_intensities(
@@ -776,9 +952,6 @@ def compute_node_impact_intensities(
             score_scalar = float(np.sum(scores_vec))
 
             node_intensity[(year, act)] = score_scalar
-
-            if debug:
-                print(f"Impact intensity year={year}, act={act}: {score_scalar:g}")
 
     return node_intensity
 

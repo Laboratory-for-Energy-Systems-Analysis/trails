@@ -181,14 +181,14 @@ def plot_temporal_scores(
     all_roots = sorted({
         root
         for year in years
-        for root in results_by_year[year].get("scores_per_root", {})
+        for root in results_by_year[year].get("scores_by_first_level_child", {})
     })
     if not all_roots:
-        raise ValueError("No scores_per_root found.")
+        raise ValueError("No scores_by_first_level_child found.")
 
     Y = np.zeros((len(years), len(all_roots)), dtype=float)
     for yi, year in enumerate(years):
-        spr = results_by_year[year].get("scores_per_root", {})
+        spr = results_by_year[year].get("scores_by_first_level_child", {})
         for ri, root in enumerate(all_roots):
             Y[yi, ri] = spr.get(root, 0.0)
 

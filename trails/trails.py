@@ -300,12 +300,7 @@ class Trails:
             else:
                 child_amt = amount * (value)  # keep positive sign (supply-driven service)
 
-            tex = self._interpolate_temporal_exchange(
-                year,
-                act_idx,
-                prod_idx,
-                self.temporal_technosphere_exchanges,
-            )
+            tex = self._get_tech_temporal_exchange(year, act_idx, prod_idx)
 
             if (tex is None) or (not use_temporal_distributions):
                 y_eff = scenario_year
@@ -351,6 +346,31 @@ class Trails:
         )
 
         return demand
+
+    def _get_tech_temporal_exchange(self, year: int, act_idx: int, prod_idx: int) -> Optional[TemporalExchange]:
+        """
+        For technosphere TD metadata, do NOT interpolate across years.
+        Instead, map to the nearest template year and do a direct lookup.
+        This prevents TD metadata from 'bleeding' into years where it wasn't specified
+        and makes TD availability stable across interpolated scenario years.
+        """
+        if not self.temporal_technosphere_exchanges:
+            return None
+
+        y_tpl = self._map_year_to_template_year(year)
+        return self.temporal_technosphere_exchanges.get((str(y_tpl), int(act_idx), int(prod_idx)))
+
+    def _get_bio_temporal_exchange(self, year: int, act_idx: int, flow_idx: int) -> Optional[TemporalExchange]:
+        """
+        For biosphere TD metadata, do NOT interpolate across years.
+        Instead, map to the nearest template year and do a direct lookup.
+        This prevents TD metadata from 'bleeding' into years where it wasn't specified.
+        """
+        if not self.temporal_biosphere_exchanges:
+            return None
+
+        y_tpl = self._map_year_to_template_year(year)
+        return self.temporal_biosphere_exchanges.get((str(y_tpl), int(act_idx), int(flow_idx)))
 
     def accumulate_temporalized_biosphere_inventory(
             self,
@@ -430,92 +450,86 @@ class Trails:
         logged_nonzero_rows = 0
         LOG_EXAMPLES = 10
 
+        # Use template year for temporal metadata (distributions defined on original years)
+        template_year = self._map_year_to_template_year(base_year)
+
         for act_idx, flow_idx, value in zip(act_indices, flow_indices, values):
-            n_triplets += 1
             act_idx = int(act_idx)
             flow_idx = int(flow_idx)
 
             supply_amt = float(supply_by_activity.get(act_idx, 0.0))
+
             if supply_amt == 0.0:
                 continue
 
-            n_supply_nonzero += 1
-
+            # IMPORTANT: biosphere sign is not flipped; value is already the correct sign
             scaled = supply_amt * float(value)
             if scaled == 0.0:
                 continue
 
             if min_amount and abs(scaled) < min_amount:
-                n_below_min += 1
                 continue
 
-            n_scaled_nonzero += 1
-
-            # Optional: log a handful of actual contributing rows
-            if logged_nonzero_rows < LOG_EXAMPLES:
-                logger.info(
-                    "accumulate_bio: contribute base_year=%d act=%d flow=%d supply=%g coeff=%g scaled=%g",
-                    int(base_year), act_idx, flow_idx, supply_amt, float(value), float(scaled)
-                )
-                logged_nonzero_rows += 1
-
-            tex = self._interpolate_temporal_exchange(
+            # Fetch temporal metadata using template year (not base_year)
+            tex = self._get_bio_temporal_exchange(
                 base_year,
                 act_idx,
                 flow_idx,
-                self.temporal_biosphere_exchanges,
             )
 
             if (tex is None) or (not use_temporal_distributions):
-                n_no_td += 1
-                y_eff = int(base_year)
+                # Anchor inventory to the same scenario year used for B slice
+                y_eff = int(scenario_year)
                 inventory_by_year.setdefault(
                     y_eff,
                     np.zeros(n_flows, dtype=self.value_dtype),
                 )
                 inventory_by_year[y_eff][flow_idx] += scaled
-            else:
-                n_with_td += 1
-                td = TemporalDistribution(tex)
+                continue
 
-                any_pair = False
-                for offset, weight in td.iter_offsets_and_weights():
-                    any_pair = True
-                    y_eff = int(base_year + offset)
-                    factor = td.scale_factor(offset)
+            td = TemporalDistribution(tex)
 
-                    inventory_by_year.setdefault(
-                        y_eff,
-                        np.zeros(n_flows, dtype=self.value_dtype),
-                    )
-                    inventory_by_year[y_eff][flow_idx] += scaled * float(weight) * float(factor)
+            # Anchor offsets to scenario_year (because the coefficient came from B[t])
+            any_pair = False
+            for offset, weight in td.iter_offsets_and_weights():
+                any_pair = True
 
-                if not any_pair:
-                    logger.warning(
-                        "accumulate_bio: TD produced no offsets/weights (year=%d act=%d flow=%d) -> dropped",
-                        int(base_year), act_idx, flow_idx
-                    )
+                raw_year = int(scenario_year + int(offset))
+                y_eff = int(self._map_year_to_scenario_year(raw_year))
 
+                factor = float(td.scale_factor(offset))
+
+                inventory_by_year.setdefault(
+                    y_eff,
+                    np.zeros(n_flows, dtype=self.value_dtype),
+                )
+                inventory_by_year[y_eff][flow_idx] += scaled * float(weight) * factor
+
+            if not any_pair:
+                logger.warning(
+                    "accumulate_bio: TD produced no offsets/weights (template_year=%d scenario_year=%d act=%d flow=%d) -> dropped",
+                    int(template_year), int(scenario_year), act_idx, flow_idx
+                )
 
 
     def _map_year_to_available(self, year: int) -> int:
-        """
-        Map an arbitrary year to the nearest available scenario year,
-        clipped to [min_year, max_year].
+            """
+            Map an arbitrary year to the nearest available scenario year,
+            clipped to [min_year, max_year].
 
-        If you later interpolate annually, and every year in [min,max]
-        is present, this is effectively just clipping.
-        """
-        # 1) Clip to global range
-        y = max(self.min_year, min(self.max_year, int(year)))
+            If you later interpolate annually, and every year in [min,max]
+            is present, this is effectively just clipping.
+            """
+            # 1) Clip to global range
+            y = max(self.min_year, min(self.max_year, int(year)))
 
-        # 2) If we have a full annual grid, just return y
-        if len(self.years_int) == (self.max_year - self.min_year + 1):
-            return y
+            # 2) If we have a full annual grid, just return y
+            if len(self.years_int) == (self.max_year - self.min_year + 1):
+                return y
 
-        # 3) Otherwise: snap to nearest available scenario year
-        idx = int(np.abs(self.years_int - y).argmin())
-        return int(self.years_int[idx])
+            # 3) Otherwise: snap to nearest available scenario year
+            idx = int(np.abs(self.years_int - y).argmin())
+            return int(self.years_int[idx])
 
 
     def temporal_traversal(
@@ -625,11 +639,30 @@ class Trails:
 
         frontier_total = defaultdict(float)  # (year, act) -> amt
         provenance_roots = defaultdict(lambda: defaultdict(float))  # (year, act) -> {root_act: amt}
+        direct_bio_total = defaultdict(
+            float)  # (year, act) -> amt (nodes with direct biosphere we do NOT want to solve)
+        direct_bio_roots = defaultdict(lambda: defaultdict(float))  # same but by root, if provenance requested
 
         bio_cache: dict[tuple[int, int], bool] = {}
 
         while queue:
             year, act, amt, depth, path, root_act = queue.popleft()
+
+            # ------------------------------------------------------------------
+            # Ensure we always have a valid root for any non-root node.
+            # If root_act is missing, recover it from the traversal path.
+            # This prevents fallback attribution to the FU in lca.py.
+            # ------------------------------------------------------------------
+            if root_act is None and depth > 0:
+                if path:
+                    first = path[0]
+                    # path stores ((year, act), ...) tuples
+                    if isinstance(first, (tuple, list)) and len(first) >= 2:
+                        root_act = int(first[1])
+                    else:
+                        root_act = int(act)
+                else:
+                    root_act = int(act)
 
             if abs(amt) < min_amount:
                 continue
@@ -652,14 +685,19 @@ class Trails:
                     bio_cache[key] = has_direct_bio
 
             # Helper: record a node into frontier + provenance
-            def _record_node(y: int, a: int, x: float, r: Optional[int]):
+            def _record_frontier(y: int, a: int, x: float, r: Optional[int]):
                 frontier_total[(int(y), int(a))] += float(x)
                 if return_provenance and (r is not None):
                     provenance_roots[(int(y), int(a))][int(r)] += float(x)
 
+            def _record_direct_bio(y: int, a: int, x: float, r: Optional[int]):
+                direct_bio_total[(int(y), int(a))] += float(x)
+                if return_provenance and (r is not None):
+                    direct_bio_roots[(int(y), int(a))][int(r)] += float(x)
+
             # Stop expanding at max_depth
             if depth >= max_depth:
-                _record_node(year, act, amt, root_act)
+                _record_frontier(year, act, amt, root_act)
                 continue
 
             # Expand this node
@@ -672,15 +710,15 @@ class Trails:
 
             # Leaf: record it
             if not child_demands:
-                _record_node(year, act, amt, root_act)
+                _record_frontier(year, act, amt, root_act)
                 continue
 
             # IMPORTANT BEHAVIOR:
             # If this node has direct biosphere flows, we record it as part of the frontier.
             # This matches your existing “solve nodes with direct biosphere” design.
             # (It is NOT a full “score technosphere exchange at its own year” algorithm.)
-            if has_direct_bio:
-                _record_node(year, act, amt, root_act)
+            if has_direct_bio and depth > 0:
+                _record_direct_bio(year, act, amt, root_act)
 
             # Enqueue children
             for child_year, mapping in child_demands.items():
@@ -713,9 +751,10 @@ class Trails:
         # Normalize provenance to plain dicts
         if return_provenance:
             provenance_roots = {k: dict(v) for k, v in provenance_roots.items()}
-            return dict(frontier_total), provenance_roots
+            direct_bio_roots = {k: dict(v) for k, v in direct_bio_roots.items()}
+            return dict(frontier_total), provenance_roots, dict(direct_bio_total), direct_bio_roots
 
-        return dict(frontier_total)
+        return dict(frontier_total), dict(direct_bio_total)
 
     def frontier_to_demand_vectors(self, frontier: dict) -> dict[int, np.ndarray]:
         """
