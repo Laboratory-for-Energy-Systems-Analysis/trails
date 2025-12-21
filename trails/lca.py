@@ -8,7 +8,7 @@ from tqdm.auto import tqdm
 
 
 from .trails import Trails
-from .lcia import fill_characterization_factors_matrices
+from .lcia import fill_characterization_factors_matrices, get_lcia_methods
 from .temporal_distributions import TemporalDistribution
 
 import logging
@@ -640,6 +640,127 @@ def _build_injected_supply_by_root(
     return injected_supply_by_first_level_child
 
 
+def _build_global_biosphere_dict_simple(trails: Trails) -> Dict[tuple, int]:
+    """
+    Build a stable (name, compartment, subcompartment) -> flow_id mapping.
+
+    Supports two possible internal formats for trails.biosphere_indices[label]:
+      A) {flow_id: {"name": ..., "compartment": ..., "subcompartment": ..., "unit": ...}}
+      B) {(name, compartment, subcompartment, unit): flow_id}
+    """
+    out: Dict[tuple, int] = {}
+
+    for _label, meta in getattr(trails, "biosphere_indices", {}).items():
+        if not meta:
+            continue
+
+        # Peek one item to infer structure
+        k0 = next(iter(meta.keys()))
+
+        # Case A: keyed by int flow_id -> meta dict
+        if isinstance(k0, (int, np.integer)):
+            for flow_id, md in meta.items():
+                if not isinstance(md, dict):
+                    continue
+                name = md.get("name")
+                comp = md.get("compartment")
+                subcomp = md.get("subcompartment")
+                if name is None or comp is None or subcomp is None:
+                    continue
+                key = (name, comp, subcomp)
+                out.setdefault(key, int(flow_id))
+
+        # Case B: keyed by tuple -> flow_id
+        elif isinstance(k0, tuple) and len(k0) >= 3:
+            for k, flow_id in meta.items():
+                # k is (name, comp, subcomp, unit) or similar
+                name = k[0]
+                comp = k[1] if len(k) > 1 else None
+                subcomp = k[2] if len(k) > 2 else None
+                if name is None or comp is None or subcomp is None:
+                    continue
+                out.setdefault((name, comp, subcomp), int(flow_id))
+
+        else:
+            raise TypeError(
+                f"Unsupported biosphere_indices structure for label {_label}: "
+                f"key type={type(k0)} example={k0}"
+            )
+
+    return out
+
+def _build_flowkey_to_flowid(trails: Trails) -> Dict[tuple, int]:
+    """
+    Build (name, compartment, subcompartment) -> flow_id mapping,
+    robust across labels.
+    """
+    out: Dict[tuple, int] = {}
+
+    for _label, meta in getattr(trails, "biosphere_indices", {}).items():
+        if not meta:
+            continue
+
+        k0 = next(iter(meta.keys()))
+
+        # Expected: {flow_id: {"name":..., "compartment":..., "subcompartment":...}}
+        if isinstance(k0, (int, np.integer)):
+            for flow_id, md in meta.items():
+                if not isinstance(md, dict):
+                    continue
+                name = md.get("name")
+                comp = md.get("compartment")
+                sub = md.get("subcompartment")
+                if name is None or comp is None or sub is None:
+                    continue
+                out.setdefault((name, comp, sub), int(flow_id))
+        else:
+            raise TypeError(
+                f"Unexpected biosphere_indices structure for label {_label}: "
+                f"expected int keys, got {type(k0)}"
+            )
+
+    return out
+
+def _build_cf_vector_flowid_space(
+    trails: Trails,
+    methods: List[str],
+    ei_version: str,
+    char_cache: dict,
+    debug: bool = False,
+) -> np.ndarray:
+    """
+    Return cf vector of length n_flows in Trails flow-id space:
+      cf[flow_id] = sum_m CF_m(flow_key_of_flow_id)
+
+    Assumes LCIA method exchanges keyed by (name, compartment, subcompartment).
+    """
+    n_flows = int(trails.B.shape[2]) if trails.B is not None else 0
+    if n_flows <= 0:
+        return np.zeros(0, dtype=np.float64)
+
+    cache_key = ("cf_vector_flowid_space", ei_version, tuple(methods))
+    if cache_key in char_cache:
+        return char_cache[cache_key]
+
+    flowkey_to_flowid = _build_flowkey_to_flowid(trails)
+
+    methods_dict = get_lcia_methods(methods=methods, ei_version=ei_version)
+
+    cf = np.zeros(n_flows, dtype=np.float64)
+
+    # Sum CFs across methods (your code already supports multiple methods)
+    for mname, exc in methods_dict.items():
+        for flow_key, val in exc.items():
+            # flow_key is (name, comp, subcomp)
+            fid = flowkey_to_flowid.get(flow_key)
+            if fid is None:
+                continue
+            cf[fid] += float(val)
+
+    char_cache[cache_key] = cf
+    return cf
+
+
 def _characterize_impact_years(
     trails: Trails,
     inventory_total_by_impact_year,
@@ -650,6 +771,7 @@ def _characterize_impact_years(
     min_amount,
     normalize_root,
     debug,
+    ei_version="3.11",
 ):
     results_by_impact_year: Dict[int, Dict[str, Any]] = {}
 
@@ -657,47 +779,30 @@ def _characterize_impact_years(
     if n_flows <= 0:
         return results_by_impact_year
 
-    impact_years = sorted(set(inventory_total_by_impact_year.keys()))
+    cf = _build_cf_vector_flowid_space(
+        trails=trails,
+        methods=methods,
+        ei_version=ei_version,
+        char_cache=char_cache,
+        debug=debug,
+    )
 
+    impact_years = sorted(set(inventory_total_by_impact_year.keys()))
     impact_iter = tqdm(impact_years, desc="Temporal LCA: impact years", unit="year")
+
     for impact_year in impact_iter:
         impact_year = int(impact_year)
-
-        _, _, bio_idx, _ = _get_datapackage(
-            dp_cache=dp_cache,
-            trails=trails,
-            year=impact_year,
-            zero_bio=True,
-            debug=debug,
-        )
-
-        char_key = (impact_year, True, "temporal_flowid_space")
-        if char_key not in char_cache:
-            biosphere_matrix_dict = {int(flow_id): int(flow_id) for flow_id in set(bio_idx.values())}
-            biosphere_dict_simple = {
-                (name, comp, subcomp): int(flow_id)
-                for (name, comp, subcomp, unit), flow_id in bio_idx.items()
-            }
-            C = fill_characterization_factors_matrices(
-                methods=methods,
-                biosphere_matrix_dict=biosphere_matrix_dict,
-                biosphere_dict=biosphere_dict_simple,
-                debug=debug,
-            )
-            char_cache[char_key] = C
-        else:
-            C = char_cache[char_key]
 
         inv_total = inventory_total_by_impact_year.get(
             impact_year, np.zeros(n_flows, dtype=trails.value_dtype)
         )
-        total_score = float(np.sum(C.dot(inv_total.reshape((-1, 1)))))
+        total_score = float(np.dot(cf, inv_total.astype(np.float64, copy=False)))
 
         scores_by_first_level_child: Dict[int, float] = {}
         for root_idx, inv_map in inventory_by_root_by_impact_year.items():
             root_norm = normalize_root(int(root_idx))
             inv_root = inv_map.get(impact_year, np.zeros(n_flows, dtype=trails.value_dtype))
-            s = float(np.sum(C.dot(inv_root.reshape((-1, 1)))))
+            s = float(np.dot(cf, inv_root.astype(np.float64, copy=False)))
             if abs(s) <= float(min_amount):
                 continue
             scores_by_first_level_child[root_norm] = scores_by_first_level_child.get(root_norm, 0.0) + s
@@ -709,6 +814,7 @@ def _characterize_impact_years(
 
     return results_by_impact_year
 
+
 def lca(
     trails: Trails,
     start_year: int,
@@ -716,7 +822,7 @@ def lca(
     methods: List[str],
     amount: float = 1.0,
     max_depth: int = 2,
-    min_amount: float = 1e-16,
+    min_amount: float = 1e-18,
     show_progress: bool = True,
     debug: bool = False,
     return_provenance: bool = False,
@@ -993,15 +1099,23 @@ def lca(
         )
 
         results_by_solve_year[solve_year] = {
-            # "fu_activity": fu0,
-            # "FU_DIRECT_ROOT": FU_DIRECT_ROOT,  # now equals fu0
-            # "fu_demand": fu_demand,
-            # "demand_by_first_level_child": demand_by_first_level_child,
-            # "injected_supply": injected_supply,
-            # "injected_supply_by_first_level_child": injected_supply_by_first_level_child,
+            "fu_demand": fu_demand,
+            "n_nonzero_demand": int(len(fu_demand)),
+            "sum_abs_demand": float(np.sum(np.abs(arr[nz_idx]))),
+            "max_abs_demand": float(np.max(np.abs(arr[nz_idx]))),
+
+            "n_injected_supply": int(len(injected_supply)),
+            "injected_supply": injected_supply,  # keep if you want detail
+
+            "roots": sorted(int(k) for k in all_diag_roots),
+            "demand_by_first_level_child": demand_by_first_level_child,
+            "injected_supply_by_first_level_child": injected_supply_by_first_level_child,
+
+            # Optional but often useful:
+            "n_supply_total": int(len(supply_total)),
+            "supply_total": supply_total if debug else None,  # can be huge; gate it
+
             "lca": lca_total,
-            "scores": 0.0,
-            "scores_by_first_level_child": {int(k): 0.0 for k in sorted(all_diag_roots)},
         }
 
     # -----------------------------

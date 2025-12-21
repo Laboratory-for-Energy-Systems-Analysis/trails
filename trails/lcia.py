@@ -12,6 +12,9 @@ logger = logging.getLogger(__name__)
 LCIA_METHODS_EI310 = DATA_DIR / "lcia_ei310.json"
 LCIA_METHODS_EI311 = DATA_DIR / "lcia_ei311.json"
 
+
+_LCIA_METHODS_CACHE = {}
+
 def get_lcia_method_names(ei_version="3.11"):
     """List LCIA method names bundled with the specified ecoinvent version.
 
@@ -52,20 +55,11 @@ def format_lcia_method_exchanges(method):
 
 
 def get_lcia_methods(methods: list = None, ei_version="3.11"):
-    """Load selected LCIA methods and format their exchanges.
+    key = (ei_version, tuple(methods) if methods else None)
+    if key in _LCIA_METHODS_CACHE:
+        return _LCIA_METHODS_CACHE[key]
 
-    :param methods: Optional subset of method names to extract.
-    :type methods: list[str] | None
-    :param ei_version: Ecoinvent release identifier to read.
-    :type ei_version: str
-    :returns: Mapping of method names to formatted exchange dictionaries.
-    :rtype: dict[str, dict[tuple[str, str, str], float]]
-    """
-
-    if ei_version == "3.11":
-        filepath = LCIA_METHODS_EI311
-    else:
-        filepath = LCIA_METHODS_EI310
+    filepath = LCIA_METHODS_EI311 if ei_version == "3.11" else LCIA_METHODS_EI310
 
     with open(filepath, "r") as f:
         data = json.load(f)
@@ -73,7 +67,9 @@ def get_lcia_methods(methods: list = None, ei_version="3.11"):
     if methods:
         data = [x for x in data if " - ".join(x["name"]) in methods]
 
-    return {" - ".join(x["name"]): format_lcia_method_exchanges(x) for x in data}
+    out = {" - ".join(x["name"]): format_lcia_method_exchanges(x) for x in data}
+    _LCIA_METHODS_CACHE[key] = out
+    return out
 
 
 def fill_characterization_factors_matrices(
