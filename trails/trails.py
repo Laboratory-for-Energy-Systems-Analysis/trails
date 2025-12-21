@@ -199,6 +199,66 @@ class Trails:
         idx = int(np.abs(self.template_years_int - y).argmin())
         return int(self.template_years_int[idx])
 
+    def _get_scenario_context(self, year: int):
+        scenario_year = self._map_year_to_scenario_year(year)
+        scenario_label = str(scenario_year)
+        if scenario_label not in self.scenario_index:
+            return None
+        t = self.scenario_index[scenario_label]
+        return scenario_year, scenario_label, t
+
+    @staticmethod
+    def _add_demand_entry(demand, target_year: int, product_index: int, exchange_amount: float) -> None:
+        demand.setdefault(target_year, {})
+        demand[target_year][product_index] = demand[target_year].get(product_index, 0.0) + exchange_amount
+
+    @staticmethod
+    def _child_amount(parent_amount: float, exchange_value: float) -> float:
+        if exchange_value < 0.0:
+            return parent_amount * (-exchange_value)
+        return parent_amount * exchange_value
+
+    def _apply_temporal_distribution_to_demand(
+        self,
+        *,
+        year: int,
+        scenario_year: int,
+        product_index: int,
+        child_amount: float,
+        tex: TemporalExchange,
+        demand,
+        debug: bool,
+    ) -> None:
+        td = TemporalDistribution(tex)
+
+        offsets_and_weights = list(td.iter_offsets_and_weights(debug=debug))
+        if not offsets_and_weights:
+            if debug:
+                logger.warning(
+                    "expand_temporal_exchanges: TD produced no offsets/weights for (year=%d prod=%d) -> dropping exchange",
+                    year, product_index,
+                )
+            return
+
+        if debug:
+            logger.debug(
+                "expand_temporal_exchanges: TD offsets=%s (sum_w=%g)",
+                [p[0] for p in offsets_and_weights],
+                float(sum(p[1] for p in offsets_and_weights)),
+            )
+
+        for offset, weight in offsets_and_weights:
+            raw_year = year + offset
+            y_eff = self._map_year_to_scenario_year(raw_year)
+
+            factor = td.scale_factor(offset)
+            self._add_demand_entry(
+                demand,
+                y_eff,
+                product_index,
+                child_amount * float(weight) * float(factor),
+            )
+
     def get_A_for_scenario(self, label: str) -> sparse.COO:
         """Return the 2D A matrix (activity x product) for a given scenario label."""
         t = self.scenario_index[label]
@@ -254,9 +314,10 @@ class Trails:
         """
         demand: dict[int, dict[int, float]] = {}
 
-        scenario_year = self._map_year_to_scenario_year(year)
-        scenario_label = str(scenario_year)
-        t = self.scenario_index[scenario_label]
+        context = self._get_scenario_context(year)
+        if context is None:
+            return demand
+        scenario_year, scenario_label, t = context
 
         if debug:
             logger.info(
@@ -278,7 +339,6 @@ class Trails:
                 )
             return demand
 
-
         product_indices = A_row.coords[0]
         values = A_row.data
 
@@ -287,15 +347,6 @@ class Trails:
                 "expand_temporal_exchanges: A_row.nnz=%d (before skipping production/diag outputs)",
                 int(A_row.nnz),
             )
-
-        def _add_to_demand(target_year: int, product_index: int, exchange_amount: float) -> None:
-            demand.setdefault(target_year, {})
-            demand[target_year][product_index] = demand[target_year].get(product_index, 0.0) + exchange_amount
-
-        def _child_amount(parent_amount: float, exchange_value: float) -> float:
-            if exchange_value < 0.0:
-                return parent_amount * (-exchange_value)
-            return parent_amount * exchange_value
 
         for product_index, exchange_value in zip(product_indices, values):
             exchange_value = float(exchange_value)
@@ -309,13 +360,13 @@ class Trails:
             # Now compute the propagated requirement amount:
             # - Inputs are negative -> convert to positive requirement magnitude
             # - Off-diagonal positive entries (e.g., waste treatment services) are kept as-is
-            child_amount = _child_amount(amount, exchange_value)
+            child_amount = self._child_amount(amount, exchange_value)
 
             tex = self._get_tech_temporal_exchange(year, act_idx, product_index)
 
             if (tex is None) or (not use_temporal_distributions):
                 y_eff = scenario_year
-                _add_to_demand(y_eff, product_index, child_amount)
+                self._add_demand_entry(demand, y_eff, product_index, child_amount)
                 continue
 
             if debug:
@@ -324,33 +375,15 @@ class Trails:
                     year, act_idx, product_index, child_amount
                 )
 
-            td = TemporalDistribution(tex)
-
-            offsets_and_weights = list(td.iter_offsets_and_weights(debug=debug))
-            if not offsets_and_weights:
-                if debug:
-                    logger.warning(
-                        "expand_temporal_exchanges: TD produced no offsets/weights for (year=%d act=%d prod=%d) -> dropping exchange",
-                        year, act_idx, product_index
-                    )
-            else:
-                if debug:
-                    logger.debug(
-                        "expand_temporal_exchanges: TD offsets=%s (sum_w=%g)",
-                        [p[0] for p in offsets_and_weights],
-                        float(sum(p[1] for p in offsets_and_weights)),
-                    )
-
-            for offset, weight in offsets_and_weights:
-                raw_year = year + offset
-                y_eff = self._map_year_to_scenario_year(raw_year)
-
-                factor = td.scale_factor(offset)
-                _add_to_demand(
-                    y_eff,
-                    product_index,
-                    child_amount * float(weight) * float(factor),
-                )
+            self._apply_temporal_distribution_to_demand(
+                year=year,
+                scenario_year=scenario_year,
+                product_index=product_index,
+                child_amount=child_amount,
+                tex=tex,
+                demand=demand,
+                debug=debug,
+            )
 
         total_children = sum(len(m) for m in demand.values())
         if debug:
@@ -386,6 +419,37 @@ class Trails:
         y_tpl = self._map_year_to_template_year(year)
         return self.temporal_biosphere_exchanges.get((str(y_tpl), int(act_idx), int(flow_idx)))
 
+    def _get_biosphere_slice(self, base_year: int, debug: bool):
+        if self.B is None:
+            if debug:
+                logger.warning("accumulate_bio: B is None -> nothing to accumulate")
+            return None
+
+        context = self._get_scenario_context(base_year)
+        if context is None:
+            if debug:
+                logger.error(
+                    "accumulate_bio: scenario_label not in scenario_index (base_year=%d) -> abort",
+                    int(base_year)
+                )
+            return None
+
+        scenario_year, scenario_label, t = context
+        B_t = self.B[t, :, :]
+        B_t_nnz = int(getattr(B_t, "nnz", 0))
+        if debug:
+            logger.info(
+                "accumulate_bio: B slice t=%d nnz=%d shape=%s",
+                int(t), B_t_nnz, getattr(B_t, "shape", None)
+            )
+        if B_t_nnz == 0:
+            if debug:
+                logger.warning("accumulate_bio: B_t.nnz==0 -> nothing to accumulate")
+            return None
+
+        n_flows = int(self.B.shape[2])
+        return scenario_year, t, B_t, n_flows
+
     def accumulate_temporalized_biosphere_inventory(
             self,
             base_year: int,
@@ -408,41 +472,10 @@ class Trails:
                 int(base_year), len(supply_by_activity), float(min_amount), bool(use_temporal_distributions)
             )
 
-        if self.B is None:
-            if debug:
-                logger.warning("accumulate_bio: B is None -> nothing to accumulate")
+        biosphere_slice = self._get_biosphere_slice(base_year, debug)
+        if biosphere_slice is None:
             return
-
-        scenario_year = self._map_year_to_scenario_year(base_year)
-        scenario_label = str(scenario_year)
-        if scenario_label not in self.scenario_index:
-            if debug:
-                logger.error(
-                    "accumulate_bio: scenario_label=%s not in scenario_index (base_year=%d) -> abort",
-                    scenario_label, int(base_year)
-                )
-            return
-        t = self.scenario_index[scenario_label]
-
-        if debug:
-            logger.info(
-                "accumulate_bio: base_year=%d scenario_year=%d t=%d",
-                int(base_year), int(scenario_year), int(t)
-            )
-
-        B_t = self.B[t, :, :]
-        B_t_nnz = int(getattr(B_t, "nnz", 0))
-        if debug:
-            logger.info(
-                "accumulate_bio: B slice t=%d nnz=%d shape=%s",
-                int(t), B_t_nnz, getattr(B_t, "shape", None)
-            )
-        if B_t_nnz == 0:
-            if debug:
-                logger.warning("accumulate_bio: B_t.nnz==0 -> nothing to accumulate")
-            return
-
-        n_flows = int(self.B.shape[2])
+        scenario_year, t, B_t, n_flows = biosphere_slice
 
         act_indices = B_t.coords[0].astype(int)
         flow_indices = B_t.coords[1].astype(int)
@@ -516,6 +549,64 @@ class Trails:
         """
         return self._map_year_to_scenario_year(year)
 
+    @staticmethod
+    def _estimate_total_from_depth(max_depth: int):
+        DEPTH_TOTALS = {
+            1: 10,
+            2: 50,
+            3: 400,
+            4: 4000,
+            5: 40000,
+            6: 400000,
+            7: 4000000,
+            8: 40000000,
+        }
+
+        EMPIRICAL_SAFETY_FACTOR = 1.05
+
+        if max_depth in DEPTH_TOTALS:
+            return int(max(1, DEPTH_TOTALS[max_depth] * EMPIRICAL_SAFETY_FACTOR))
+
+        depths = sorted(DEPTH_TOTALS.keys())
+        if len(depths) >= 2:
+            lo = max([d for d in depths if d < max_depth], default=None)
+            hi = min([d for d in depths if d > max_depth], default=None)
+            if lo is not None and hi is not None and DEPTH_TOTALS[lo] > 0 and DEPTH_TOTALS[hi] > 0:
+                import math
+                y0 = math.log(DEPTH_TOTALS[lo])
+                y1 = math.log(DEPTH_TOTALS[hi])
+                t = (max_depth - lo) / (hi - lo)
+                est = math.exp(y0 + t * (y1 - y0))
+                return int(max(1, est * EMPIRICAL_SAFETY_FACTOR))
+
+        return None
+
+    @staticmethod
+    def _record_frontier(frontier_total, provenance_roots, y: int, a: int, x: float, r: Optional[int],
+                         return_provenance: bool):
+        frontier_total[(int(y), int(a))] += float(x)
+        if return_provenance and (r is not None):
+            provenance_roots[(int(y), int(a))][int(r)] += float(x)
+
+    @staticmethod
+    def _record_direct_bio(direct_bio_total, direct_bio_roots, y: int, a: int, x: float, r: Optional[int],
+                           return_provenance: bool):
+        direct_bio_total[(int(y), int(a))] += float(x)
+        if return_provenance and (r is not None):
+            direct_bio_roots[(int(y), int(a))][int(r)] += float(x)
+
+    def _has_direct_biosphere(self, scenario_year: int, act: int, bio_cache: dict) -> bool:
+        label = str(scenario_year)
+        if label in self.scenario_index and (self.B is not None):
+            t = self.scenario_index[label]
+            key = (scenario_year, act)
+            if key in bio_cache:
+                return bio_cache[key]
+            has_direct_bio = (self.B[t, act, :].nnz > 0)
+            bio_cache[key] = has_direct_bio
+            return has_direct_bio
+        return False
+
 
     def temporal_traversal(
             self,
@@ -544,68 +635,9 @@ class Trails:
             )
 
         # ------------------------------------------------------------------
-        # 1) Empirical totals by depth (YOU populate these)
-        #    Values should represent the *typical nodes_processed* for that depth.
-        # ------------------------------------------------------------------
-        DEPTH_TOTALS = {
-            1: 10,
-            2: 50,
-            3: 400,
-            4: 4000,
-            5: 40000,
-            6: 400000,
-            7: 4000000,
-            8: 40000000,
-        }
-
-        # Conservative multiplier so the bar doesn't finish early
-        EMPIRICAL_SAFETY_FACTOR = 1.05  # tune: 1.05–1.30
-
-        # ------------------------------------------------------------------
-        # 2) Warm-up fallback params (only used if DEPTH_TOTALS lacks max_depth)
-        # ------------------------------------------------------------------
-        WARMUP_LIMIT = 1000
-        BRANCHING_PERCENTILE = 95.0
-        BRANCHING_SAFETY_FACTOR = 1.2
-
-        def estimate_total_from_branching(branching_samples):
-            if not branching_samples:
-                return 1
-            s = sorted(branching_samples)
-            k = int((BRANCHING_PERCENTILE / 100.0) * (len(s) - 1))
-            b = max(1.0, float(s[k]) * BRANCHING_SAFETY_FACTOR)
-            if abs(b - 1.0) < 1e-9:
-                return max_depth + 1
-            return int((b ** (max_depth + 1) - 1.0) / (b - 1.0))
-
-        def estimate_total_from_depth():
-            # Exact depth available
-            if max_depth in DEPTH_TOTALS:
-                return int(max(1, DEPTH_TOTALS[max_depth] * EMPIRICAL_SAFETY_FACTOR))
-
-            # If you have surrounding depths, interpolate in log-space (often more stable)
-            depths = sorted(DEPTH_TOTALS.keys())
-            if len(depths) >= 2:
-                lo = max([d for d in depths if d < max_depth], default=None)
-                hi = min([d for d in depths if d > max_depth], default=None)
-                if lo is not None and hi is not None and DEPTH_TOTALS[lo] > 0 and DEPTH_TOTALS[hi] > 0:
-                    import math
-                    y0 = math.log(DEPTH_TOTALS[lo])
-                    y1 = math.log(DEPTH_TOTALS[hi])
-                    t = (max_depth - lo) / (hi - lo)
-                    est = math.exp(y0 + t * (y1 - y0))
-                    return int(max(1, est * EMPIRICAL_SAFETY_FACTOR))
-
-            # Otherwise, no empirical estimate
-            return None
-
-        # ------------------------------------------------------------------
         # Progress bar setup
         # ------------------------------------------------------------------
         pbar = None
-        branching_samples = []
-        nodes_processed = 0
-
         total_est = None
         total_est = estimate_total_from_depth()
         try:
@@ -692,32 +724,12 @@ class Trails:
 
             # Map to scenario year for "has direct biosphere" test (fast cutoff logic)
             scenario_year = self._map_year_to_scenario_year(year)
-            label = str(scenario_year)
-
-            has_direct_bio = False
-            if label in self.scenario_index and (self.B is not None):
-                t = self.scenario_index[label]
-                key = (scenario_year, act)
-                if key in bio_cache:
-                    has_direct_bio = bio_cache[key]
-                else:
-                    has_direct_bio = (self.B[t, act, :].nnz > 0)
-                    bio_cache[key] = has_direct_bio
+            has_direct_bio = self._has_direct_biosphere(scenario_year, act, bio_cache)
 
             # Helper: record a node into frontier + provenance
-            def _record_frontier(y: int, a: int, x: float, r: Optional[int]):
-                frontier_total[(int(y), int(a))] += float(x)
-                if return_provenance and (r is not None):
-                    provenance_roots[(int(y), int(a))][int(r)] += float(x)
-
-            def _record_direct_bio(y: int, a: int, x: float, r: Optional[int]):
-                direct_bio_total[(int(y), int(a))] += float(x)
-                if return_provenance and (r is not None):
-                    direct_bio_roots[(int(y), int(a))][int(r)] += float(x)
-
             # Stop expanding at max_depth
             if depth >= max_depth:
-                _record_frontier(year, act, amt, root_act)
+                self._record_frontier(frontier_total, provenance_roots, year, act, amt, root_act, return_provenance)
                 continue
 
             # Expand this node
@@ -758,7 +770,7 @@ class Trails:
 
             # Leaf: record it
             if not child_demands:
-                _record_frontier(year, act, amt, root_act)
+                self._record_frontier(frontier_total, provenance_roots, year, act, amt, root_act, return_provenance)
                 continue
 
             # IMPORTANT BEHAVIOR:
@@ -766,7 +778,15 @@ class Trails:
             # This matches your existing “solve nodes with direct biosphere” design.
             # (It is NOT a full “score technosphere exchange at its own year” algorithm.)
             if has_direct_bio and depth > 0:
-                _record_direct_bio(year, act, amt, root_act)
+                self._record_direct_bio(
+                    direct_bio_total,
+                    direct_bio_roots,
+                    year,
+                    act,
+                    amt,
+                    root_act,
+                    return_provenance,
+                )
 
             # Enqueue children
             for child_year, mapping in child_demands.items():
