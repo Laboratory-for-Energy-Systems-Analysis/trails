@@ -5,7 +5,6 @@ from collections import defaultdict, deque
 
 import numpy as np
 import sparse
-import pyprind
 
 from tqdm import tqdm
 
@@ -48,7 +47,6 @@ class Trails:
         self.A: Optional[sparse.COO] = None
         self.B: Optional[sparse.COO] = None
 
-
         print("Loading matrices from data package          [1/3]")
         (
             self.A,
@@ -74,7 +72,6 @@ class Trails:
             None if self.B is None else int(self.B.nnz),
             len(getattr(self, "temporal_exchanges", {})),
         )
-
 
         self.template_labels = list(self.scenario_labels)
         self.template_years_int = np.array([int(lbl) for lbl in self.template_labels], dtype=int)
@@ -275,7 +272,7 @@ class Trails:
             return demand
 
 
-        prod_indices = A_row.coords[0]
+        product_indices = A_row.coords[0]
         values = A_row.data
 
         logger.debug(
@@ -283,60 +280,65 @@ class Trails:
             int(A_row.nnz),
         )
 
-        for prod_idx, value in zip(prod_indices, values):
-            value = float(value)
-            prod_idx = int(prod_idx)
+        def _add_to_demand(target_year: int, product_index: int, exchange_amount: float) -> None:
+            demand.setdefault(target_year, {})
+            demand[target_year][product_index] = demand[target_year].get(product_index, 0.0) + exchange_amount
+
+        def _child_amount(parent_amount: float, exchange_value: float) -> float:
+            if exchange_value < 0.0:
+                return parent_amount * (-exchange_value)
+            return parent_amount * exchange_value
+
+        for product_index, exchange_value in zip(product_indices, values):
+            exchange_value = float(exchange_value)
+            product_index = int(product_index)
 
             # Always skip the canonical production exchange, if present in your data
             # (common convention: A[act, act] = 1)
-            if prod_idx == act_idx and abs(value) == 1.0:
+            if product_index == act_idx and abs(exchange_value) == 1.0:
                 continue
 
             # Now compute the propagated requirement amount:
             # - Inputs are negative -> convert to positive requirement magnitude
             # - Off-diagonal positive entries (e.g., waste treatment services) are kept as-is
-            if value < 0.0:
-                child_amt = amount * (-value)  # positive requirement magnitude
-            else:
-                child_amt = amount * (value)  # keep positive sign (supply-driven service)
+            child_amount = _child_amount(amount, exchange_value)
 
-            tex = self._get_tech_temporal_exchange(year, act_idx, prod_idx)
+            tex = self._get_tech_temporal_exchange(year, act_idx, product_index)
 
             if (tex is None) or (not use_temporal_distributions):
                 y_eff = scenario_year
-                demand.setdefault(y_eff, {})
-                demand[y_eff][prod_idx] = demand[y_eff].get(prod_idx, 0.0) + child_amt
+                _add_to_demand(y_eff, product_index, child_amount)
                 continue
 
             logger.debug(
                 "expand_temporal_exchanges: applying TD for (year=%d act=%d prod=%d) child_amt=%g",
-                year, act_idx, prod_idx, child_amt
+                year, act_idx, product_index, child_amount
             )
 
             td = TemporalDistribution(tex)
 
-            pairs = list(td.iter_offsets_and_weights())
-            if not pairs:
+            offsets_and_weights = list(td.iter_offsets_and_weights())
+            if not offsets_and_weights:
                 logger.warning(
                     "expand_temporal_exchanges: TD produced no offsets/weights for (year=%d act=%d prod=%d) -> dropping exchange",
-                    year, act_idx, prod_idx
+                    year, act_idx, product_index
                 )
             else:
                 logger.debug(
                     "expand_temporal_exchanges: TD offsets=%s (sum_w=%g)",
-                    [p[0] for p in pairs],
-                    float(sum(p[1] for p in pairs)),
+                    [p[0] for p in offsets_and_weights],
+                    float(sum(p[1] for p in offsets_and_weights)),
                 )
 
-            for offset, weight in td.iter_offsets_and_weights():
+            for offset, weight in offsets_and_weights:
                 raw_year = year + offset
                 y_eff = self._map_year_to_scenario_year(raw_year)
 
                 factor = td.scale_factor(offset)
-                demand.setdefault(y_eff, {})
-                demand[y_eff][prod_idx] = (
-                        demand[y_eff].get(prod_idx, 0.0)
-                        + child_amt * float(weight) * float(factor)
+                _add_to_demand(
+                    y_eff,
+                    product_index,
+                    child_amount * float(weight) * float(factor),
                 )
 
         total_children = sum(len(m) for m in demand.values())
@@ -387,9 +389,6 @@ class Trails:
 
         supply_by_activity maps Trails activity indices -> supply.
         """
-        # -----------------------------
-        # (A) Entry diagnostics
-        # -----------------------------
         logger.info(
             "accumulate_bio: base_year=%d acts_in=%d min_amount=%g use_td=%s",
             int(base_year), len(supply_by_activity), float(min_amount), bool(use_temporal_distributions)
@@ -399,9 +398,6 @@ class Trails:
             logger.warning("accumulate_bio: B is None -> nothing to accumulate")
             return
 
-        # -----------------------------
-        # (B) Scenario/template mapping diagnostics
-        # -----------------------------
         scenario_year = self._map_year_to_scenario_year(base_year)
         scenario_label = str(scenario_year)
         if scenario_label not in self.scenario_index:
@@ -417,9 +413,6 @@ class Trails:
             int(base_year), int(scenario_year), int(t)
         )
 
-        # -----------------------------
-        # (C) B slice diagnostics
-        # -----------------------------
         B_t = self.B[t, :, :]
         B_t_nnz = int(getattr(B_t, "nnz", 0))
         logger.info(
@@ -435,20 +428,6 @@ class Trails:
         act_indices = B_t.coords[0].astype(int)
         flow_indices = B_t.coords[1].astype(int)
         values = B_t.data
-
-        # -----------------------------
-        # (D) Main accumulation with “why zero?” instrumentation
-        # -----------------------------
-        n_triplets = 0
-        n_supply_nonzero = 0
-        n_scaled_nonzero = 0
-        n_below_min = 0
-        n_no_td = 0
-        n_with_td = 0
-
-        # for a few examples only (avoid log spam)
-        logged_nonzero_rows = 0
-        LOG_EXAMPLES = 10
 
         # Use template year for temporal metadata (distributions defined on original years)
         template_year = self._map_year_to_template_year(base_year)
@@ -511,25 +490,11 @@ class Trails:
                     int(template_year), int(scenario_year), act_idx, flow_idx
                 )
 
-
     def _map_year_to_available(self, year: int) -> int:
-            """
-            Map an arbitrary year to the nearest available scenario year,
-            clipped to [min_year, max_year].
-
-            If you later interpolate annually, and every year in [min,max]
-            is present, this is effectively just clipping.
-            """
-            # 1) Clip to global range
-            y = max(self.min_year, min(self.max_year, int(year)))
-
-            # 2) If we have a full annual grid, just return y
-            if len(self.years_int) == (self.max_year - self.min_year + 1):
-                return y
-
-            # 3) Otherwise: snap to nearest available scenario year
-            idx = int(np.abs(self.years_int - y).argmin())
-            return int(self.years_int[idx])
+        """
+        Backwards-compatible alias for _map_year_to_scenario_year.
+        """
+        return self._map_year_to_scenario_year(year)
 
 
     def temporal_traversal(
