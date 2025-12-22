@@ -48,6 +48,11 @@ class TemporalDistribution:
     """Turn a TemporalExchange into discrete (offset, weight) pairs."""
 
     def __init__(self, tex: TemporalExchange):
+        """Initialize the distribution wrapper.
+
+        :param tex: Temporal exchange metadata to interpret.
+        :type tex: TemporalExchange
+        """
         self.tex = tex
 
     def iter_offsets_and_weights(
@@ -140,6 +145,15 @@ class TemporalDistribution:
     def scale_factor(
         self, offset: int, *, clip: Optional[Tuple[float, float]] = None
     ) -> float:
+        """Compute the scaling factor for a given offset.
+
+        :param offset: Offset value to scale.
+        :type offset: int
+        :param clip: Optional ``(min, max)`` bounds for the scale factor.
+        :type clip: tuple[float, float] | None
+        :returns: Scaling factor to apply to the offset.
+        :rtype: float
+        """
         t = self.tex
         raw_mode = getattr(t, "scale_mode", None)
         mode = (raw_mode or "").strip().lower()
@@ -225,6 +239,13 @@ class TemporalDistribution:
 
         # CDF helper
         def normal_cdf(x):
+            """Return the standard normal CDF at ``x`` for the local parameters.
+
+            :param x: Input value.
+            :type x: float
+            :returns: CDF value for the truncated normal helper.
+            :rtype: float
+            """
             return 0.5 * (1 + erf((x - loc) / (scale * sqrt(2))))
 
         # Continuous probability mass inside the allowed range

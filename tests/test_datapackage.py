@@ -4,12 +4,14 @@ import trails.datapackage as datapackage
 
 
 def test_parse_intish_or_none():
+    """Verify int-like parsing helper."""
     assert datapackage._parse_intish_or_none(None) is None
     assert datapackage._parse_intish_or_none("") is None
     assert datapackage._parse_intish_or_none("3.0") == 3
 
 
 def test_iter_inventory_resources(example_package):
+    """Verify inventory resource iteration."""
     resources = list(
         datapackage._iter_inventory_resources(example_package, "A_matrix.csv")
     )
@@ -18,6 +20,7 @@ def test_iter_inventory_resources(example_package):
 
 
 def test_label_to_year_and_sorting():
+    """Verify label-to-year parsing and sorting."""
     assert datapackage._label_to_year("2050") == 2050
     assert datapackage._label_to_year("model/pathway/2005") == 2005
 
@@ -27,6 +30,7 @@ def test_label_to_year_and_sorting():
 
 
 def test_load_matrices_from_package(example_package):
+    """Verify matrix loading from datapackage."""
     A, B, labels, scenario_index, temporal_exchanges, temporal_bio = (
         datapackage.load_matrices_from_package(example_package)
     )
@@ -40,6 +44,7 @@ def test_load_matrices_from_package(example_package):
 
 
 def test_interpolate_to_annual(example_package):
+    """Verify annual interpolation of matrices."""
     A, B, labels, _, _, _ = datapackage.load_matrices_from_package(example_package)
     A_interp, B_interp, new_labels, new_index = datapackage.interpolate_to_annual(
         A, B, labels
@@ -54,6 +59,7 @@ def test_interpolate_to_annual(example_package):
 
 
 def test_load_indices_from_package(example_package):
+    """Verify index loading from datapackage."""
     activity_indices, biosphere_indices = datapackage.load_indices_from_package(
         example_package
     )
