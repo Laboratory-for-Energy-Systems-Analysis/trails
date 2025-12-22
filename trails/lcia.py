@@ -57,6 +57,15 @@ def format_lcia_method_exchanges(method):
 
 
 def get_lcia_methods(methods: list = None, ei_version="3.11"):
+    """Load LCIA methods and exchanges from the bundled JSON files.
+
+    :param methods: Optional list of method names to include.
+    :type methods: list[str] | None
+    :param ei_version: Ecoinvent release identifier (e.g. ``"3.11"``).
+    :type ei_version: str
+    :returns: Mapping of method name to exchange characterization factors.
+    :rtype: dict[str, dict[tuple[str, str, str], float]]
+    """
     key = (ei_version, tuple(methods) if methods else None)
     if key in _LCIA_METHODS_CACHE:
         return _LCIA_METHODS_CACHE[key]

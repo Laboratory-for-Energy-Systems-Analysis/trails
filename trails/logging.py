@@ -18,6 +18,14 @@ _depth: ContextVar[str] = ContextVar("depth", default="-")
 
 class TrailsContextFilter(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
+        """Inject Trails context variables into a log record.
+
+        Args:
+            record: Log record to enrich.
+
+        Returns:
+            bool: True to keep the record.
+        """
         record.run_id = _run_id.get()
         record.case = _case.get()
         record.year = _year.get()
@@ -33,13 +41,18 @@ def configure_trails_logging(
     mode: str = "w",
     debug: bool = False,
 ) -> Path:
-    """
-    Configure root logging so all modules using logging.getLogger(__name__)
-    write to the same file in the current working directory.
+    """Configure Trails logging with optional file and console handlers.
 
-    - File handler always writes to `filename`.
-    - Console handler (optional) is kept at WARNING by default (notebook-friendly).
-    - Idempotent across notebook reruns: updates or replaces existing Trails handlers.
+    Args:
+        file_level: Logging level for the file handler.
+        filename: Name of the log file written in the current working directory.
+        also_console: Whether to emit logs to the console.
+        console_level: Logging level for the console handler.
+        mode: File open mode for the file handler.
+        debug: Whether to log a configuration summary.
+
+    Returns:
+        pathlib.Path: Path to the log file.
     """
     log_path = Path(os.getcwd()) / filename
     root = logging.getLogger()
@@ -54,11 +67,27 @@ def configure_trails_logging(
 
     # Helper to detect "our" handlers
     def _is_trails_file_handler(h: logging.Handler) -> bool:
+        """Check whether a handler is the Trails file handler.
+
+        Args:
+            h: Handler to inspect.
+
+        Returns:
+            bool: True if the handler targets the Trails log file.
+        """
         return isinstance(h, logging.FileHandler) and getattr(
             h, "baseFilename", ""
         ) == str(log_path)
 
     def _is_console_handler(h: logging.Handler) -> bool:
+        """Check whether a handler is a console handler.
+
+        Args:
+            h: Handler to inspect.
+
+        Returns:
+            bool: True if the handler is a stream handler (not a file handler).
+        """
         # StreamHandler that is not a FileHandler
         return isinstance(h, logging.StreamHandler) and not isinstance(
             h, logging.FileHandler
@@ -132,6 +161,17 @@ def trails_log_context(
     year: Optional[int] = None,
     depth: Optional[int] = None,
 ):
+    """Temporarily set Trails logging context variables.
+
+    Args:
+        run_id: Run identifier to attach to log records.
+        case: Case identifier to attach to log records.
+        year: Year value to attach to log records.
+        depth: Depth value to attach to log records.
+
+    Yields:
+        None: Context manager that sets and resets logging context variables.
+    """
     tokens = []
     try:
         if run_id is not None:

@@ -17,6 +17,13 @@ logger = logging.getLogger(__name__)
 
 
 def _ij_from_coords(X_t):
+    """Extract row/column indices from a sparse COO coordinate array.
+
+    :param X_t: Sparse array with ``coords`` attribute.
+    :type X_t: sparse.COO
+    :returns: Tuple of ``(row_indices, col_indices)``.
+    :rtype: tuple[numpy.ndarray, numpy.ndarray]
+    """
     coords = X_t.coords
     if coords.shape[0] == 3:
         i_idx = np.asarray(coords[1], dtype=np.int64)
@@ -30,6 +37,15 @@ def _ij_from_coords(X_t):
 
 
 def _resolve_matrix_label(trails: Trails, year: int) -> tuple[str, int]:
+    """Resolve a calendar year to the closest available matrix label.
+
+    :param trails: Trails instance with scenario labels and index.
+    :type trails: Trails
+    :param year: Calendar year to resolve.
+    :type year: int
+    :returns: Tuple of ``(label_for_matrix, scenario_index)``.
+    :rtype: tuple[str, int]
+    """
     label_for_matrix = str(year)
     if label_for_matrix not in trails.scenario_index:
         years = np.array([int(lbl) for lbl in trails.scenario_labels])
@@ -45,6 +61,15 @@ def _resolve_matrix_label(trails: Trails, year: int) -> tuple[str, int]:
 
 
 def _select_metadata_label(trails: Trails, label_for_matrix: str) -> str:
+    """Select the metadata label matching or nearest to the matrix label.
+
+    :param trails: Trails instance with metadata labels.
+    :type trails: Trails
+    :param label_for_matrix: Scenario label used for the matrix slice.
+    :type label_for_matrix: str
+    :returns: Metadata label to use for indices.
+    :rtype: str
+    """
     if label_for_matrix in trails.activity_indices:
         return label_for_matrix
     return _nearest_metadata_label_for_year(trails, int(label_for_matrix))
@@ -57,6 +82,21 @@ def _apply_temporal_scaling_to_A(
     debug: bool,
     collapse_tech_temporal_scaling: bool,
 ):
+    """Apply temporal scaling factors to the technosphere matrix slice.
+
+    :param trails: Trails instance with temporal metadata.
+    :type trails: Trails
+    :param year: Calendar year of the slice.
+    :type year: int
+    :param A_t: Technosphere matrix slice.
+    :type A_t: sparse.COO
+    :param debug: Whether to emit debug logging.
+    :type debug: bool
+    :param collapse_tech_temporal_scaling: Whether to collapse scaling into A.
+    :type collapse_tech_temporal_scaling: bool
+    :returns: Scaled A data array.
+    :rtype: numpy.ndarray
+    """
     A_signed = A_t.data
     if not collapse_tech_temporal_scaling:
         return A_signed
@@ -97,6 +137,23 @@ def _apply_temporal_scaling_to_B(
     collapse_bio_temporal_scaling: bool,
     debug: bool,
 ):
+    """Apply temporal scaling factors to the biosphere matrix slice.
+
+    :param trails: Trails instance with temporal metadata.
+    :type trails: Trails
+    :param year: Calendar year of the slice.
+    :type year: int
+    :param B_t: Biosphere matrix slice.
+    :type B_t: sparse.COO
+    :param zero_biosphere: Whether to zero out biosphere values.
+    :type zero_biosphere: bool
+    :param collapse_bio_temporal_scaling: Whether to collapse scaling into B.
+    :type collapse_bio_temporal_scaling: bool
+    :param debug: Whether to emit debug logging.
+    :type debug: bool
+    :returns: Scaled B data array.
+    :rtype: numpy.ndarray
+    """
     B_signed = B_t.data.astype(np.float64, copy=False)
     if not collapse_bio_temporal_scaling or zero_biosphere:
         return B_signed
@@ -124,6 +181,15 @@ def _apply_temporal_scaling_to_B(
 
 
 def _make_bw_indices_rowcol(row_idx: np.ndarray, col_idx: np.ndarray) -> np.ndarray:
+    """Build a bw_processing indices array from row and column indices.
+
+    :param row_idx: Row indices array.
+    :type row_idx: numpy.ndarray
+    :param col_idx: Column indices array.
+    :type col_idx: numpy.ndarray
+    :returns: Structured indices array compatible with bw_processing.
+    :rtype: numpy.ndarray
+    """
     idx = np.empty(len(row_idx), dtype=bwp.INDICES_DTYPE)
     idx["row"] = row_idx.astype(np.uint32, copy=False)
     idx["col"] = col_idx.astype(np.uint32, copy=False)
@@ -133,6 +199,23 @@ def _make_bw_indices_rowcol(row_idx: np.ndarray, col_idx: np.ndarray) -> np.ndar
 def _warn_on_missing_metadata(
     label_for_matrix, meta_label, A_act_idx, A_prod_idx, B_flow_idx, act_meta, bio_meta
 ):
+    """Emit warnings for matrix indices missing from metadata.
+
+    :param label_for_matrix: Scenario label for matrix slices.
+    :param meta_label: Metadata label used for indices.
+    :param A_act_idx: Activity indices from A.
+    :param A_prod_idx: Product indices from A.
+    :param B_flow_idx: Flow indices from B.
+    :param act_meta: Activity metadata mapping.
+    :param bio_meta: Biosphere metadata mapping.
+    :type label_for_matrix: str
+    :type meta_label: str
+    :type A_act_idx: numpy.ndarray
+    :type A_prod_idx: numpy.ndarray
+    :type B_flow_idx: numpy.ndarray
+    :type act_meta: dict
+    :type bio_meta: dict
+    """
     meta_act_indices = set(act_meta.keys())
     meta_bio_indices = set(bio_meta.keys())
 
@@ -162,6 +245,15 @@ def _warn_on_missing_metadata(
 
 
 def _build_metadata_indices(act_meta, bio_meta):
+    """Build technosphere and biosphere indices from metadata dictionaries.
+
+    :param act_meta: Activity metadata mapping.
+    :type act_meta: dict
+    :param bio_meta: Biosphere metadata mapping.
+    :type bio_meta: dict
+    :returns: Tuple of ``(technosphere_indices, biosphere_indices)``.
+    :rtype: tuple[dict[tuple, int], dict[tuple, int]]
+    """
     technosphere_indices: Dict[tuple, int] = {}
     for idx, meta in act_meta.items():
         key = (
@@ -415,6 +507,17 @@ def lca_static_simple(
 
 
 def _normalize_root(fu0: int, root: int, legacy_root: int) -> int:
+    """Normalize legacy root identifiers to the functional unit index.
+
+    :param fu0: Functional unit activity index.
+    :type fu0: int
+    :param root: Root activity index to normalize.
+    :type root: int
+    :param legacy_root: Legacy sentinel root to replace.
+    :type legacy_root: int
+    :returns: Normalized root index.
+    :rtype: int
+    """
     root = int(root)
     return fu0 if root == legacy_root else root
 
@@ -429,6 +532,27 @@ def _run_temporal_traversal(
     show_progress: bool,
     debug: bool,
 ):
+    """Run temporal traversal and normalize optional return structures.
+
+    :param trails: Trails instance to traverse.
+    :type trails: Trails
+    :param y0: Start year.
+    :type y0: int
+    :param fu0: Functional unit activity index.
+    :type fu0: int
+    :param amt0: Functional unit amount.
+    :type amt0: float
+    :param max_depth: Maximum traversal depth.
+    :type max_depth: int
+    :param min_amount: Minimum amount threshold for traversal.
+    :type min_amount: float
+    :param show_progress: Whether to show traversal progress.
+    :type show_progress: bool
+    :param debug: Whether to emit debug logging.
+    :type debug: bool
+    :returns: Traversal frontier, provenance, and injected supply mappings.
+    :rtype: tuple[dict, dict, dict, dict]
+    """
     (
         frontier,
         provenance,
@@ -467,6 +591,21 @@ def _apply_fu_direct_injection(
     amt0: float,
     legacy_root: int,
 ):
+    """Record functional-unit direct biosphere injection entries.
+
+    :param injected_supply_by_year_act: Mapping of injected supply by year/activity.
+    :type injected_supply_by_year_act: dict[tuple[int, int], float]
+    :param injected_supply_prov_by_year_act: Provenance mapping by year/activity.
+    :type injected_supply_prov_by_year_act: dict[tuple[int, int], dict[int, float]]
+    :param y0: Start year.
+    :type y0: int
+    :param fu0: Functional unit activity index.
+    :type fu0: int
+    :param amt0: Functional unit amount.
+    :type amt0: float
+    :param legacy_root: Legacy sentinel root to normalize.
+    :type legacy_root: int
+    """
     injected_supply_by_year_act[(y0, fu0)] = (
         float(injected_supply_by_year_act.get((y0, fu0), 0.0)) + amt0
     )
@@ -483,10 +622,24 @@ def _apply_fu_direct_injection(
 
 
 def _build_rooted_frontier(frontier, provenance, fu0: int, root_tol: float):
+    """Build a frontier keyed by activity roots using provenance paths.
+
+    :param frontier: Mapping of ``(year, activity)`` to amount.
+    :type frontier: dict[tuple[int, int], float]
+    :param provenance: Mapping of provenance path to amount shares.
+    :type provenance: dict[tuple[int, int], dict]
+    :param fu0: Functional unit activity index.
+    :type fu0: int
+    :param root_tol: Tolerance for residual attribution.
+    :type root_tol: float
+    :returns: Rooted frontier and set of roots seen.
+    :rtype: tuple[dict[tuple[int, int, int], float], set[int]]
+    """
     rooted_frontier = defaultdict(float)
     roots_seen = set()
 
     def _iter_path_nodes(path):
+        """Yield activity indices from a provenance path."""
         if path is None:
             return
         if isinstance(path, (int, np.integer)):
@@ -502,6 +655,17 @@ def _build_rooted_frontier(frontier, provenance, fu0: int, root_tol: float):
             return
 
     def _root_from_path(path, fu_act: int, fallback_root: int) -> int:
+        """Infer the root activity from a provenance path.
+
+        :param path: Provenance path representation.
+        :param fu_act: Functional unit activity index.
+        :param fallback_root: Fallback root when none is found.
+        :type path: object
+        :type fu_act: int
+        :type fallback_root: int
+        :returns: Root activity index.
+        :rtype: int
+        """
         if isinstance(path, (int, np.integer)):
             r = int(path)
             return r if r != fu_act else int(fallback_root)
@@ -544,6 +708,15 @@ def _build_rooted_frontier(frontier, provenance, fu0: int, root_tol: float):
 def _extend_roots_with_injected_supply(
     roots_seen, injected_supply_prov_by_year_act, normalize_root
 ):
+    """Extend the root set with injected supply provenance entries.
+
+    :param roots_seen: Set of root activity indices.
+    :type roots_seen: set[int]
+    :param injected_supply_prov_by_year_act: Provenance mapping for injected supply.
+    :type injected_supply_prov_by_year_act: dict[tuple[int, int], dict[int, float]]
+    :param normalize_root: Function to normalize root identifiers.
+    :type normalize_root: callable
+    """
     for (_y, _a), roots_map in injected_supply_prov_by_year_act.items():
         for r in roots_map.keys():
             roots_seen.add(normalize_root(int(r)))
@@ -552,6 +725,19 @@ def _extend_roots_with_injected_supply(
 def _build_root_demand_vectors(
     trails: Trails, rooted_frontier, roots_seen, normalize_root
 ):
+    """Build per-root demand vectors from a rooted frontier.
+
+    :param trails: Trails instance with matrix shapes.
+    :type trails: Trails
+    :param rooted_frontier: Rooted frontier mapping.
+    :type rooted_frontier: dict[tuple[int, int, int], float]
+    :param roots_seen: Iterable of roots to include.
+    :type roots_seen: iterable[int]
+    :param normalize_root: Function to normalize root identifiers.
+    :type normalize_root: callable
+    :returns: Mapping of root to per-year demand vectors.
+    :rtype: dict[int, dict[int, numpy.ndarray]]
+    """
     n_activities = int(trails.A.shape[1])
     dtype = trails.value_dtype
     f_by_year_by_root = {r: {} for r in roots_seen}
@@ -569,6 +755,21 @@ def _build_root_demand_vectors(
 
 
 def _get_datapackage(dp_cache, trails: Trails, year: int, zero_bio: bool, debug: bool):
+    """Fetch or build a datapackage for a given year and biosphere setting.
+
+    :param dp_cache: Cache mapping ``(year, zero_bio)`` to datapackage tuples.
+    :type dp_cache: dict[tuple[int, bool], tuple]
+    :param trails: Trails instance to build datapackages from.
+    :type trails: Trails
+    :param year: Calendar year to load.
+    :type year: int
+    :param zero_bio: Whether to zero biosphere emissions.
+    :type zero_bio: bool
+    :param debug: Whether to emit debug logging.
+    :type debug: bool
+    :returns: Datapackage tuple ``(dp, tech_idx, bio_idx, uncertain_params)``.
+    :rtype: tuple
+    """
     dp_key = (year, zero_bio)
     if dp_key not in dp_cache:
         dp, tech_idx, bio_idx, uncertain_params = (
@@ -584,6 +785,17 @@ def _get_datapackage(dp_cache, trails: Trails, year: int, zero_bio: bool, debug:
 
 
 def _build_demand_by_first_level_child(f_by_year_by_root, solve_year, min_amount):
+    """Build demand mappings by first-level child for a solve year.
+
+    :param f_by_year_by_root: Demand vectors by root and year.
+    :type f_by_year_by_root: dict[int, dict[int, numpy.ndarray]]
+    :param solve_year: Year to extract demand for.
+    :type solve_year: int
+    :param min_amount: Minimum amount threshold to include.
+    :type min_amount: float
+    :returns: Demand mapping by root and child index.
+    :rtype: dict[int, dict[int, float]]
+    """
     demand_by_first_level_child: Dict[int, Dict[int, float]] = {}
     for root_idx, by_year in f_by_year_by_root.items():
         vec = by_year.get(solve_year)
@@ -600,6 +812,16 @@ def _build_demand_by_first_level_child(f_by_year_by_root, solve_year, min_amount
 
 
 def _assert_rooted_closure(arr, demand_by_first_level_child, solve_year):
+    """Assert that rooted demands sum to total demand for a solve year.
+
+    :param arr: Total demand array for the solve year.
+    :type arr: numpy.ndarray
+    :param demand_by_first_level_child: Rooted demand mapping.
+    :type demand_by_first_level_child: dict[int, dict[int, float]]
+    :param solve_year: Solve year for error reporting.
+    :type solve_year: int
+    :raises ValueError: If rooted demand does not sum to total demand.
+    """
     summed = np.zeros_like(arr, dtype=float)
     for dct in demand_by_first_level_child.values():
         for i, v in dct.items():
@@ -614,6 +836,17 @@ def _assert_rooted_closure(arr, demand_by_first_level_child, solve_year):
 
 
 def _extract_supply(lca_obj, n_acts: int, min_amount: float) -> Dict[int, float]:
+    """Extract supply values above a minimum threshold from an LCA object.
+
+    :param lca_obj: Brightway LCA object.
+    :type lca_obj: bw2calc.LCA
+    :param n_acts: Number of activities to inspect.
+    :type n_acts: int
+    :param min_amount: Minimum magnitude to include.
+    :type min_amount: float
+    :returns: Mapping of activity index to supply amount.
+    :rtype: dict[int, float]
+    """
     supply_total: Dict[int, float] = {}
     for act_idx in range(n_acts):
         try:
@@ -627,6 +860,17 @@ def _extract_supply(lca_obj, n_acts: int, min_amount: float) -> Dict[int, float]
 
 
 def _build_injected_supply(injected_supply_by_year_act, solve_year, min_amount):
+    """Build injected supply mapping for a solve year.
+
+    :param injected_supply_by_year_act: Injected supply mapping by year/activity.
+    :type injected_supply_by_year_act: dict[tuple[int, int], float]
+    :param solve_year: Solve year to filter by.
+    :type solve_year: int
+    :param min_amount: Minimum magnitude to include.
+    :type min_amount: float
+    :returns: Mapping of activity index to injected supply amount.
+    :rtype: dict[int, float]
+    """
     injected_supply: Dict[int, float] = {}
     for (y, a), v in injected_supply_by_year_act.items():
         if int(y) != solve_year:
@@ -644,6 +888,19 @@ def _build_injected_supply_by_root(
     min_amount,
     normalize_root,
 ):
+    """Build injected supply mapping by root for a solve year.
+
+    :param injected_supply_prov_by_year_act: Provenance mapping for injected supply.
+    :type injected_supply_prov_by_year_act: dict[tuple[int, int], dict[int, float]]
+    :param solve_year: Solve year to filter by.
+    :type solve_year: int
+    :param min_amount: Minimum magnitude to include.
+    :type min_amount: float
+    :param normalize_root: Function to normalize root identifiers.
+    :type normalize_root: callable
+    :returns: Mapping of root to injected supply entries.
+    :rtype: dict[int, dict[int, float]]
+    """
     injected_supply_by_first_level_child: Dict[int, Dict[int, float]] = {}
     for (y, act), roots_map in injected_supply_prov_by_year_act.items():
         if int(y) != solve_year:
@@ -795,6 +1052,31 @@ def _characterize_impact_years(
     debug,
     ei_version="3.11",
 ):
+    """Characterize inventories into impact scores by impact year.
+
+    :param trails: Trails instance with inventory dimensions.
+    :type trails: Trails
+    :param inventory_total_by_impact_year: Total inventory by impact year.
+    :type inventory_total_by_impact_year: dict[int, numpy.ndarray]
+    :param inventory_by_root_by_impact_year: Inventory by root and impact year.
+    :type inventory_by_root_by_impact_year: dict[int, dict[int, numpy.ndarray]]
+    :param dp_cache: Datapackage cache (unused but kept for parity).
+    :type dp_cache: dict
+    :param char_cache: Cache for characterization vectors.
+    :type char_cache: dict
+    :param methods: List of LCIA methods.
+    :type methods: list[str]
+    :param min_amount: Minimum magnitude to include.
+    :type min_amount: float
+    :param normalize_root: Function to normalize root identifiers.
+    :type normalize_root: callable
+    :param debug: Whether to emit debug logging.
+    :type debug: bool
+    :param ei_version: Ecoinvent release identifier.
+    :type ei_version: str
+    :returns: Results by impact year.
+    :rtype: dict[int, dict[str, typing.Any]]
+    """
     results_by_impact_year: Dict[int, Dict[str, Any]] = {}
 
     n_flows = int(trails.B.shape[2]) if trails.B is not None else 0
@@ -888,6 +1170,13 @@ def lca(
     FU_DIRECT_ROOT = fu0
 
     def _normalize_root_local(r: int) -> int:
+        """Normalize root identifiers within the LCA function scope.
+
+        :param r: Root activity index to normalize.
+        :type r: int
+        :returns: Normalized root activity index.
+        :rtype: int
+        """
         return _normalize_root(fu0, r, LEGACY_FU_DIRECT_ROOT)
 
     # ---------------------------------------------------------

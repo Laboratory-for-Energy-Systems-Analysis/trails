@@ -39,6 +39,19 @@ class Trails:
         index_dtype=np.int32,
         debug: bool = False,
     ):
+        """Initialize Trails by loading matrices, indices, and metadata.
+
+        :param package: Frictionless data package to load.
+        :type package: Package
+        :param interpolate_annual: Whether to interpolate matrices to annual resolution.
+        :type interpolate_annual: bool
+        :param value_dtype: Data type for matrix values.
+        :type value_dtype: numpy.dtype
+        :param index_dtype: Data type for matrix indices.
+        :type index_dtype: numpy.dtype
+        :param debug: Whether to emit debug logging.
+        :type debug: bool
+        """
         self.package = package
         self.value_dtype = value_dtype
         self.index_dtype = index_dtype
@@ -125,6 +138,19 @@ class Trails:
         other_idx: int,
         exchanges: Dict[tuple, TemporalExchange],
     ) -> Optional[TemporalExchange]:
+        """Interpolate temporal exchange metadata for a given year and indices.
+
+        :param year: Calendar year to resolve.
+        :type year: int
+        :param act_idx: Activity index.
+        :type act_idx: int
+        :param other_idx: Product or flow index.
+        :type other_idx: int
+        :param exchanges: Mapping of exchange metadata keyed by scenario label.
+        :type exchanges: dict[tuple, TemporalExchange]
+        :returns: Interpolated exchange metadata, if available.
+        :rtype: TemporalExchange | None
+        """
         if not exchanges:
             return None
 
@@ -164,6 +190,15 @@ class Trails:
                 w = (year - y0) / (y1 - y0)
 
                 def interp_optional(v0, v1):
+                    """Interpolate optional numeric values with nearest fallback.
+
+                    :param v0: First value to interpolate.
+                    :type v0: float | None
+                    :param v1: Second value to interpolate.
+                    :type v1: float | None
+                    :returns: Interpolated or nearest value.
+                    :rtype: float | None
+                    """
                     if v0 is None or v1 is None:
                         return v0 if (year - y0) <= (y1 - year) else v1
                     return float(v0) + (float(v1) - float(v0)) * w
@@ -205,6 +240,13 @@ class Trails:
         return int(self.template_years_int[idx])
 
     def _get_scenario_context(self, year: int):
+        """Return the scenario tuple for a given year if available.
+
+        :param year: Calendar year to map.
+        :type year: int
+        :returns: ``(scenario_year, scenario_label, scenario_index)`` or ``None``.
+        :rtype: tuple[int, str, int] | None
+        """
         scenario_year = self._map_year_to_scenario_year(year)
         scenario_label = str(scenario_year)
         if scenario_label not in self.scenario_index:
@@ -216,6 +258,17 @@ class Trails:
     def _add_demand_entry(
         demand, target_year: int, product_index: int, exchange_amount: float
     ) -> None:
+        """Accumulate a demand amount for a given year and product index.
+
+        :param demand: Nested demand mapping to update.
+        :type demand: dict[int, dict[int, float]]
+        :param target_year: Scenario year to update.
+        :type target_year: int
+        :param product_index: Product index to add demand for.
+        :type product_index: int
+        :param exchange_amount: Amount to add.
+        :type exchange_amount: float
+        """
         demand.setdefault(target_year, {})
         demand[target_year][product_index] = (
             demand[target_year].get(product_index, 0.0) + exchange_amount
@@ -223,6 +276,15 @@ class Trails:
 
     @staticmethod
     def _child_amount(parent_amount: float, exchange_value: float) -> float:
+        """Convert an exchange value into a child demand amount.
+
+        :param parent_amount: Upstream demand amount.
+        :type parent_amount: float
+        :param exchange_value: Exchange coefficient from the A matrix.
+        :type exchange_value: float
+        :returns: Child demand amount with sign handled.
+        :rtype: float
+        """
         if exchange_value < 0.0:
             return parent_amount * (-exchange_value)
         return parent_amount * exchange_value
@@ -238,6 +300,23 @@ class Trails:
         demand,
         debug: bool,
     ) -> None:
+        """Apply temporal distribution metadata to a demand entry.
+
+        :param year: Base year for the demand.
+        :type year: int
+        :param scenario_year: Scenario year used for A/B lookup.
+        :type scenario_year: int
+        :param product_index: Product index receiving the demand.
+        :type product_index: int
+        :param child_amount: Amount to distribute across offsets.
+        :type child_amount: float
+        :param tex: Temporal exchange metadata to apply.
+        :type tex: TemporalExchange
+        :param demand: Demand mapping to update.
+        :type demand: dict[int, dict[int, float]]
+        :param debug: Whether to emit debug logging.
+        :type debug: bool
+        """
         td = TemporalDistribution(tex)
 
         offsets_and_weights = list(td.iter_offsets_and_weights(debug=debug))
@@ -456,6 +535,15 @@ class Trails:
         )
 
     def _get_biosphere_slice(self, base_year: int, debug: bool):
+        """Return biosphere slice metadata for a base year.
+
+        :param base_year: Calendar year used to select the scenario slice.
+        :type base_year: int
+        :param debug: Whether to emit debug logging.
+        :type debug: bool
+        :returns: Tuple ``(scenario_year, t_index, B_slice, n_flows)`` or ``None``.
+        :rtype: tuple[int, int, sparse.COO, int] | None
+        """
         if self.B is None:
             if debug:
                 logger.warning("accumulate_bio: B is None -> nothing to accumulate")
@@ -595,6 +683,13 @@ class Trails:
 
     @staticmethod
     def _estimate_total_from_depth(max_depth: int):
+        """Estimate a traversal size for a given maximum depth.
+
+        :param max_depth: Maximum traversal depth.
+        :type max_depth: int
+        :returns: Estimated total size or ``None`` if not available.
+        :rtype: int | None
+        """
         DEPTH_TOTALS = {
             1: 10,
             2: 50,
@@ -641,6 +736,23 @@ class Trails:
         r: Optional[int],
         return_provenance: bool,
     ):
+        """Record frontier totals and optional provenance entries.
+
+        :param frontier_total: Mapping of (year, activity) to totals.
+        :type frontier_total: dict[tuple[int, int], float]
+        :param provenance_roots: Mapping of (year, activity) to root totals.
+        :type provenance_roots: dict[tuple[int, int], dict[int, float]]
+        :param y: Year to record.
+        :type y: int
+        :param a: Activity index to record.
+        :type a: int
+        :param x: Amount to add.
+        :type x: float
+        :param r: Root activity index, if any.
+        :type r: int | None
+        :param return_provenance: Whether to populate provenance data.
+        :type return_provenance: bool
+        """
         frontier_total[(int(y), int(a))] += float(x)
         if return_provenance and (r is not None):
             provenance_roots[(int(y), int(a))][int(r)] += float(x)
@@ -655,6 +767,23 @@ class Trails:
         r: Optional[int],
         return_provenance: bool,
     ):
+        """Record direct biosphere totals and optional provenance entries.
+
+        :param direct_bio_total: Mapping of (year, activity) to totals.
+        :type direct_bio_total: dict[tuple[int, int], float]
+        :param direct_bio_roots: Mapping of (year, activity) to root totals.
+        :type direct_bio_roots: dict[tuple[int, int], dict[int, float]]
+        :param y: Year to record.
+        :type y: int
+        :param a: Activity index to record.
+        :type a: int
+        :param x: Amount to add.
+        :type x: float
+        :param r: Root activity index, if any.
+        :type r: int | None
+        :param return_provenance: Whether to populate provenance data.
+        :type return_provenance: bool
+        """
         direct_bio_total[(int(y), int(a))] += float(x)
         if return_provenance and (r is not None):
             direct_bio_roots[(int(y), int(a))][int(r)] += float(x)
@@ -662,6 +791,17 @@ class Trails:
     def _has_direct_biosphere(
         self, scenario_year: int, act: int, bio_cache: dict
     ) -> bool:
+        """Check whether an activity has direct biosphere exchanges.
+
+        :param scenario_year: Scenario year to query.
+        :type scenario_year: int
+        :param act: Activity index to query.
+        :type act: int
+        :param bio_cache: Cache mapping ``(year, activity)`` to bool.
+        :type bio_cache: dict[tuple[int, int], bool]
+        :returns: True if the activity has direct biosphere exchanges.
+        :rtype: bool
+        """
         label = str(scenario_year)
         if label in self.scenario_index and (self.B is not None):
             t = self.scenario_index[label]
@@ -717,6 +857,13 @@ class Trails:
         EMPIRICAL_SAFETY_FACTOR = 1.05  # also used as a conservative headroom
 
         def estimate_total_from_branching(branching_samples):
+            """Estimate total nodes from observed branching samples.
+
+            :param branching_samples: List of branching counts observed in warm-up.
+            :type branching_samples: list[int]
+            :returns: Estimated total node count.
+            :rtype: int
+            """
             if not branching_samples:
                 return 1
             s = sorted(branching_samples)
@@ -757,6 +904,7 @@ class Trails:
         #  - If we exceed total, expand total so the bar never runs beyond 100%.
         #  - At the end, snap total to exactly nodes_processed so the bar finishes at 100%.
         def _pbar_step():
+            """Advance the progress bar, expanding total if needed."""
             nonlocal nodes_processed, pbar
             nodes_processed += 1
             if pbar is None:
@@ -776,6 +924,7 @@ class Trails:
             pbar.update(1)
 
         def _pbar_finalize():
+            """Finalize the progress bar, snapping total to actual count."""
             nonlocal pbar
             if pbar is None:
                 return

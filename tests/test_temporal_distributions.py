@@ -6,18 +6,21 @@ from trails.temporal_distributions import TemporalDistribution, TemporalExchange
 
 
 def test_default_sigma():
+    """Verify default sigma calculation."""
     offsets = np.array([0, 4])
     assert TemporalDistribution._default_sigma(offsets, None) == 1.0
     assert TemporalDistribution._default_sigma(offsets, 2.0) == 2.0
 
 
 def test_triangular_weights_centered():
+    """Verify centered triangular weights."""
     offsets = np.array([0, 1, 2])
     weights = TemporalDistribution._triangular_weights(offsets, loc=1.0)
     assert weights.tolist() == [0.0, 1.0, 0.0]
 
 
 def test_normal_weights_truncated():
+    """Verify truncated normal weights."""
     offsets = np.array([-1, 0, 1])
     weights = TemporalDistribution._normal_weights(
         offsets=offsets, loc=0.0, scale=1.0, offset_min=-1, offset_max=1
@@ -30,6 +33,7 @@ def test_normal_weights_truncated():
 
 
 def test_lognormal_weights_fallback():
+    """Verify lognormal weights fallback behavior."""
     tex = TemporalExchange(
         distribution=2, loc=None, scale=None, offset_min=-1, offset_max=1
     )
@@ -41,12 +45,14 @@ def test_lognormal_weights_fallback():
 
 
 def test_discrete_weights_default_zero():
+    """Verify discrete weights default to zero offset."""
     offsets = np.array([-1, 0, 1])
     weights = TemporalDistribution._discrete_weights(offsets, loc=None)
     assert weights.tolist() == [0.0, 1.0, 0.0]
 
 
 def test_iter_offsets_and_weights_with_scaling():
+    """Verify offsets and weights with scaling."""
     tex = TemporalExchange(
         distribution=4,
         loc=None,
@@ -63,6 +69,7 @@ def test_iter_offsets_and_weights_with_scaling():
 
 
 def test_iter_offsets_and_weights_unknown_scale_mode():
+    """Verify unknown scale modes raise errors."""
     tex = TemporalExchange(
         distribution=4,
         loc=None,
@@ -77,6 +84,7 @@ def test_iter_offsets_and_weights_unknown_scale_mode():
 
 
 def test_scale_factor_modes_and_clip():
+    """Verify scale factor modes and clipping."""
     tex = TemporalExchange(
         distribution=1,
         loc=None,
