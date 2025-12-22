@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import json
 
 import numpy as np
@@ -17,7 +19,7 @@ LCIA_METHODS_EI311 = DATA_DIR / "lcia_ei311.json"
 _LCIA_METHODS_CACHE = {}
 
 
-def get_lcia_method_names(ei_version="3.11"):
+def get_lcia_method_names(ei_version: str = "3.11") -> list[str]:
     """List LCIA method names bundled with the specified ecoinvent version.
 
     :param ei_version: Ecoinvent release identifier (e.g. ``"3.11"``).
@@ -37,7 +39,9 @@ def get_lcia_method_names(ei_version="3.11"):
     return [" - ".join(x["name"]) for x in data]
 
 
-def format_lcia_method_exchanges(method):
+def format_lcia_method_exchanges(
+    method: dict,
+) -> dict[tuple[str, str, str], float]:
     """Map an LCIA method's exchanges to impact amounts keyed by flow identity.
 
     :param method: LCIA method object as loaded from the JSON descriptor.
@@ -56,7 +60,9 @@ def format_lcia_method_exchanges(method):
     }
 
 
-def get_lcia_methods(methods: list = None, ei_version="3.11"):
+def get_lcia_methods(
+    methods: list[str] | None = None, ei_version: str = "3.11"
+) -> dict[str, dict[tuple[str, str, str], float]]:
     """Load LCIA methods and exchanges from the bundled JSON files.
 
     :param methods: Optional list of method names to include.
@@ -84,7 +90,10 @@ def get_lcia_methods(methods: list = None, ei_version="3.11"):
 
 
 def fill_characterization_factors_matrices(
-    methods: list, biosphere_matrix_dict: dict, biosphere_dict: dict, debug=False
+    methods: list[str],
+    biosphere_matrix_dict: dict[int, int],
+    biosphere_dict: dict[tuple[str, str, str], int],
+    debug: bool = False,
 ) -> csr_matrix:
     """Assemble a CSR matrix with characterization factors for multiple LCIA methods.
 

@@ -1,4 +1,4 @@
-from typing import Dict, Any, List, Tuple, Optional, Literal
+from typing import Any, Callable, Dict, List, Literal, Optional, Tuple
 
 import math
 
@@ -12,7 +12,7 @@ from .trails import Trails
 from .utils import _format_path_label, _format_path_label_with_years
 
 
-def _build_activity_label_map(trails: Trails):
+def _build_activity_label_map(trails: Trails) -> dict[int, str]:
     """Build a mapping of activity indices to display labels.
 
     :param trails: Trails instance with activity metadata.
@@ -61,7 +61,10 @@ def _activity_label_map(trails: Trails) -> dict[int, str]:
     return labels
 
 
-def _select_years_from_results(results_by_year, year_range):
+def _select_years_from_results(
+    results_by_year: dict[int, dict[str, Any]],
+    year_range: tuple[int, int] | None,
+) -> list[int]:
     """Select years from results with an optional range filter.
 
     :param results_by_year: Mapping of year to results payload.
@@ -87,7 +90,9 @@ def _select_years_from_results(results_by_year, year_range):
     return years
 
 
-def _collect_root_scores(results_by_year, years):
+def _collect_root_scores(
+    results_by_year: dict[int, dict[str, Any]], years: list[int]
+) -> list[int]:
     """Collect unique root indices with scores across years.
 
     :param results_by_year: Mapping of year to results payload.
@@ -109,7 +114,11 @@ def _collect_root_scores(results_by_year, years):
     return all_roots
 
 
-def _build_score_matrix(results_by_year, years, all_roots):
+def _build_score_matrix(
+    results_by_year: dict[int, dict[str, Any]],
+    years: list[int],
+    all_roots: list[int],
+) -> np.ndarray:
     """Build a score matrix of shape ``(years, roots)``.
 
     :param results_by_year: Mapping of year to results payload.
@@ -129,7 +138,15 @@ def _build_score_matrix(results_by_year, years, all_roots):
     return Y
 
 
-def _add_root_traces(fig, years, Y, all_roots, idx_to_label, method_label, stacked):
+def _add_root_traces(
+    fig: go.Figure,
+    years: list[int],
+    Y: np.ndarray,
+    all_roots: list[int],
+    idx_to_label: dict[int, str],
+    method_label: str,
+    stacked: bool,
+) -> None:
     """Add root score traces to a Plotly figure.
 
     :param fig: Plotly figure to update.
@@ -185,8 +202,13 @@ def _add_root_traces(fig, years, Y, all_roots, idx_to_label, method_label, stack
 
 
 def _add_cumulative_trace(
-    fig, years, total_raw, cumulative_axis_label, yaxis_type, log_eps
-):
+    fig: go.Figure,
+    years: list[int],
+    total_raw: list[float],
+    cumulative_axis_label: str,
+    yaxis_type: str,
+    log_eps: float,
+) -> np.ndarray:
     """Add a cumulative total trace to a Plotly figure.
 
     :param fig: Plotly figure to update.
@@ -229,14 +251,14 @@ def _add_cumulative_trace(
 
 
 def _add_static_score_trace(
-    fig,
-    years,
-    static_score,
-    static_score_label,
-    static_score_dash,
-    static_score_color,
-    method_label,
-):
+    fig: go.Figure,
+    years: list[int],
+    static_score: float,
+    static_score_label: str,
+    static_score_dash: str,
+    static_score_color: str,
+    method_label: str,
+) -> None:
     """Add a horizontal static score trace to a Plotly figure.
 
     :param fig: Plotly figure to update.
@@ -274,7 +296,12 @@ def _add_static_score_trace(
     )
 
 
-def _compute_layout_dimensions(width, legend_entrywidth, legend_row_height, n_items):
+def _compute_layout_dimensions(
+    width: int | None,
+    legend_entrywidth: int,
+    legend_row_height: int,
+    n_items: int,
+) -> tuple[int, int]:
     """Compute layout sizing values for the plot.
 
     :param width: Figure width override.
@@ -297,19 +324,19 @@ def _compute_layout_dimensions(width, legend_entrywidth, legend_row_height, n_it
 
 
 def _apply_base_layout(
-    fig,
-    width,
-    height,
-    title,
-    legend_y,
-    entry_w,
-    top_margin,
-    method_label,
-    yaxis_type,
-    show_cumulative_axis,
-    static_score,
-    cumulative_axis_label,
-):
+    fig: go.Figure,
+    width: int,
+    height: int,
+    title: str,
+    legend_y: float,
+    entry_w: int,
+    top_margin: int,
+    method_label: str,
+    yaxis_type: str,
+    show_cumulative_axis: bool,
+    static_score: float | None,
+    cumulative_axis_label: str,
+) -> None:
     """Apply base layout settings to a Plotly figure.
 
     :param fig: Plotly figure to update.
@@ -383,8 +410,14 @@ def _apply_base_layout(
 
 
 def _apply_linear_yaxis_alignment(
-    fig, Y, cum_vals, static_score, y_max, y2_max, y2_headroom
-):
+    fig: go.Figure,
+    Y: np.ndarray,
+    cum_vals: np.ndarray | None,
+    static_score: float | None,
+    y_max: float | None,
+    y2_max: float | None,
+    y2_headroom: float,
+) -> None:
     """Align linear y-axes for primary and cumulative traces.
 
     :param fig: Plotly figure to update.
@@ -457,7 +490,13 @@ def _apply_linear_yaxis_alignment(
     )
 
 
-def _apply_xaxis_settings(fig, year_tick, year_range, years, show_year_grid):
+def _apply_xaxis_settings(
+    fig: go.Figure,
+    year_tick: int | None,
+    year_range: tuple[int, int] | None,
+    years: list[int],
+    show_year_grid: bool,
+) -> None:
     """Apply x-axis settings for year-based plots.
 
     :param fig: Plotly figure to update.
@@ -480,7 +519,7 @@ def _apply_xaxis_settings(fig, year_tick, year_range, years, show_year_grid):
     )
 
 
-def _add_reference_year_line(fig, reference_year):
+def _add_reference_year_line(fig: go.Figure, reference_year: int | None) -> None:
     """Add a vertical reference year line to a Plotly figure.
 
     :param fig: Plotly figure to update.
@@ -593,7 +632,7 @@ def to_impact_year_results(
 
 def plot_temporal_scores(
     results_by_year: Dict[int, Dict[str, Any]],
-    trails,
+    trails: Trails,
     title: str = "Temporal impacts by responsible activity",
     method_label: str = "Impact score",
     cumulative: bool = False,
@@ -619,7 +658,7 @@ def plot_temporal_scores(
     static_score_color: str = "black",
     y_max: Optional[float] = None,
     y2_max: Optional[float] = None,
-):
+) -> go.Figure:
     """Plot temporal impact scores by responsible activity.
 
     :param results_by_year: Impact-year results mapping.
@@ -800,21 +839,23 @@ def plot_top_paths_for_year(
     top_n: int = 10,
     title: str = "Top demand paths by amount",
     amount_label: str = "Demand (amount units)",
-):
-    """
-    Visualize the top-N *paths* (chains of suppliers) contributing to demand
-    in a given year, based on path-wise provenance.
+) -> go.Figure:
+    """Visualize the top-N paths contributing to demand for a given year.
 
-    Parameters
-    ----------
-    provenance : dict[(year, act_idx) -> dict[path_tuple -> amount]]
-        Returned by `lca(..., return_provenance=True)` via temporal_traversal.
-    trails : Trails
-        To resolve activity indices to labels.
-    year : int
-        Scenario year to visualize.
-    top_n : int
-        Number of paths to show.
+    :param provenance: Provenance mapping from temporal traversal.
+    :type provenance: dict[tuple[int, int], dict[tuple[int, ...], float]]
+    :param trails: Trails instance to resolve activity labels.
+    :type trails: Trails
+    :param year: Scenario year to visualize.
+    :type year: int
+    :param top_n: Number of paths to show.
+    :type top_n: int
+    :param title: Plot title.
+    :type title: str
+    :param amount_label: Label for the amount axis.
+    :type amount_label: str
+    :returns: Plotly figure.
+    :rtype: plotly.graph_objects.Figure
     """
     from collections import defaultdict
     import numpy as np
@@ -908,7 +949,11 @@ def _activity_label_from_meta(act_meta: Dict[int, Dict[str, Any]], act_idx: int)
     return label
 
 
-def _build_full_path_amounts(provenance, start_year, start_act_idx):
+def _build_full_path_amounts(
+    provenance: Dict[tuple[int, int], Dict[tuple[int, ...], float]],
+    start_year: int,
+    start_act_idx: int,
+) -> Dict[Tuple[Tuple[int, int], ...], float]:
     """Build full provenance paths including the root node.
 
     :param provenance: Provenance mapping from traversal.
@@ -936,7 +981,10 @@ def _build_full_path_amounts(provenance, start_year, start_act_idx):
     return full_path_amounts
 
 
-def _select_paths(full_path_amounts, top_n_paths):
+def _select_paths(
+    full_path_amounts: Dict[Tuple[Tuple[int, int], ...], float],
+    top_n_paths: int | None,
+) -> list[tuple[tuple[tuple[int, int], ...], float]]:
     """Select top-N paths from a full path mapping.
 
     :param full_path_amounts: Mapping of paths to amounts.
@@ -955,7 +1003,9 @@ def _select_paths(full_path_amounts, top_n_paths):
     )[:top_n_paths]
 
 
-def _build_depth_map(selected_paths):
+def _build_depth_map(
+    selected_paths: list[tuple[tuple[tuple[int, int], ...], float]]
+) -> tuple[list[tuple[int, int]], dict[tuple[int, int], int]]:
     """Build node depth mapping from selected paths.
 
     :param selected_paths: Selected path items.
@@ -976,7 +1026,14 @@ def _build_depth_map(selected_paths):
     return node_keys, depth_map
 
 
-def _aggregate_link_impacts(selected_paths, depth_map, node_intensity):
+def _aggregate_link_impacts(
+    selected_paths: list[tuple[tuple[tuple[int, int], ...], float]],
+    depth_map: dict[tuple[int, int], int],
+    node_intensity: dict[tuple[int, int], float],
+) -> tuple[
+    dict[tuple[tuple[int, int], tuple[int, int]], float],
+    dict[tuple[tuple[int, int], tuple[int, int]], dict[int, float]],
+]:
     """Aggregate link impacts by depth/year nodes.
 
     :param selected_paths: Selected path items.
@@ -1024,7 +1081,9 @@ def _aggregate_link_impacts(selected_paths, depth_map, node_intensity):
     return link_impact_agg, edge_activity_contrib
 
 
-def _build_agg_nodes(link_impact_agg):
+def _build_agg_nodes(
+    link_impact_agg: dict[tuple[tuple[int, int], tuple[int, int]], float]
+) -> tuple[list[tuple[int, int]], dict[tuple[int, int], int]]:
     """Build aggregated node list and index mapping.
 
     :param link_impact_agg: Aggregated link impacts.
@@ -1044,7 +1103,9 @@ def _build_agg_nodes(link_impact_agg):
     return agg_nodes, node_index_agg
 
 
-def _compute_node_totals(link_impact_agg):
+def _compute_node_totals(
+    link_impact_agg: dict[tuple[tuple[int, int], tuple[int, int]], float]
+) -> dict[tuple[int, int], float]:
     """Compute total incoming impact per aggregated node.
 
     :param link_impact_agg: Aggregated link impacts.
@@ -1058,7 +1119,9 @@ def _compute_node_totals(link_impact_agg):
     return node_total_impact
 
 
-def _compute_sankey_layout(agg_nodes):
+def _compute_sankey_layout(
+    agg_nodes: list[tuple[int, int]]
+) -> tuple[list[float], list[float], list[int], list[int]]:
     """Compute Sankey node positions from aggregated nodes.
 
     :param agg_nodes: Aggregated nodes as ``(depth, year)`` tuples.
@@ -1089,7 +1152,11 @@ def _compute_sankey_layout(agg_nodes):
     return node_x, node_y, depths, years
 
 
-def _build_node_labels(agg_nodes, node_total_impact, amount_label):
+def _build_node_labels(
+    agg_nodes: list[tuple[int, int]],
+    node_total_impact: dict[tuple[int, int], float],
+    amount_label: str,
+) -> list[str]:
     """Build labels for Sankey nodes.
 
     :param agg_nodes: Aggregated nodes as ``(depth, year)`` tuples.
@@ -1110,7 +1177,7 @@ def _build_node_labels(agg_nodes, node_total_impact, amount_label):
     return node_labels
 
 
-def _assign_year_colors(years):
+def _assign_year_colors(years: list[int]) -> dict[int, str]:
     """Assign colors to years using a sequential palette.
 
     :param years: Years to assign colors for.
@@ -1130,13 +1197,15 @@ def _assign_year_colors(years):
 
 
 def _build_link_arrays(
-    link_impact_agg,
-    edge_activity_contrib,
-    node_index_agg,
-    year_to_color,
-    amount_label,
-    activity_label,
-):
+    link_impact_agg: dict[tuple[tuple[int, int], tuple[int, int]], float],
+    edge_activity_contrib: dict[
+        tuple[tuple[int, int], tuple[int, int]], dict[int, float]
+    ],
+    node_index_agg: dict[tuple[int, int], int],
+    year_to_color: dict[int, str],
+    amount_label: str,
+    activity_label: Callable[[int], str],
+) -> tuple[list[int], list[int], list[float], list[str], list[str]]:
     """Build Sankey link arrays from aggregated impact data.
 
     :param link_impact_agg: Aggregated link impacts.
@@ -1199,7 +1268,7 @@ def _build_link_arrays(
 
 
 def plot_temporal_sankey(
-    provenance,
+    provenance: Dict[tuple[int, int], Dict[tuple[tuple[int, int], ...], float]],
     trails: Trails,
     start_year: int,
     start_act_idx: int,
@@ -1212,36 +1281,41 @@ def plot_temporal_sankey(
     node_thickness: int = 20,
     node_pad: int = 15,
     font_size: int = 11,
-):
-    """
-    Impact-weighted temporal Sankey, simplified:
+) -> go.Figure:
+    """Build an impact-weighted temporal Sankey plot.
 
-    - Nodes are aggregated by (depth, year), NOT by activity.
-      At each depth level, there is at most one node per year.
-    - Links are impact-weighted sums of all activities between these
-      (depth, year) nodes, but we preserve activity-level contributions
-      in the hover text.
+    Nodes are aggregated by ``(depth, year)`` and links are impact-weighted
+    sums between those nodes, preserving activity-level contributions in
+    hover text.
 
-    Layout:
-      - x-axis = depth (0 = root, 1 = first level, etc.), left→right.
-      - y-axis = year (earlier years towards top, later towards bottom),
-        aligned across depths (same year → same vertical position).
-
-    Parameters
-    ----------
-    provenance : dict[(int, int) -> dict[path_tuple -> amount]]
-        Returned by lca(..., return_provenance=True).
-        path_tuple is a tuple of (year, act_idx) pairs from first-level onward.
-    trails : Trails
-        Trails wrapper.
-    start_year : int
-        Root demand year.
-    start_act_idx : int
-        Root activity index.
-    node_intensity : dict[(year, act_idx), impact_score]
-        Impact intensities for each (year, activity) node.
-    top_n_paths : int | None
-        If None, use all paths. If int, keep only the top-N by |amount|.
+    :param provenance: Provenance mapping from traversal.
+    :type provenance: dict[tuple[int, int], dict[tuple[tuple[int, int], ...], float]]
+    :param trails: Trails instance for metadata.
+    :type trails: Trails
+    :param start_year: Root demand year.
+    :type start_year: int
+    :param start_act_idx: Root activity index.
+    :type start_act_idx: int
+    :param node_intensity: Impact intensities keyed by ``(year, act_idx)``.
+    :type node_intensity: dict[tuple[int, int], float] | None
+    :param top_n_paths: Number of paths to include (``None`` for all).
+    :type top_n_paths: int | None
+    :param title: Figure title.
+    :type title: str
+    :param amount_label: Label for impact values.
+    :type amount_label: str
+    :param fig_width: Figure width in pixels.
+    :type fig_width: int
+    :param fig_height: Figure height in pixels.
+    :type fig_height: int
+    :param node_thickness: Node thickness in pixels.
+    :type node_thickness: int
+    :param node_pad: Node padding in pixels.
+    :type node_pad: int
+    :param font_size: Font size for labels.
+    :type font_size: int
+    :returns: Plotly figure.
+    :rtype: plotly.graph_objects.Figure
     """
 
     full_path_amounts = _build_full_path_amounts(provenance, start_year, start_act_idx)
@@ -1312,7 +1386,9 @@ def plot_temporal_sankey(
     return fig
 
 
-def _select_depths(edges_by_depth, depths):
+def _select_depths(
+    edges_by_depth: dict[int, dict], depths: list[int] | None
+) -> list[int]:
     """Select which traversal depths to plot.
 
     :param edges_by_depth: Mapping of depth to edges.
@@ -1333,7 +1409,12 @@ def _select_depths(edges_by_depth, depths):
     return depths_list
 
 
-def _collect_activities(edges_by_depth, trails, depths_list, include_all_activities):
+def _collect_activities(
+    edges_by_depth: dict[int, dict],
+    trails: Trails,
+    depths_list: list[int],
+    include_all_activities: bool,
+) -> list[int]:
     """Collect activity indices referenced by selected edges.
 
     :param edges_by_depth: Mapping of depth to edges.
@@ -1367,7 +1448,9 @@ def _collect_activities(edges_by_depth, trails, depths_list, include_all_activit
     return acts
 
 
-def _collect_global_years(edges_by_depth, depths_list):
+def _collect_global_years(
+    edges_by_depth: dict[int, dict], depths_list: list[int]
+) -> tuple[int, int, list[int]]:
     """Collect all years referenced by selected depths.
 
     :param edges_by_depth: Mapping of depth to edges.
@@ -1395,7 +1478,9 @@ def _collect_global_years(edges_by_depth, depths_list):
     return year_min, year_max, years_global
 
 
-def _init_flow_subplots(panel_labels, ncols):
+def _init_flow_subplots(
+    panel_labels: list[str], ncols: int
+) -> tuple[go.Figure, int]:
     """Initialize subplot grid for flow panels.
 
     :param panel_labels: Labels for each panel.
@@ -1419,7 +1504,14 @@ def _init_flow_subplots(panel_labels, ncols):
     return fig, nrows
 
 
-def _configure_flow_axes(fig, n_panels, ncols, acts, year_min, year_max):
+def _configure_flow_axes(
+    fig: go.Figure,
+    n_panels: int,
+    ncols: int,
+    acts: list[int],
+    year_min: int,
+    year_max: int,
+) -> None:
     """Configure axes for flow subplots.
 
     :param fig: Plotly figure to update.
@@ -1466,7 +1558,9 @@ def _configure_flow_axes(fig, n_panels, ncols, acts, year_min, year_max):
         )
 
 
-def _merge_all_edges(edges_by_depth, depths_list):
+def _merge_all_edges(
+    edges_by_depth: dict[int, dict], depths_list: list[int]
+) -> dict[tuple[tuple[int, int], tuple[int, int]], float]:
     """Merge edge mappings across depths.
 
     :param edges_by_depth: Mapping of depth to edges.
@@ -1486,8 +1580,15 @@ def _merge_all_edges(edges_by_depth, depths_list):
 
 
 def _add_flow_panel_traces(
-    fig, edges, act_to_row, idx_to_label, dot_size, row, col, show_legend
-):
+    fig: go.Figure,
+    edges: dict[tuple[tuple[int, int], tuple[int, int]], float],
+    act_to_row: dict[int, int],
+    idx_to_label: dict[int, str],
+    dot_size: int,
+    row: int,
+    col: int,
+    show_legend: bool,
+) -> None:
     """Add consumer and supplier node traces for a panel.
 
     :param fig: Plotly figure to update.
@@ -1622,7 +1723,9 @@ def _add_flow_panel_traces(
     )
 
 
-def _add_activity_legend(fig, acts, idx_to_label):
+def _add_activity_legend(
+    fig: go.Figure, acts: list[int], idx_to_label: dict[int, str]
+) -> None:
     """Add activity legend entries to the figure.
 
     :param fig: Plotly figure to update.
@@ -1652,7 +1755,9 @@ def _add_activity_legend(fig, acts, idx_to_label):
     )
 
 
-def _apply_flow_layout(fig, title, base_width, base_height, nrows):
+def _apply_flow_layout(
+    fig: go.Figure, title: str, base_width: int, base_height: int, nrows: int
+) -> None:
     """Apply layout settings for flow subplots.
 
     :param fig: Plotly figure to update.
@@ -1692,7 +1797,7 @@ def plot_traversal_grid_flow(
     dot_size: int = 10,
     base_width: int = 550,
     base_height: int = 260,
-):
+) -> go.Figure:
     """Plot traversal edges as a grid of flow panels.
 
     Multi-panel plot of traversal flows on an activity×year grid.

@@ -1,6 +1,6 @@
 # trails.py
 
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 from collections import defaultdict, deque
 
 import numpy as np
@@ -33,12 +33,12 @@ class Trails:
 
     def __init__(
         self,
-        package,
+        package: Any,
         interpolate_annual: bool = True,
-        value_dtype=np.float32,
-        index_dtype=np.int32,
+        value_dtype: np.dtype = np.float32,
+        index_dtype: np.dtype = np.int32,
         debug: bool = False,
-    ):
+    ) -> None:
         """Initialize Trails by loading matrices, indices, and metadata.
 
         :param package: Frictionless data package to load.
@@ -189,7 +189,9 @@ class Trails:
 
                 w = (year - y0) / (y1 - y0)
 
-                def interp_optional(v0, v1):
+                def interp_optional(
+                    v0: float | None, v1: float | None
+                ) -> float | None:
                     """Interpolate optional numeric values with nearest fallback.
 
                     :param v0: First value to interpolate.
@@ -239,7 +241,7 @@ class Trails:
         idx = int(np.abs(self.template_years_int - y).argmin())
         return int(self.template_years_int[idx])
 
-    def _get_scenario_context(self, year: int):
+    def _get_scenario_context(self, year: int) -> tuple[int, str, int] | None:
         """Return the scenario tuple for a given year if available.
 
         :param year: Calendar year to map.
@@ -256,7 +258,10 @@ class Trails:
 
     @staticmethod
     def _add_demand_entry(
-        demand, target_year: int, product_index: int, exchange_amount: float
+        demand: dict[int, dict[int, float]],
+        target_year: int,
+        product_index: int,
+        exchange_amount: float,
     ) -> None:
         """Accumulate a demand amount for a given year and product index.
 
@@ -297,7 +302,7 @@ class Trails:
         product_index: int,
         child_amount: float,
         tex: TemporalExchange,
-        demand,
+        demand: dict[int, dict[int, float]],
         debug: bool,
     ) -> None:
         """Apply temporal distribution metadata to a demand entry.
@@ -358,10 +363,19 @@ class Trails:
         t = self.scenario_index[label]
         return self.B[t, :, :]
 
-    def get_temporal_exchange(self, year: int, act_idx: int, prod_idx: int):
-        """
-        Return TemporalExchange for (year, act_idx, prod_idx), or None.
-        Keys are based on the original scenario label strings.
+    def get_temporal_exchange(
+        self, year: int, act_idx: int, prod_idx: int
+    ) -> TemporalExchange | None:
+        """Return temporal exchange metadata for a given activity/product.
+
+        :param year: Calendar year to query.
+        :type year: int
+        :param act_idx: Activity index.
+        :type act_idx: int
+        :param prod_idx: Product index.
+        :type prod_idx: int
+        :returns: Temporal exchange metadata if available.
+        :rtype: TemporalExchange | None
         """
         return self._interpolate_temporal_exchange(
             year,
@@ -370,10 +384,19 @@ class Trails:
             self.temporal_technosphere_exchanges,
         )
 
-    def get_temporal_distribution(self, year: int, act_idx: int, prod_idx: int):
-        """
-        Return a TemporalDistribution object for (year, act_idx, prod_idx),
-        or None if this exchange has no temporal metadata.
+    def get_temporal_distribution(
+        self, year: int, act_idx: int, prod_idx: int
+    ) -> TemporalDistribution | None:
+        """Return temporal distribution metadata for a given activity/product.
+
+        :param year: Calendar year to query.
+        :type year: int
+        :param act_idx: Activity index.
+        :type act_idx: int
+        :param prod_idx: Product index.
+        :type prod_idx: int
+        :returns: Temporal distribution if metadata exists.
+        :rtype: TemporalDistribution | None
         """
         tex = self._interpolate_temporal_exchange(
             year,
@@ -393,13 +416,21 @@ class Trails:
         *,
         use_temporal_distributions: bool = True,
         debug: bool = False,
-    ):
-        """
-        Expand one activity-year demand into temporally distributed multi-year
-        demands for its *direct* exchanges.
+    ) -> dict[int, dict[int, float]]:
+        """Expand activity-year demand into temporally distributed demands.
 
-        If use_temporal_distributions=False, treat all exchanges as occurring in
-        the (mapped) scenario year (i.e. no temporal shifting).
+        :param year: Calendar year of the demand.
+        :type year: int
+        :param act_idx: Activity index to expand.
+        :type act_idx: int
+        :param amount: Demand amount for the activity.
+        :type amount: float
+        :param use_temporal_distributions: Whether to apply temporal metadata.
+        :type use_temporal_distributions: bool
+        :param debug: Whether to emit debug logging.
+        :type debug: bool
+        :returns: Demand mapping by year and product index.
+        :rtype: dict[int, dict[int, float]]
         """
         demand: dict[int, dict[int, float]] = {}
 
@@ -534,7 +565,9 @@ class Trails:
             (str(y_tpl), int(act_idx), int(flow_idx))
         )
 
-    def _get_biosphere_slice(self, base_year: int, debug: bool):
+    def _get_biosphere_slice(
+        self, base_year: int, debug: bool
+    ) -> tuple[int, int, sparse.COO, int] | None:
         """Return biosphere slice metadata for a base year.
 
         :param base_year: Calendar year used to select the scenario slice.
@@ -682,7 +715,7 @@ class Trails:
         return self._map_year_to_scenario_year(year)
 
     @staticmethod
-    def _estimate_total_from_depth(max_depth: int):
+    def _estimate_total_from_depth(max_depth: int) -> int | None:
         """Estimate a traversal size for a given maximum depth.
 
         :param max_depth: Maximum traversal depth.
@@ -728,14 +761,14 @@ class Trails:
 
     @staticmethod
     def _record_frontier(
-        frontier_total,
-        provenance_roots,
+        frontier_total: dict[tuple[int, int], float],
+        provenance_roots: dict[tuple[int, int], dict[int, float]],
         y: int,
         a: int,
         x: float,
         r: Optional[int],
         return_provenance: bool,
-    ):
+    ) -> None:
         """Record frontier totals and optional provenance entries.
 
         :param frontier_total: Mapping of (year, activity) to totals.
@@ -759,14 +792,14 @@ class Trails:
 
     @staticmethod
     def _record_direct_bio(
-        direct_bio_total,
-        direct_bio_roots,
+        direct_bio_total: dict[tuple[int, int], float],
+        direct_bio_roots: dict[tuple[int, int], dict[int, float]],
         y: int,
         a: int,
         x: float,
         r: Optional[int],
         return_provenance: bool,
-    ):
+    ) -> None:
         """Record direct biosphere totals and optional provenance entries.
 
         :param direct_bio_total: Mapping of (year, activity) to totals.
@@ -824,7 +857,7 @@ class Trails:
         show_progress: bool = False,
         use_temporal_distributions: bool = True,
         debug: bool = False,
-    ):
+    ) -> tuple[dict, dict] | tuple[dict, dict, dict, dict]:
         """
         Traverse the temporal-technosphere graph starting from (start_year, start_act_idx).
 
@@ -856,7 +889,7 @@ class Trails:
         BRANCHING_SAFETY_FACTOR = 1.2
         EMPIRICAL_SAFETY_FACTOR = 1.05  # also used as a conservative headroom
 
-        def estimate_total_from_branching(branching_samples):
+        def estimate_total_from_branching(branching_samples: list[int]) -> int:
             """Estimate total nodes from observed branching samples.
 
             :param branching_samples: List of branching counts observed in warm-up.
@@ -903,7 +936,7 @@ class Trails:
         # Policy:
         #  - If we exceed total, expand total so the bar never runs beyond 100%.
         #  - At the end, snap total to exactly nodes_processed so the bar finishes at 100%.
-        def _pbar_step():
+        def _pbar_step() -> None:
             """Advance the progress bar, expanding total if needed."""
             nonlocal nodes_processed, pbar
             nodes_processed += 1
@@ -923,7 +956,7 @@ class Trails:
 
             pbar.update(1)
 
-        def _pbar_finalize():
+        def _pbar_finalize() -> None:
             """Finalize the progress bar, snapping total to actual count."""
             nonlocal pbar
             if pbar is None:
@@ -1150,18 +1183,20 @@ class Trails:
         max_depth: int = 3,
         min_amount: float = 1e-12,
     ) -> dict[int, dict[tuple[tuple[int, int], tuple[int, int]], float]]:
-        """
-        Traverse the temporal-technosphere graph starting from
-        (start_year, start_act_idx) and record edges by depth.
+        """Traverse the temporal graph and record edges by depth.
 
-        Returns
-        -------
-        edges_by_depth : dict[int, dict[((int, int), (int, int)), float]]
-            {depth: {((year_from, act_from), (year_to, act_to)): amount, ...}, ...}
-
-        - 'depth' is the depth of the *parent* node.
-        - 'amount' is the flow leaving (year_from, act_from) towards (year_to, act_to)
-          at that depth, starting from a functional unit of `amount` at the root.
+        :param start_year: Start year for traversal.
+        :type start_year: int
+        :param start_act_idx: Start activity index.
+        :type start_act_idx: int
+        :param amount: Functional unit amount.
+        :type amount: float
+        :param max_depth: Maximum traversal depth.
+        :type max_depth: int
+        :param min_amount: Minimum magnitude to include.
+        :type min_amount: float
+        :returns: Mapping of depth to edge amounts.
+        :rtype: dict[int, dict[tuple[tuple[int, int], tuple[int, int]], float]]
         """
         queue = deque()
         queue.append((int(start_year), int(start_act_idx), float(amount), 0))

@@ -16,7 +16,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-def _ij_from_coords(X_t):
+def _ij_from_coords(X_t: Any) -> tuple[np.ndarray, np.ndarray]:
     """Extract row/column indices from a sparse COO coordinate array.
 
     :param X_t: Sparse array with ``coords`` attribute.
@@ -78,10 +78,10 @@ def _select_metadata_label(trails: Trails, label_for_matrix: str) -> str:
 def _apply_temporal_scaling_to_A(
     trails: Trails,
     year: int,
-    A_t,
+    A_t: Any,
     debug: bool,
     collapse_tech_temporal_scaling: bool,
-):
+) -> np.ndarray:
     """Apply temporal scaling factors to the technosphere matrix slice.
 
     :param trails: Trails instance with temporal metadata.
@@ -132,11 +132,11 @@ def _apply_temporal_scaling_to_A(
 def _apply_temporal_scaling_to_B(
     trails: Trails,
     year: int,
-    B_t,
+    B_t: Any,
     zero_biosphere: bool,
     collapse_bio_temporal_scaling: bool,
     debug: bool,
-):
+) -> np.ndarray:
     """Apply temporal scaling factors to the biosphere matrix slice.
 
     :param trails: Trails instance with temporal metadata.
@@ -197,8 +197,14 @@ def _make_bw_indices_rowcol(row_idx: np.ndarray, col_idx: np.ndarray) -> np.ndar
 
 
 def _warn_on_missing_metadata(
-    label_for_matrix, meta_label, A_act_idx, A_prod_idx, B_flow_idx, act_meta, bio_meta
-):
+    label_for_matrix: str,
+    meta_label: str,
+    A_act_idx: np.ndarray,
+    A_prod_idx: np.ndarray,
+    B_flow_idx: np.ndarray,
+    act_meta: dict[int, dict],
+    bio_meta: dict[int, dict],
+) -> None:
     """Emit warnings for matrix indices missing from metadata.
 
     :param label_for_matrix: Scenario label for matrix slices.
@@ -244,7 +250,9 @@ def _warn_on_missing_metadata(
         )
 
 
-def _build_metadata_indices(act_meta, bio_meta):
+def _build_metadata_indices(
+    act_meta: dict[int, dict], bio_meta: dict[int, dict]
+) -> tuple[dict[tuple, int], dict[tuple, int]]:
     """Build technosphere and biosphere indices from metadata dictionaries.
 
     :param act_meta: Activity metadata mapping.
@@ -298,27 +306,24 @@ def build_datapackage_for_year_from_trails(
     collapse_bio_temporal_scaling: bool = False,
     collapse_tech_temporal_scaling: bool = False,
     debug: bool = False,
-):
-    """
-    Build a bw_processing.Datapackage for a given calendar year
-    directly from Trails.A / Trails.B.
+) -> tuple[Any, dict[tuple, int], dict[tuple, int], list[tuple[int, int]]]:
+    """Build a bw_processing.Datapackage for a given calendar year.
 
-    IMPORTANT:
-    - Matrix indices (rows/cols) are taken as-is from Trails (which already
-      reflect the indices from A_matrix_index.csv / B_matrix_index.csv).
-    - Metadata (technosphere_indices, biosphere_indices) is taken from the
-      *corresponding* index CSV for that scenario/year if available.
-    - If no exact metadata exists for `year`, we fall back to the nearest
-      available metadata year and warn.
-
-    Returns
-    -------
-    dp : bwp.Datapackage
-        Datapackage with 'technosphere_matrix' and 'biosphere_matrix'.
-    technosphere_indices : dict[(name, ref, unit, loc), int]
-    biosphere_indices : dict[(name, compartment, subcompartment, unit), int]
-    uncertain_parameters : list[tuple[int, int]]
-        Empty for now (no uncertainty).
+    :param trails: Trails instance providing matrices and metadata.
+    :type trails: Trails
+    :param year: Calendar year to extract.
+    :type year: int
+    :param zero_biosphere: Whether to zero out biosphere values.
+    :type zero_biosphere: bool
+    :param collapse_bio_temporal_scaling: Whether to fold temporal scaling into B.
+    :type collapse_bio_temporal_scaling: bool
+    :param collapse_tech_temporal_scaling: Whether to fold temporal scaling into A.
+    :type collapse_tech_temporal_scaling: bool
+    :param debug: Whether to emit debug logging.
+    :type debug: bool
+    :returns: Datapackage, technosphere indices, biosphere indices, and
+        uncertain parameter placeholders.
+    :rtype: tuple
     """
     # ------------------------------------------------------------------
     # 1) Map `year` to the matrix slice we actually use
@@ -448,11 +453,22 @@ def lca_static_simple(
     amount: float = 1.0,
     debug: bool = False,
 ) -> Dict[str, Any]:
-    """
-    Plain static LCA for a single FU activity in a single year:
-      demand = {fu_act_idx: amount}
-      solves full upstream supply chain
-      includes that activity's direct biosphere and upstream biosphere
+    """Run a static LCA for a single functional unit and year.
+
+    :param trails: Trails instance providing matrices and metadata.
+    :type trails: Trails
+    :param year: Calendar year to solve.
+    :type year: int
+    :param fu_act_idx: Functional unit activity index.
+    :type fu_act_idx: int
+    :param methods: LCIA method identifiers.
+    :type methods: list[str]
+    :param amount: Functional unit amount.
+    :type amount: float
+    :param debug: Whether to emit debug logging.
+    :type debug: bool
+    :returns: Result dictionaries for solve-year and impact-year views.
+    :rtype: dict[str, Any]
     """
     # Build datapackage for that year with biosphere enabled
     dp, _, bio_idx, _ = build_datapackage_for_year_from_trails(
@@ -531,7 +547,7 @@ def _run_temporal_traversal(
     min_amount: float,
     show_progress: bool,
     debug: bool,
-):
+) -> tuple[dict, dict, dict, dict]:
     """Run temporal traversal and normalize optional return structures.
 
     :param trails: Trails instance to traverse.
@@ -584,13 +600,13 @@ def _run_temporal_traversal(
 
 
 def _apply_fu_direct_injection(
-    injected_supply_by_year_act,
-    injected_supply_prov_by_year_act,
+    injected_supply_by_year_act: dict[tuple[int, int], float],
+    injected_supply_prov_by_year_act: dict[tuple[int, int], dict[int, float]],
     y0: int,
     fu0: int,
     amt0: float,
     legacy_root: int,
-):
+) -> None:
     """Record functional-unit direct biosphere injection entries.
 
     :param injected_supply_by_year_act: Mapping of injected supply by year/activity.
@@ -621,7 +637,12 @@ def _apply_fu_direct_injection(
         ) + float(injected_supply_prov_by_year_act[(y0, fu0)].pop(legacy_root))
 
 
-def _build_rooted_frontier(frontier, provenance, fu0: int, root_tol: float):
+def _build_rooted_frontier(
+    frontier: dict[tuple[int, int], float],
+    provenance: dict[tuple[int, int], dict],
+    fu0: int,
+    root_tol: float,
+) -> tuple[dict[tuple[int, int, int], float], set[int]]:
     """Build a frontier keyed by activity roots using provenance paths.
 
     :param frontier: Mapping of ``(year, activity)`` to amount.
@@ -638,8 +659,14 @@ def _build_rooted_frontier(frontier, provenance, fu0: int, root_tol: float):
     rooted_frontier = defaultdict(float)
     roots_seen = set()
 
-    def _iter_path_nodes(path):
-        """Yield activity indices from a provenance path."""
+    def _iter_path_nodes(path: tuple[tuple[int, int], ...] | None) -> list[int]:
+        """Yield activity indices from a provenance path.
+
+        :param path: Provenance path tuple to iterate.
+        :type path: tuple[tuple[int, int], ...] | None
+        :returns: Activity indices extracted from the path.
+        :rtype: list[int]
+        """
         if path is None:
             return
         if isinstance(path, (int, np.integer)):
@@ -654,7 +681,11 @@ def _build_rooted_frontier(frontier, provenance, fu0: int, root_tol: float):
         except TypeError:
             return
 
-    def _root_from_path(path, fu_act: int, fallback_root: int) -> int:
+    def _root_from_path(
+        path: tuple[tuple[int, int], ...] | int | None,
+        fu_act: int,
+        fallback_root: int,
+    ) -> int:
         """Infer the root activity from a provenance path.
 
         :param path: Provenance path representation.
@@ -706,8 +737,10 @@ def _build_rooted_frontier(frontier, provenance, fu0: int, root_tol: float):
 
 
 def _extend_roots_with_injected_supply(
-    roots_seen, injected_supply_prov_by_year_act, normalize_root
-):
+    roots_seen: set[int],
+    injected_supply_prov_by_year_act: dict[tuple[int, int], dict[int, float]],
+    normalize_root: Any,
+) -> None:
     """Extend the root set with injected supply provenance entries.
 
     :param roots_seen: Set of root activity indices.
@@ -723,8 +756,11 @@ def _extend_roots_with_injected_supply(
 
 
 def _build_root_demand_vectors(
-    trails: Trails, rooted_frontier, roots_seen, normalize_root
-):
+    trails: Trails,
+    rooted_frontier: dict[tuple[int, int, int], float],
+    roots_seen: set[int],
+    normalize_root: Any,
+) -> dict[int, dict[int, np.ndarray]]:
     """Build per-root demand vectors from a rooted frontier.
 
     :param trails: Trails instance with matrix shapes.
@@ -754,7 +790,13 @@ def _build_root_demand_vectors(
     return f_by_year_by_root
 
 
-def _get_datapackage(dp_cache, trails: Trails, year: int, zero_bio: bool, debug: bool):
+def _get_datapackage(
+    dp_cache: dict[tuple[int, bool], Any],
+    trails: Trails,
+    year: int,
+    zero_bio: bool,
+    debug: bool,
+) -> tuple[Any, dict[tuple, int], dict[tuple, int], list[tuple[int, int]]]:
     """Fetch or build a datapackage for a given year and biosphere setting.
 
     :param dp_cache: Cache mapping ``(year, zero_bio)`` to datapackage tuples.
@@ -784,7 +826,11 @@ def _get_datapackage(dp_cache, trails: Trails, year: int, zero_bio: bool, debug:
     return dp_cache[dp_key]
 
 
-def _build_demand_by_first_level_child(f_by_year_by_root, solve_year, min_amount):
+def _build_demand_by_first_level_child(
+    f_by_year_by_root: dict[int, dict[int, np.ndarray]],
+    solve_year: int,
+    min_amount: float,
+) -> Dict[int, Dict[int, float]]:
     """Build demand mappings by first-level child for a solve year.
 
     :param f_by_year_by_root: Demand vectors by root and year.
@@ -811,7 +857,11 @@ def _build_demand_by_first_level_child(f_by_year_by_root, solve_year, min_amount
     return demand_by_first_level_child
 
 
-def _assert_rooted_closure(arr, demand_by_first_level_child, solve_year):
+def _assert_rooted_closure(
+    arr: np.ndarray,
+    demand_by_first_level_child: dict[int, dict[int, float]],
+    solve_year: int,
+) -> None:
     """Assert that rooted demands sum to total demand for a solve year.
 
     :param arr: Total demand array for the solve year.
@@ -835,7 +885,7 @@ def _assert_rooted_closure(arr, demand_by_first_level_child, solve_year):
         )
 
 
-def _extract_supply(lca_obj, n_acts: int, min_amount: float) -> Dict[int, float]:
+def _extract_supply(lca_obj: Any, n_acts: int, min_amount: float) -> Dict[int, float]:
     """Extract supply values above a minimum threshold from an LCA object.
 
     :param lca_obj: Brightway LCA object.
@@ -859,7 +909,11 @@ def _extract_supply(lca_obj, n_acts: int, min_amount: float) -> Dict[int, float]
     return supply_total
 
 
-def _build_injected_supply(injected_supply_by_year_act, solve_year, min_amount):
+def _build_injected_supply(
+    injected_supply_by_year_act: dict[tuple[int, int], float],
+    solve_year: int,
+    min_amount: float,
+) -> Dict[int, float]:
     """Build injected supply mapping for a solve year.
 
     :param injected_supply_by_year_act: Injected supply mapping by year/activity.
@@ -883,11 +937,11 @@ def _build_injected_supply(injected_supply_by_year_act, solve_year, min_amount):
 
 
 def _build_injected_supply_by_root(
-    injected_supply_prov_by_year_act,
-    solve_year,
-    min_amount,
-    normalize_root,
-):
+    injected_supply_prov_by_year_act: dict[tuple[int, int], dict[int, float]],
+    solve_year: int,
+    min_amount: float,
+    normalize_root: Any,
+) -> Dict[int, Dict[int, float]]:
     """Build injected supply mapping by root for a solve year.
 
     :param injected_supply_prov_by_year_act: Provenance mapping for injected supply.
@@ -918,12 +972,16 @@ def _build_injected_supply_by_root(
 
 
 def _build_global_biosphere_dict_simple(trails: Trails) -> Dict[tuple, int]:
-    """
-    Build a stable (name, compartment, subcompartment) -> flow_id mapping.
+    """Build a stable ``(name, compartment, subcompartment) -> flow_id`` mapping.
 
-    Supports two possible internal formats for trails.biosphere_indices[label]:
-      A) {flow_id: {"name": ..., "compartment": ..., "subcompartment": ..., "unit": ...}}
-      B) {(name, compartment, subcompartment, unit): flow_id}
+    Supports:
+      - ``{flow_id: {"name": ..., "compartment": ..., "subcompartment": ..., "unit": ...}}``
+      - ``{(name, compartment, subcompartment, unit): flow_id}``
+
+    :param trails: Trails instance with biosphere metadata.
+    :type trails: Trails
+    :returns: Mapping of flow key to flow id.
+    :rtype: dict[tuple, int]
     """
     out: Dict[tuple, int] = {}
 
@@ -968,9 +1026,12 @@ def _build_global_biosphere_dict_simple(trails: Trails) -> Dict[tuple, int]:
 
 
 def _build_flowkey_to_flowid(trails: Trails) -> Dict[tuple, int]:
-    """
-    Build (name, compartment, subcompartment) -> flow_id mapping,
-    robust across labels.
+    """Build a flow-key to flow-id mapping across labels.
+
+    :param trails: Trails instance with biosphere metadata.
+    :type trails: Trails
+    :returns: Mapping of ``(name, compartment, subcompartment)`` to flow id.
+    :rtype: dict[tuple, int]
     """
     out: Dict[tuple, int] = {}
 
@@ -1004,14 +1065,23 @@ def _build_cf_vector_flowid_space(
     trails: Trails,
     methods: List[str],
     ei_version: str,
-    char_cache: dict,
+    char_cache: dict[tuple, np.ndarray],
     debug: bool = False,
 ) -> np.ndarray:
-    """
-    Return cf vector of length n_flows in Trails flow-id space:
-      cf[flow_id] = sum_m CF_m(flow_key_of_flow_id)
+    """Build a CF vector aligned with Trails flow-id space.
 
-    Assumes LCIA method exchanges keyed by (name, compartment, subcompartment).
+    :param trails: Trails instance with biosphere metadata.
+    :type trails: Trails
+    :param methods: LCIA methods to include.
+    :type methods: list[str]
+    :param ei_version: Ecoinvent release identifier.
+    :type ei_version: str
+    :param char_cache: Cache mapping for characterization vectors.
+    :type char_cache: dict
+    :param debug: Whether to emit debug logging.
+    :type debug: bool
+    :returns: CF vector in flow-id space.
+    :rtype: numpy.ndarray
     """
     n_flows = int(trails.B.shape[2]) if trails.B is not None else 0
     if n_flows <= 0:
@@ -1042,16 +1112,16 @@ def _build_cf_vector_flowid_space(
 
 def _characterize_impact_years(
     trails: Trails,
-    inventory_total_by_impact_year,
-    inventory_by_root_by_impact_year,
-    dp_cache,
-    char_cache,
-    methods,
-    min_amount,
-    normalize_root,
-    debug,
-    ei_version="3.11",
-):
+    inventory_total_by_impact_year: dict[int, np.ndarray],
+    inventory_by_root_by_impact_year: dict[int, dict[int, np.ndarray]],
+    dp_cache: dict,
+    char_cache: dict[tuple, np.ndarray],
+    methods: list[str],
+    min_amount: float,
+    normalize_root: Any,
+    debug: bool,
+    ei_version: str = "3.11",
+) -> dict[int, dict[str, Any]]:
     """Characterize inventories into impact scores by impact year.
 
     :param trails: Trails instance with inventory dimensions.
@@ -1136,21 +1206,32 @@ def lca(
     return_provenance: bool = False,
     use_temporal_distributions: bool = True,
 ) -> Dict[str, Any]:
-    """
-    Option A output:
-      - results_by_solve_year: diagnostic per-year solves
-      - results_by_impact_year: time series of impacts booked in impact years (for plotting)
+    """Run temporal LCA for a functional unit and year.
 
-    Naming conventions:
-      - fu_demand: the full demand vector solved in a given solve_year (sparse dict form)
-      - demand_by_first_level_child: technosphere demand split by first-level child under the FU
-      - injected_supply: extra "supply pulses" to book direct biosphere without re-solving technosphere
-      - injected_supply_by_first_level_child: same, but attributed to a root bucket
-
-    IMPORTANT BEHAVIOR (FIX):
-      - FU-direct biosphere is attributed to the *FU activity index* (fu0),
-        not to a synthetic bucket like -1.
-      - Any legacy occurrences of -1 are normalized into fu0 during bookkeeping.
+    :param trails: Trails instance to analyze.
+    :type trails: Trails
+    :param start_year: Start year for the traversal.
+    :type start_year: int
+    :param start_act_idx: Functional unit activity index.
+    :type start_act_idx: int
+    :param methods: LCIA methods to apply.
+    :type methods: list[str]
+    :param amount: Functional unit amount.
+    :type amount: float
+    :param max_depth: Maximum traversal depth.
+    :type max_depth: int
+    :param min_amount: Minimum magnitude to include.
+    :type min_amount: float
+    :param show_progress: Whether to show traversal progress.
+    :type show_progress: bool
+    :param debug: Whether to emit debug logging.
+    :type debug: bool
+    :param return_provenance: Whether to include provenance data.
+    :type return_provenance: bool
+    :param use_temporal_distributions: Whether to apply temporal distributions.
+    :type use_temporal_distributions: bool
+    :returns: Results with solve-year and impact-year summaries.
+    :rtype: dict[str, Any]
     """
 
     import numpy as np

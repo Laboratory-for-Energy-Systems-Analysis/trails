@@ -1,17 +1,28 @@
 import numpy as np
+from datapackage import Package
 
 import trails.datapackage as datapackage
 
 
-def test_parse_intish_or_none():
-    """Verify int-like parsing helper."""
+def test_parse_intish_or_none() -> None:
+    """Verify int-like parsing helper.
+
+    :returns: None.
+    :rtype: None
+    """
     assert datapackage._parse_intish_or_none(None) is None
     assert datapackage._parse_intish_or_none("") is None
     assert datapackage._parse_intish_or_none("3.0") == 3
 
 
-def test_iter_inventory_resources(example_package):
-    """Verify inventory resource iteration."""
+def test_iter_inventory_resources(example_package: Package) -> None:
+    """Verify inventory resource iteration.
+
+    :param example_package: Example datapackage fixture.
+    :type example_package: datapackage.Package
+    :returns: None.
+    :rtype: None
+    """
     resources = list(
         datapackage._iter_inventory_resources(example_package, "A_matrix.csv")
     )
@@ -19,8 +30,12 @@ def test_iter_inventory_resources(example_package):
     assert years == ["2005", "2020", "2050", "2100"]
 
 
-def test_label_to_year_and_sorting():
-    """Verify label-to-year parsing and sorting."""
+def test_label_to_year_and_sorting() -> None:
+    """Verify label-to-year parsing and sorting.
+
+    :returns: None.
+    :rtype: None
+    """
     assert datapackage._label_to_year("2050") == 2050
     assert datapackage._label_to_year("model/pathway/2005") == 2005
 
@@ -29,8 +44,14 @@ def test_label_to_year_and_sorting():
     assert order.tolist() == [1, 2, 0]
 
 
-def test_load_matrices_from_package(example_package):
-    """Verify matrix loading from datapackage."""
+def test_load_matrices_from_package(example_package: Package) -> None:
+    """Verify matrix loading from datapackage.
+
+    :param example_package: Example datapackage fixture.
+    :type example_package: datapackage.Package
+    :returns: None.
+    :rtype: None
+    """
     A, B, labels, scenario_index, temporal_exchanges, temporal_bio = (
         datapackage.load_matrices_from_package(example_package)
     )
@@ -43,8 +64,14 @@ def test_load_matrices_from_package(example_package):
     assert all(hasattr(v, "distribution") for v in temporal_bio.values())
 
 
-def test_interpolate_to_annual(example_package):
-    """Verify annual interpolation of matrices."""
+def test_interpolate_to_annual(example_package: Package) -> None:
+    """Verify annual interpolation of matrices.
+
+    :param example_package: Example datapackage fixture.
+    :type example_package: datapackage.Package
+    :returns: None.
+    :rtype: None
+    """
     A, B, labels, _, _, _ = datapackage.load_matrices_from_package(example_package)
     A_interp, B_interp, new_labels, new_index = datapackage.interpolate_to_annual(
         A, B, labels
@@ -58,8 +85,14 @@ def test_interpolate_to_annual(example_package):
     assert B_interp.shape[0] == len(new_labels)
 
 
-def test_load_indices_from_package(example_package):
-    """Verify index loading from datapackage."""
+def test_load_indices_from_package(example_package: Package) -> None:
+    """Verify index loading from datapackage.
+
+    :param example_package: Example datapackage fixture.
+    :type example_package: datapackage.Package
+    :returns: None.
+    :rtype: None
+    """
     activity_indices, biosphere_indices = datapackage.load_indices_from_package(
         example_package
     )

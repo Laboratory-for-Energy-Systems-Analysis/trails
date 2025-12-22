@@ -47,7 +47,7 @@ class TemporalExchange:
 class TemporalDistribution:
     """Turn a TemporalExchange into discrete (offset, weight) pairs."""
 
-    def __init__(self, tex: TemporalExchange):
+    def __init__(self, tex: TemporalExchange) -> None:
         """Initialize the distribution wrapper.
 
         :param tex: Temporal exchange metadata to interpret.
@@ -58,14 +58,17 @@ class TemporalDistribution:
     def iter_offsets_and_weights(
         self, debug: bool = False
     ) -> Iterable[Tuple[int, float]]:
-        """
-        Yield (offset_k, weight_k) for integer offsets k in
-        [offset_min, offset_max].
+        """Yield weighted integer offsets for the temporal distribution.
 
         Temporal weights are:
           1) computed from the distribution shape
           2) modified by an optional offset-dependent scaling law
           3) renormalized to sum to 1
+
+        :param debug: Whether to emit debug logging.
+        :type debug: bool
+        :returns: Iterable of ``(offset, weight)`` pairs.
+        :rtype: Iterable[tuple[int, float]]
         """
         t = self.tex
         offsets = np.arange(t.offset_min, t.offset_max + 1, dtype=int)
@@ -183,7 +186,15 @@ class TemporalDistribution:
     # ------------------------------------------------------------------
     @staticmethod
     def _default_sigma(offsets: np.ndarray, scale: Optional[float]) -> float:
-        """Choose a reasonable sigma if scale is None or invalid."""
+        """Choose a reasonable sigma if scale is None or invalid.
+
+        :param offsets: Offset values to inspect.
+        :type offsets: numpy.ndarray
+        :param scale: Scale parameter if provided.
+        :type scale: float | None
+        :returns: Fallback sigma value.
+        :rtype: float
+        """
         if scale is not None and scale > 0:
             return float(scale)
 
@@ -195,11 +206,14 @@ class TemporalDistribution:
 
     @staticmethod
     def _triangular_weights(offsets: np.ndarray, loc: Optional[float]) -> np.ndarray:
-        """
-        Simple discrete triangular shape over given integer offsets.
+        """Build a discrete triangular shape over given integer offsets.
 
-        loc is the "mode" (can be fractional). We give higher weight
-        to offsets closest to loc, linearly decreasing to the ends.
+        :param offsets: Offset values to weight.
+        :type offsets: numpy.ndarray
+        :param loc: Mode location for the distribution.
+        :type loc: float | None
+        :returns: Unnormalized triangular weights.
+        :rtype: numpy.ndarray
         """
         if loc is None:
             # If no loc given, fall back to symmetric around the midpoint
@@ -221,11 +235,27 @@ class TemporalDistribution:
         return w
 
     @staticmethod
-    def _normal_weights(offsets, loc, scale, offset_min, offset_max):
-        """
-        Proper truncated normal over [offset_min, offset_max].
-        PDF values are computed only at integer offsets but normalized to match
-        the truncated continuous distribution.
+    def _normal_weights(
+        offsets: np.ndarray,
+        loc: float,
+        scale: float,
+        offset_min: int,
+        offset_max: int,
+    ) -> np.ndarray:
+        """Compute truncated normal weights over the integer offsets.
+
+        :param offsets: Offset values to weight.
+        :type offsets: numpy.ndarray
+        :param loc: Mean of the normal distribution.
+        :type loc: float
+        :param scale: Standard deviation for the normal distribution.
+        :type scale: float
+        :param offset_min: Minimum offset bound.
+        :type offset_min: int
+        :param offset_max: Maximum offset bound.
+        :type offset_max: int
+        :returns: Truncated normal weights over offsets.
+        :rtype: numpy.ndarray
         """
         if scale is None or scale <= 0:
             scale = 1.0
@@ -238,7 +268,7 @@ class TemporalDistribution:
         # --- Normalization for TRUNCATED NORMAL BETWEEN [offset_min, offset_max] ---
 
         # CDF helper
-        def normal_cdf(x):
+        def normal_cdf(x: float) -> float:
             """Return the standard normal CDF at ``x`` for the local parameters.
 
             :param x: Input value.
@@ -264,15 +294,19 @@ class TemporalDistribution:
     def _lognormal_weights(
         self, offsets: np.ndarray, loc: Optional[float], scale: Optional[float]
     ) -> np.ndarray:
-        """
-        Discrete lognormal weights over given integer offsets.
+        """Compute discrete lognormal weights for integer offsets.
 
-        - Only positive offsets get non-zero weight.
-        - loc is interpreted as the *median* in offset space (if > 0):
-              median = exp(mu)  =>  mu = log(loc)
-        - scale is sigma in log-space.
+        Only positive offsets receive mass. ``loc`` is interpreted as the
+        median in offset space when provided.
 
-        If there are no positive offsets or loc <= 0, falls back to uniform.
+        :param offsets: Offset values to weight.
+        :type offsets: numpy.ndarray
+        :param loc: Median location in offset space.
+        :type loc: float | None
+        :param scale: Sigma in log-space.
+        :type scale: float | None
+        :returns: Lognormal weights over offsets.
+        :rtype: numpy.ndarray
         """
         x = offsets.astype(float)
         mask = x > 0
@@ -300,11 +334,14 @@ class TemporalDistribution:
 
     @staticmethod
     def _discrete_weights(offsets: np.ndarray, loc: Optional[float]) -> np.ndarray:
-        """
-        A discrete (Dirac-like) distribution:
+        """Build a discrete (Dirac-like) distribution over offsets.
 
-        - All weight on the single offset that is closest to `loc`.
-        - If loc is None, use 0 if within range, else the nearest boundary.
+        :param offsets: Offset values to weight.
+        :type offsets: numpy.ndarray
+        :param loc: Location to concentrate weight around.
+        :type loc: float | None
+        :returns: Discrete weights over offsets.
+        :rtype: numpy.ndarray
         """
         if loc is None:
             # try to anchor at 0 if possible
