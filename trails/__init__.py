@@ -1,6 +1,5 @@
 """
-edges: A Python package for calculating the environmental impact of products by
-applying characterization factors conditioned by the context of exchanges.
+TRAILS: Temporal Routing And Aggregation of Impacts across Life-cycle Systems.
 """
 
 __all__ = ("Trails", "lca", "get_lcia_method_names", "plot_temporal_scores")

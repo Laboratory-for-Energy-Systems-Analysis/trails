@@ -1,166 +1,65 @@
-
 Theory
 ======
 
-Overview
---------
+TRAILS models environmental impacts as *time-aware* exchanges moving through a
+supply-chain graph. Instead of collapsing all exchanges into a single static
+inventory, it carries time-indexed technosphere and biosphere matrices and
+allows temporal distributions to shift when impacts are booked.
 
-The `edges` framework introduces a novel modeling layer in LCIA: **exchange-resolved LCIA**. Unlike traditional LCIA that assigns impacts to flows regardless of context, `edges` characterizes **exchanges** — the relationships between activities — allowing for CFs to reflect supplier/consumer location, activity classification, and scenario conditions.
+Temporal LCIA in TRAILS
+-----------------------
 
-This method is practical, scalable, and avoids the need for full GIS integration.
+At a high level, TRAILS works with time-indexed matrices:
 
----
+* :math:`A_t`: technosphere exchanges by scenario/year :math:`t`
+* :math:`B_t`: biosphere exchanges by scenario/year :math:`t`
 
-Node-based vs Edge-based LCIA
------------------------------
+For a given functional unit in year :math:`y_0`, TRAILS traverses the
+technosphere graph over time, collecting a **frontier** of activity demands in
+future years. Each frontier slice is solved with the corresponding
+:math:`A_t` and combined with :math:`B_t` to construct inventories for impact
+years.
 
-Conventional LCIA applies CFs to nodes (flows), yielding:
+The final output is a mapping from impact year to characterized impact scores
+(plus attribution to first-level suppliers when available).
 
-.. math::
-
-   s = \mathbf{c}^T \cdot \mathbf{B} \cdot \mathbf{A}^{-1} \cdot \mathbf{f}
-
-Where:
-
-- :math:`\mathbf{f}` is the demand vector
-- :math:`\mathbf{A}` is the technosphere matrix
-- :math:`\mathbf{B}` is the biosphere matrix
-- :math:`\mathbf{c}` is a vector of characterization factors
-- :math:`s` is the final score
-
-This approach treats CFs as static, context-independent.
-
-In contrast, `edges` defines a **non-diagonal, rectangular matrix** :math:`\mathbf{C}` mapping to **individual exchanges**, enabling:
-
-.. math::
-
-   \mathbf{S} = \mathbf{C} \circ \mathbf{X}
-
-Where :math:`\mathbf{X}` is the matrix of exchanges, and :math:`\mathbf{S}` is the characterized inventory.
-
----
-
-Matching Logic
---------------
-
-Characterization factors in `edges` are matched using:
-
-- **Supplier** attributes: `name`, `reference product`, `location`, `matrix`
-- **Consumer** attributes: `location`, `matrix`, `classifications`
-- **Contextual parameters**: e.g., scenario-dependent variables like CO₂ concentrations
-
-Matching is flexible: partial string matches (`contains`, `startswith`), matrix filters, nested dictionaries for `classifications`.
-
----
-
-Regionalization Mechanisms
----------------------------
-
-Regional mapping follows a five-step cascade:
-
-1. **Direct Match**: Exact match on supplier/consumer location
-2. **Disaggregation**: Split aggregate inventory region using weighted CFs
-3. **Aggregation**: Fill missing CFs using containing regions
-4. **Dynamic Resolution**: Handle "RoW"-like fallback with exclusion logic
-5. **Global Fallback**: Default CF if no other match found
-
-**Weights** can be based on population, GDP, water demand, etc.
-
----
-
-Symbolic and Scenario-Based CFs
+Temporal exchange distributions
 -------------------------------
 
-CFs can be defined as symbolic expressions:
+Exchanges can carry temporal distributions rather than single-point events.
+A temporal distribution defines how a flow is spread over offsets relative to
+its parent activity year. TRAILS supports deterministic and distributional
+forms (e.g., fixed offset, uniform spread, normal-like kernels), allowing:
 
-.. code-block:: json
+* **delayed emissions** (e.g., use-phase emissions)
+* **staged production** (e.g., infrastructure build-outs)
+* **temporal aggregation** for long-lived supply chains
 
-    {
-        "value": "GWP('CH4', H, C_CH4)"
-    }
+During traversal, these distributions shift demand and emissions into impact
+years. When desired, TRAILS can collapse distributions into scalar multipliers
+for faster static approximations.
 
-Where variables (`H`, `C_CH4`) are evaluated per scenario or year.
+Scenario-aware inventories
+--------------------------
 
-This enables prospective LCIA consistent with IAM or RCP scenarios.
+TRAILS is designed for prospective LCA with scenario data packages (e.g.,
+from ``premise``). Each scenario year contains its own technosphere and
+biosphere slices. TRAILS can interpolate to annual resolution, or snap to the
+nearest available year, ensuring that the inventory and characterization logic
+remains consistent across time horizons.
 
----
+Impact attribution across time
+------------------------------
 
-Uncertainty Modeling
---------------------
+The core LCA routine produces two complementary views:
 
-`edges` supports multiple uncertainty types:
+* **results_by_solve_year**: diagnostic information about each solved year
+  (demand vectors, injected supply pulses, and metadata for debugging).
+* **results_by_impact_year**: the impact time series that you plot and analyze.
 
-- `normal`, `lognormal`, `triangular`, `uniform`
-- `discrete_empirical` (e.g. basin-based CFs)
-- Nested uncertainty: e.g., a distribution selected per region, with per-basin variability
+Because impacts are booked in impact years, TRAILS provides a direct answer to
+questions such as:
 
-Monte Carlo draws are supported directly via CF definitions and sampling logic.
-
----
-
-Technosphere CFs
-----------------
-
-Beyond biosphere flows, `edges` can characterize **technosphere exchanges** — for instance, country-to-country commodity flows (e.g., GeoPolRisk). This adds relational, supply-chain-sensitive impact modeling.
-
----
-
-Life Cycle Costing (LCC)
-------------------------
-
-In addition to environmental impact assessment, the `edges` framework supports
-**life cycle costing (LCC)** through the `CostLCIA` class. This allows the user
-to apply cost-based characterization factors to LCI exchanges, using the same
-regionalization and parametrization logic available for environmental LCIA.
-
-Cost data can be:
-
-- Fixed (e.g., per unit cost in a specific currency)
-- Parameterized (e.g., price = base_price * inflation_factor)
-- Scenario-dependent (e.g., modeled price paths from IAMs or forecasts)
-- Uncertain (e.g., cost ranges or distributions used in Monte Carlo)
-
-The core LCC workflow mirrors LCIA:
-
-1. Compute the inventory with `lci()`
-2. Match exchanges with cost factors via `map_exchanges()` (and mapping steps)
-3. Evaluate symbolic costs via `evaluate_cfs()`
-4. Compute the total life cycle cost using `lcia()`
-5. Export detailed cost breakdowns via `generate_df_table()`
-
-This allows integrated techno-economic and environmental modeling under consistent spatial, structural, and scenario assumptions.
-
-**Example:**
-
-.. code-block:: python
-
-    import bw2data
-    from edges import CostLCIA
-
-    bw2data.project.set_current("some project")
-    act = bw2data.Database("some db").random()
-
-    lcia = CostLCIA(
-        method=("LCC 1.0", "2023"),
-        demand={act: 1}
-    )
-
-    lcia.lci()
-    lcia.map_exchanges()
-    lcia.evaluate_cfs()
-    lcia.lcia()
-    df = lcia.generate_df_table()
-    print(df.head())
-
----
-
-Summary
--------
-
-By resolving CFs at the level of exchanges, `edges`:
-
-- Enables context-aware LCIA without full GIS dependency
-- Supports regionalized, relational, and prospective modeling
-- Keeps logic transparent, reproducible, and extendable via JSON and symbolic expressions
-
-This makes `edges` ideal for advanced LCIA applications where geography, classification, and policy scenarios all matter.
+* *When do impacts occur?*
+* *Which upstream suppliers contribute most over time?*
+* *How do scenario transitions shift the impact profile?*
