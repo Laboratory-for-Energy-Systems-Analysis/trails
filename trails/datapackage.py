@@ -37,9 +37,7 @@ def _parse_intish_or_none(value: object) -> int | None:
 # ----------------------------------------------------------------------
 # Internal helpers
 # ----------------------------------------------------------------------
-def _iter_inventory_resources(
-    package: Any, filename: str
-) -> Iterator[tuple[str, Any]]:
+def _iter_inventory_resources(package: Any, filename: str) -> Iterator[tuple[str, Any]]:
     """
     Yield (year_label, resource) for resources whose path matches:
 

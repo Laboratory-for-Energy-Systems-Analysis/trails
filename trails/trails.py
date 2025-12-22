@@ -189,9 +189,7 @@ class Trails:
 
                 w = (year - y0) / (y1 - y0)
 
-                def interp_optional(
-                    v0: float | None, v1: float | None
-                ) -> float | None:
+                def interp_optional(v0: float | None, v1: float | None) -> float | None:
                     """Interpolate optional numeric values with nearest fallback.
 
                     :param v0: First value to interpolate.

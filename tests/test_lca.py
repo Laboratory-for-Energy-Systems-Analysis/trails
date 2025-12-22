@@ -168,9 +168,7 @@ def test_lca_static_mode(monkeypatch: pytest.MonkeyPatch) -> None:
         """
         return object(), {}, {}, []
 
-    def fake_fill_characterization_factors_matrices(
-        *args, **kwargs
-    ) -> np.ndarray:
+    def fake_fill_characterization_factors_matrices(*args, **kwargs) -> np.ndarray:
         """Return a dummy characterization matrix for tests.
 
         :returns: Dummy characterization matrix.

@@ -1004,7 +1004,7 @@ def _select_paths(
 
 
 def _build_depth_map(
-    selected_paths: list[tuple[tuple[tuple[int, int], ...], float]]
+    selected_paths: list[tuple[tuple[tuple[int, int], ...], float]],
 ) -> tuple[list[tuple[int, int]], dict[tuple[int, int], int]]:
     """Build node depth mapping from selected paths.
 
@@ -1082,7 +1082,7 @@ def _aggregate_link_impacts(
 
 
 def _build_agg_nodes(
-    link_impact_agg: dict[tuple[tuple[int, int], tuple[int, int]], float]
+    link_impact_agg: dict[tuple[tuple[int, int], tuple[int, int]], float],
 ) -> tuple[list[tuple[int, int]], dict[tuple[int, int], int]]:
     """Build aggregated node list and index mapping.
 
@@ -1104,7 +1104,7 @@ def _build_agg_nodes(
 
 
 def _compute_node_totals(
-    link_impact_agg: dict[tuple[tuple[int, int], tuple[int, int]], float]
+    link_impact_agg: dict[tuple[tuple[int, int], tuple[int, int]], float],
 ) -> dict[tuple[int, int], float]:
     """Compute total incoming impact per aggregated node.
 
@@ -1120,7 +1120,7 @@ def _compute_node_totals(
 
 
 def _compute_sankey_layout(
-    agg_nodes: list[tuple[int, int]]
+    agg_nodes: list[tuple[int, int]],
 ) -> tuple[list[float], list[float], list[int], list[int]]:
     """Compute Sankey node positions from aggregated nodes.
 
@@ -1478,9 +1478,7 @@ def _collect_global_years(
     return year_min, year_max, years_global
 
 
-def _init_flow_subplots(
-    panel_labels: list[str], ncols: int
-) -> tuple[go.Figure, int]:
+def _init_flow_subplots(panel_labels: list[str], ncols: int) -> tuple[go.Figure, int]:
     """Initialize subplot grid for flow panels.
 
     :param panel_labels: Labels for each panel.
