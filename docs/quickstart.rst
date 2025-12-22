@@ -1,45 +1,56 @@
+Quickstart
+==========
 
-Quick Start
-===========
+This quickstart shows how to load a Frictionless data package, run a temporal
+LCA, and plot impact scores over time.
 
-This minimal example walks you through performing a basic LCIA using `edges`.
+Install
+-------
+
+.. code-block:: bash
+
+    pip install trails
+
+Run a temporal LCA
+------------------
 
 .. code-block:: python
 
-    import bw2data
-    from edges import EdgeLCIA, get_available_methods
+    from datapackage import Package
 
-    bw2data.project.set_current("some project")
-    act = bw2data.Database("some db").random()
+    from trails import Trails, lca, get_lcia_method_names, plot_temporal_scores
 
-    # get available method
-    get_available_methods()
+    # Load a Frictionless data package exported by premise (or compatible tooling)
+    package = Package("path/to/datapackage.json")
 
-    # Load a built-in method
-    lcia = EdgeLCIA(
-        demand={act: 1},
-        method=("AWARE 2.0", "Country", "all", "yearly")
+    # Initialize the TRAILS wrapper (annual interpolation is optional)
+    trails = Trails(package, interpolate_annual=True)
+
+    # Pick an activity index from the metadata
+    activity_indices = next(iter(trails.activity_indices.values()))
+    start_act_idx = next(iter(activity_indices.keys()))
+
+    # Choose an LCIA method bundled with TRAILS
+    method = get_lcia_method_names(ei_version="3.11")[0]
+
+    # Run a temporal LCA
+    results = lca(
+        trails=trails,
+        start_year=2030,
+        start_act_idx=start_act_idx,
+        methods=[method],
+        max_depth=2,
     )
 
-    # Step 1: Build the inventory
-    lcia.lci()
+    # Plot temporal impact scores
+    fig = plot_temporal_scores(results, trails, method_label=method)
+    fig.show()
 
-    # Step 2.a: Match exchanges to characterization factors
-    lcia.map_exchanges()
-    # Step 2.b: since this si a regionalized method, a few more steps are required
-    lcia.map_aggregate_locations() # finds matches for aggregate regions ("RER", "US" etc.)
-    lcia.map_dynamic_locations() # finds matches for dynamic regions ("RoW", "RoW", etc.)
-    lcia.map_contained_locations() # finds matches for contained regions ("CA" for "CA-QC" if factor of "CA-QC" is not available)
-    lcia.map_remaining_locations_to_global() # applies global factors to remaining locations
+What you get
+------------
 
-    # Step 3: Evaluate CFs (e.g., resolve symbolic expressions)
-    lcia.evaluate_cfs()
+The returned ``results`` dictionary contains:
 
-    # Step 4: Compute the LCIA score
-    lcia.lcia()
-
-    # Step 5 (optional): Print a summary
-    print(lcia.statistics())
-
-    # Step 6 (optional): Print a table with all exchanges characterized
-    df = lcia.generate_cf_table()
+* ``results_by_solve_year``: diagnostics for each solved year
+* ``results_by_impact_year``: impact scores aggregated by impact year (ready for
+  plotting or further analysis)

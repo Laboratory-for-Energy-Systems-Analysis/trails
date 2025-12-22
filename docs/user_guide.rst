@@ -1,282 +1,157 @@
-
 User Guide
 ==========
 
-This guide walks you through practical usage patterns of the `edges` library,
-covering common workflows such as simple LCIA, regionalized impact assessment,
-parameterized methods, uncertainty analysis, and scenario-based modeling.
+This guide covers the main workflows in TRAILS: loading data packages, running
+temporal LCA, and interpreting results.
 
----
+Data packages
+-------------
 
-Simple LCIA
------------
+TRAILS expects a Frictionless data package (``datapackage.json``) with
+scenario-indexed technosphere and biosphere matrices plus index metadata.
+Packages produced by ``premise`` are supported out of the box.
 
-For non-regionalized methods with fixed CFs:
+Key components include:
+
+* **Technosphere matrix** (``A``): exchanges between activities/products
+* **Biosphere matrix** (``B``): biosphere flows per activity
+* **Activity indices**: metadata for activities (name, location, unit)
+* **Biosphere indices**: metadata for flows (name, compartment, unit)
+* **Temporal exchanges** (optional): distribution metadata for delayed flows
+
+Loading TRAILS
+--------------
 
 .. code-block:: python
 
-    import bw2data
-    from edges import EdgeLCIA
+    from datapackage import Package
+    from trails import Trails
 
-    bw2data.project.set_current("some project")
-    act = bw2data.Database("some db").random()
+    package = Package("path/to/datapackage.json")
 
-    # here, the user provides his/her own LCIA method file
-    lcia = EdgeLCIA(
-        demand={act: 1},
-        filepath="lcia_example_1.json"
+    # interpolate_annual=True expands scenario slices to full annual resolution
+    trails = Trails(package, interpolate_annual=True)
+
+After initialization, you can access scenario labels and metadata:
+
+.. code-block:: python
+
+    print(trails.scenario_labels)
+    activity_indices = next(iter(trails.activity_indices.values()))
+    print(list(activity_indices.items())[:5])
+
+Selecting activities
+--------------------
+
+Activities are referenced by integer indices from the metadata. A typical
+workflow is to select an activity and store the index for repeated calls:
+
+.. code-block:: python
+
+    activity_indices = next(iter(trails.activity_indices.values()))
+    start_act_idx = next(iter(activity_indices.keys()))
+
+Running temporal LCA
+--------------------
+
+The primary entry point is ``trails.lca.lca``:
+
+.. code-block:: python
+
+    from trails import lca, get_lcia_method_names
+
+    method = get_lcia_method_names(ei_version="3.11")[0]
+
+    results = lca(
+        trails=trails,
+        start_year=2030,
+        start_act_idx=start_act_idx,
+        methods=[method],
+        amount=1.0,
+        max_depth=3,
+        min_amount=1e-18,
+        show_progress=True,
+        debug=False,
+        return_provenance=False,
+        use_temporal_distributions=True,
     )
-    # solves the system and generates the inventory matrix
-    lcia.lci()
-    # map exchanges that should receive a CF
-    lcia.map_exchanges()
-    # evaluate the CF values
-    lcia.evaluate_cfs()
-    # populate the characterized_inventory matrix and a score
-    lcia.lcia()
-    print(lcia.score)
-    # optional, generate a dataframe with all characterized exchanges
-    df = lcia.generate_df_table()
-    print(df.head())
 
----
+The ``results`` structure provides:
 
-Using Built-in Method Files
----------------------------
+* ``results_by_solve_year``: demand vectors and diagnostics per solved year
+* ``results_by_impact_year``: scores and attribution by impact year
 
-You can list available method files with:
+Temporal distributions
+----------------------
+
+Temporal distributions control how exchanges are spread across impact years.
+TRAILS can use the distribution data included in the package, or collapse the
+effects into scalar multipliers for a static approximation:
 
 .. code-block:: python
 
-    from edges import get_available_methods
-    print(get_available_methods())
-
-Use the name in the `method=` argument when instantiating `EdgeLCIA`.
-
----
-
-Regionalized LCIA
------------------
-
-When using region-specific methods like AWARE or ImpactWorld+:
-
-.. code-block:: python
-
-    import bw2data
-    from edges import EdgeLCIA
-
-    bw2data.project.set_current("some project")
-    act = bw2data.Database("some db").random()
-
-    # here, we use a method already included in `edges`
-    lcia = EdgeLCIA(
-        demand={act: 1},
-        method=("AWARE 2.0", "Country", "all", "yearly"),
+    # Use full temporal distributions (default)
+    results = lca(
+        trails=trails,
+        start_year=2030,
+        start_act_idx=start_act_idx,
+        methods=[method],
+        use_temporal_distributions=True,
     )
-    lcia.lci()
-    lcia.map_exchanges()
-    # this is a regionalized LCIa method
-    # so a few extra steps are necessary to ensure
-    # that exchanges with suppliers located in aggregated regions (e.g., RER)
-    # or dynamic regions (e.g., RoW) also get a CF
-    lcia.map_aggregate_locations()
-    lcia.map_dynamic_locations()
-    lcia.map_contained_locations()
-    lcia.map_remaining_locations_to_global()
-    lcia.evaluate_cfs()
-    lcia.lcia()
-    print(lcia.score)
 
----
+    # Collapse temporal distributions for a faster static view
+    results_static = lca(
+        trails=trails,
+        start_year=2030,
+        start_act_idx=start_act_idx,
+        methods=[method],
+        use_temporal_distributions=False,
+    )
 
+Plotting results
+----------------
 
-
-Using a Custom Method JSON
---------------------------
-
-Your method file should follow the expected CF JSON schema:
+Use ``plot_temporal_scores`` to visualize the time series and contribution by
+first-level suppliers:
 
 .. code-block:: python
 
-    import bw2data
-    from edges import EdgeLCIA
+    from trails import plot_temporal_scores
 
-    bw2data.project.set_current("some project")
-    act = bw2data.Database("some db").random()
+    fig = plot_temporal_scores(
+        results,
+        trails,
+        method_label=method,
+        stacked=True,
+        show_cumulative_axis=True,
+    )
+    fig.show()
 
-    lcia = EdgeLCIA(method="my_custom_method.json")
-    lcia.lci()
-    lcia.map_exchanges()
-    lcia.evaluate_cfs(parameters={"H": 100, "C_CH4": 1866})
-    lcia.lcia()
+Interpreting outputs
+--------------------
 
----
-
-Parameterized CFs
------------------
-
-If the method uses symbolic expressions, pass parameter values:
+``results_by_impact_year`` is structured as:
 
 .. code-block:: python
 
-    import bw2data
-    from edges import EdgeLCIA
-
-    bw2data.project.set_current("some project")
-    act = bw2data.Database("some db").random()
-
-    # Define scenario parameters (e.g., atmospheric CO₂ concentration
-    # and time horizon)
-    params = {
-        "some scenario": {
-             "co2ppm": {
-                "2020": 410,
-                "2050": 450,
-                "2100": 500
-             },
-             "h": {
-                "2020": 100,
-                "2050": 100,
-                "2100": 100
-             }
-        }
+    {
+        2030: {
+            "scores": 1.23,
+            "scores_by_first_level_child": {
+                42: 0.8,
+                77: 0.4,
+            },
+        },
+        2031: {...},
     }
 
-    # Define an LCIA method name (the content will be taken from the JSON file)
-    method = ('GWP', 'scenario-dependent', '100 years')
+Use ``scores`` for the total impact in a year, and
+``scores_by_first_level_child`` for attribution to first-level suppliers.
 
-    lcia = EdgeLCIA(
-        demand={act: 1},
-        method=method,
-        parameters=params,
-        filepath="lcia_parameterized_gwp.json")
-    )
-    lcia.lci()
-    lcia.map_exchanges()
+Troubleshooting and diagnostics
+-------------------------------
 
-    # Run scenarios efficiently
-    results = []
-    for idx in {"2020", "2050", "2100"}:
-        lcia.evaluate_cfs(idx)
-        lcia.lcia()
-        df = lcia.generate_cf_table()
-
-        scenario_result = {
-            "scenario": idx,
-            "co2ppm": params["some scenario"]["co2ppm"][idx],
-            "score": lcia.score,
-            "CF_table": df
-        }
-        results.append(scenario_result)
-
-        print(f"Scenario (CO₂ {params['some scenario']['co2ppm'][idx]} ppm): Impact = {lcia.score}")
-
-
-This allows integration with scenario data (e.g., from RCPs or IAMs).
-
----
-
-Uncertainty-aware LCIA
------------------------
-
-If CFs include uncertainty (e.g., lognormal, discrete empirical),
-you can get statistics:
-
-.. code-block:: python
-
-    import bw2data
-    from edges import EdgeLCIA
-
-    bw2data.project.set_current("some project")
-    act = bw2data.Database("some db").random()
-
-    lcia = EdgeLCIA(
-        demand={act: 1},
-        method=("AWARE 2.0", "Country", "all", "yearly"),
-        use_distributions=True,
-        iterations=10_000
-    )
-
-    lcia.lci()
-    lcia.map_exchanges()
-    lcia.map_aggregate_locations()
-    lcia.map_dynamic_locations()
-    lcia.map_contained_locations()
-    lcia.map_remaining_locations_to_global()
-    lcia.evaluate_cfs()
-    lcia.lcia()
-
-    print(lcia.score.mean())
-
-    #plot histogram of results distirbution
-    import matplitlib.pyplot as plt
-    plt.hist(lcia.score, bins=100)
-
-    # get dataframe with statistics
-    df = lcia.generate_cf_table()
-
-
----
-
-To know more on how uncertainty works in `edges`, see:
-
-- examples/uncertainty.ipynb
-
-Working with Technosphere CFs (e.g., GeoPolRisk)
-------------------------------------------------
-
-.. code-block:: python
-
-    import bw2data
-    from edges import EdgeLCIA
-
-    bw2data.project.set_current("some project")
-    act = bw2data.Database("some db").random()
-
-    lcia = EdgeLCIA(
-        demand={act:1},
-        method=("GeoPolRisk", "paired", "2024")
-    )
-
-    lcia.lci()
-    lcia.map_exchanges()
-    lcia.map_aggregate_locations()
-    lcia.map_contained_locations()
-    lcia.map_remaining_locations_to_global()
-    lcia.evaluate_cfs()
-    lcia.lcia()
-    df = lcia.generate_df_table()
-    df.to_csv("results.csv")
-
----
-
-Scenario-based Fossil Resource Scarcity
----------------------------------------
-
-Supports expressions depending on extraction volume and discount rate:
-
-.. code-block:: python
-
-    import bw2data
-    from edges import EdgeLCIA
-
-    bw2data.project.set_current("some project")
-    act = bw2data.Database("some db").random()
-
-    lcia = EdgeLCIA(method="SCP_1.0.json")
-    lcia.lci()
-    lcia.map_exchanges()
-    lcia.evaluate_cfs(parameters={"MCI_OIL": 0.5, "P_OIL": 450, "d": 0.03})
-    lcia.lcia()
-
----
-
-Exporting Results
------------------
-
-You can inspect or save the detailed contribution table:
-
-.. code-block:: python
-
-    df = lcia.generate_cf_table()
-    df.to_csv("edge_lcia_detailed_results.csv")
+* If a requested year is not available in the data package, TRAILS will snap to
+  the nearest available year and emit a warning.
+* Set ``debug=True`` to retain more diagnostic information in
+  ``results_by_solve_year`` and enable detailed logging.
