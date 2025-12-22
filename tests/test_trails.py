@@ -1,38 +1,72 @@
 import numpy as np
 import pytest
 
+from trails.trails import Trails
+
 from trails.temporal_distributions import TemporalDistribution
 
 
-def test_map_year_helpers(example_trails):
-    """Verify year mapping helpers for scenario and template years."""
+def test_map_year_helpers(example_trails: Trails) -> None:
+    """Verify year mapping helpers for scenario and template years.
+
+    :param example_trails: Trails fixture under test.
+    :type example_trails: trails.trails.Trails
+    :returns: None.
+    :rtype: None
+    """
     assert example_trails._map_year_to_scenario_year(2010) == 2005
     assert example_trails._map_year_to_template_year(2010) == 2005
     assert example_trails._map_year_to_available(2010) == 2005
 
 
-def test_get_matrices_for_scenario(example_trails):
-    """Verify scenario matrix accessors."""
+def test_get_matrices_for_scenario(example_trails: Trails) -> None:
+    """Verify scenario matrix accessors.
+
+    :param example_trails: Trails fixture under test.
+    :type example_trails: trails.trails.Trails
+    :returns: None.
+    :rtype: None
+    """
     A_2005 = example_trails.get_A_for_scenario("2005")
     B_2005 = example_trails.get_B_for_scenario("2005")
     assert A_2005.shape[0] == example_trails.A.shape[1]
     assert B_2005.shape[0] == example_trails.B.shape[1]
 
 
-def test_get_temporal_exchange(example_trails):
-    """Verify temporal exchange lookup behavior."""
+def test_get_temporal_exchange(example_trails: Trails) -> None:
+    """Verify temporal exchange lookup behavior.
+
+    :param example_trails: Trails fixture under test.
+    :type example_trails: trails.trails.Trails
+    :returns: None.
+    :rtype: None
+    """
     tex = example_trails.get_temporal_exchange(2005, 2, 0)
     assert tex is not None
 
 
-def test_get_temporal_distribution(example_trails):
-    """Verify temporal distribution construction."""
+def test_get_temporal_distribution(example_trails: Trails) -> None:
+    """Verify temporal distribution construction.
+
+    :param example_trails: Trails fixture under test.
+    :type example_trails: trails.trails.Trails
+    :returns: None.
+    :rtype: None
+    """
     td = example_trails.get_temporal_distribution(2005, 2, 0)
     assert isinstance(td, TemporalDistribution)
 
 
-def test_expand_temporal_exchanges_without_temporal_distributions(example_trails):
-    """Verify exchange expansion without temporal distributions."""
+def test_expand_temporal_exchanges_without_temporal_distributions(
+    example_trails: Trails,
+) -> None:
+    """Verify exchange expansion without temporal distributions.
+
+    :param example_trails: Trails fixture under test.
+    :type example_trails: trails.trails.Trails
+    :returns: None.
+    :rtype: None
+    """
     demand = example_trails.expand_temporal_exchanges(
         year=2005, act_idx=1, amount=2.0, use_temporal_distributions=False
     )
@@ -44,14 +78,28 @@ def test_expand_temporal_exchanges_without_temporal_distributions(example_trails
     assert demand[2005][7] == pytest.approx(0.6)
 
 
-def test_expand_temporal_exchanges_with_temporal_distributions(example_trails):
-    """Verify exchange expansion with temporal distributions."""
+def test_expand_temporal_exchanges_with_temporal_distributions(
+    example_trails: Trails,
+) -> None:
+    """Verify exchange expansion with temporal distributions.
+
+    :param example_trails: Trails fixture under test.
+    :type example_trails: trails.trails.Trails
+    :returns: None.
+    :rtype: None
+    """
     demand = example_trails.expand_temporal_exchanges(year=2005, act_idx=2, amount=1.0)
     assert any(0 in mapping for mapping in demand.values())
 
 
-def test_accumulate_temporalized_biosphere_inventory(example_trails):
-    """Verify temporalized biosphere inventory accumulation."""
+def test_accumulate_temporalized_biosphere_inventory(example_trails: Trails) -> None:
+    """Verify temporalized biosphere inventory accumulation.
+
+    :param example_trails: Trails fixture under test.
+    :type example_trails: trails.trails.Trails
+    :returns: None.
+    :rtype: None
+    """
     inventory_by_year = {}
     example_trails.accumulate_temporalized_biosphere_inventory(
         base_year=2005,
@@ -62,8 +110,14 @@ def test_accumulate_temporalized_biosphere_inventory(example_trails):
     assert np.isclose(inventory_by_year[2005][0], 30000.0)
 
 
-def test_temporal_traversal_basic(example_trails):
-    """Verify basic temporal traversal behavior."""
+def test_temporal_traversal_basic(example_trails: Trails) -> None:
+    """Verify basic temporal traversal behavior.
+
+    :param example_trails: Trails fixture under test.
+    :type example_trails: trails.trails.Trails
+    :returns: None.
+    :rtype: None
+    """
     out = example_trails.temporal_traversal(
         start_year=2005,
         start_act_idx=1,
@@ -84,16 +138,28 @@ def test_temporal_traversal_basic(example_trails):
     assert demand[(2005, 7)] == pytest.approx(0.3)
 
 
-def test_frontier_to_demand_vectors(example_trails):
-    """Verify conversion from frontier to demand vectors."""
+def test_frontier_to_demand_vectors(example_trails: Trails) -> None:
+    """Verify conversion from frontier to demand vectors.
+
+    :param example_trails: Trails fixture under test.
+    :type example_trails: trails.trails.Trails
+    :returns: None.
+    :rtype: None
+    """
     frontier = {(2005, 1): 1.0, (2006, 2): 2.0}
     f_by_year = example_trails.frontier_to_demand_vectors(frontier)
     assert f_by_year[2005][1] == 1.0
     assert f_by_year[2006][2] == 2.0
 
 
-def test_collect_traversal_edges(example_trails):
-    """Verify traversal edge collection."""
+def test_collect_traversal_edges(example_trails: Trails) -> None:
+    """Verify traversal edge collection.
+
+    :param example_trails: Trails fixture under test.
+    :type example_trails: trails.trails.Trails
+    :returns: None.
+    :rtype: None
+    """
     edges = example_trails.collect_traversal_edges(
         start_year=2005, start_act_idx=1, amount=1.0, max_depth=1, min_amount=0.0
     )

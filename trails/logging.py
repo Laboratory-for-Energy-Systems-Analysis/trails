@@ -7,7 +7,7 @@ import os
 from contextlib import contextmanager
 from contextvars import ContextVar
 from pathlib import Path
-from typing import Optional
+from typing import Iterator, Optional
 
 # Context variables to correlate logs across modules
 _run_id: ContextVar[str] = ContextVar("run_id", default="-")
@@ -20,11 +20,10 @@ class TrailsContextFilter(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
         """Inject Trails context variables into a log record.
 
-        Args:
-            record: Log record to enrich.
-
-        Returns:
-            bool: True to keep the record.
+        :param record: Log record to enrich.
+        :type record: logging.LogRecord
+        :returns: True to keep the record.
+        :rtype: bool
         """
         record.run_id = _run_id.get()
         record.case = _case.get()
@@ -43,16 +42,20 @@ def configure_trails_logging(
 ) -> Path:
     """Configure Trails logging with optional file and console handlers.
 
-    Args:
-        file_level: Logging level for the file handler.
-        filename: Name of the log file written in the current working directory.
-        also_console: Whether to emit logs to the console.
-        console_level: Logging level for the console handler.
-        mode: File open mode for the file handler.
-        debug: Whether to log a configuration summary.
-
-    Returns:
-        pathlib.Path: Path to the log file.
+    :param file_level: Logging level for the file handler.
+    :type file_level: int
+    :param filename: Name of the log file written in the current working directory.
+    :type filename: str
+    :param also_console: Whether to emit logs to the console.
+    :type also_console: bool
+    :param console_level: Logging level for the console handler.
+    :type console_level: int
+    :param mode: File open mode for the file handler.
+    :type mode: str
+    :param debug: Whether to log a configuration summary.
+    :type debug: bool
+    :returns: Path to the log file.
+    :rtype: pathlib.Path
     """
     log_path = Path(os.getcwd()) / filename
     root = logging.getLogger()
@@ -69,11 +72,10 @@ def configure_trails_logging(
     def _is_trails_file_handler(h: logging.Handler) -> bool:
         """Check whether a handler is the Trails file handler.
 
-        Args:
-            h: Handler to inspect.
-
-        Returns:
-            bool: True if the handler targets the Trails log file.
+        :param h: Handler to inspect.
+        :type h: logging.Handler
+        :returns: True if the handler targets the Trails log file.
+        :rtype: bool
         """
         return isinstance(h, logging.FileHandler) and getattr(
             h, "baseFilename", ""
@@ -82,11 +84,10 @@ def configure_trails_logging(
     def _is_console_handler(h: logging.Handler) -> bool:
         """Check whether a handler is a console handler.
 
-        Args:
-            h: Handler to inspect.
-
-        Returns:
-            bool: True if the handler is a stream handler (not a file handler).
+        :param h: Handler to inspect.
+        :type h: logging.Handler
+        :returns: True if the handler is a stream handler (not a file handler).
+        :rtype: bool
         """
         # StreamHandler that is not a FileHandler
         return isinstance(h, logging.StreamHandler) and not isinstance(
@@ -160,17 +161,19 @@ def trails_log_context(
     case: Optional[str] = None,
     year: Optional[int] = None,
     depth: Optional[int] = None,
-):
+) -> Iterator[None]:
     """Temporarily set Trails logging context variables.
 
-    Args:
-        run_id: Run identifier to attach to log records.
-        case: Case identifier to attach to log records.
-        year: Year value to attach to log records.
-        depth: Depth value to attach to log records.
-
-    Yields:
-        None: Context manager that sets and resets logging context variables.
+    :param run_id: Run identifier to attach to log records.
+    :type run_id: str | None
+    :param case: Case identifier to attach to log records.
+    :type case: str | None
+    :param year: Year value to attach to log records.
+    :type year: int | None
+    :param depth: Depth value to attach to log records.
+    :type depth: int | None
+    :yields: Context manager that sets and resets logging context variables.
+    :rtype: Iterator[None]
     """
     tokens = []
     try:

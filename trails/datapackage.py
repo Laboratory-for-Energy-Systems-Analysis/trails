@@ -1,7 +1,8 @@
 # datapackage.py
+from __future__ import annotations
 
 from pathlib import PurePosixPath
-from typing import Dict, List, Tuple
+from typing import Any, Dict, Iterable, Iterator, List, Mapping, Sequence, Tuple
 
 import numpy as np
 import sparse
@@ -14,7 +15,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-def _parse_intish_or_none(value):
+def _parse_intish_or_none(value: object) -> int | None:
     """Parse an integer from values that may be formatted as strings or floats.
 
     :param value: Input value to parse.
@@ -36,7 +37,9 @@ def _parse_intish_or_none(value):
 # ----------------------------------------------------------------------
 # Internal helpers
 # ----------------------------------------------------------------------
-def _iter_inventory_resources(package, filename: str):
+def _iter_inventory_resources(
+    package: Any, filename: str
+) -> Iterator[tuple[str, Any]]:
     """
     Yield (year_label, resource) for resources whose path matches:
 
@@ -69,7 +72,9 @@ def _iter_inventory_resources(package, filename: str):
             yield year_label, res
 
 
-def _parse_temporal_exchange_row(row) -> TemporalExchange | None:
+def _parse_temporal_exchange_row(
+    row: Mapping[str, Any],
+) -> TemporalExchange | None:
     """Parse a temporal exchange row into a TemporalExchange object.
 
     :param row: Row mapping from the inventory CSV.
@@ -102,7 +107,13 @@ def _parse_temporal_exchange_row(row) -> TemporalExchange | None:
     )
 
 
-def _build_sparse_matrix(coords, data, shape, idx_dtype, val_dtype) -> sparse.COO:
+def _build_sparse_matrix(
+    coords: Sequence[Sequence[int]],
+    data: Sequence[float],
+    shape: tuple[int, ...],
+    idx_dtype: np.dtype,
+    val_dtype: np.dtype,
+) -> sparse.COO:
     """Build a sparse.COO matrix from coordinate lists and data.
 
     :param coords: Coordinate lists for each axis.
@@ -135,8 +146,13 @@ def _build_sparse_matrix(coords, data, shape, idx_dtype, val_dtype) -> sparse.CO
 
 
 def _parse_a_exchange_row(
-    row, scenario_label, t, temporal_exchanges, A_coords, max_indices
-):
+    row: Mapping[str, Any],
+    scenario_label: str,
+    t: int,
+    temporal_exchanges: Dict[tuple[str, int, int], TemporalExchange],
+    A_coords: Dict[str, List[int]],
+    max_indices: Dict[str, int],
+) -> None:
     """Parse a technosphere exchange row and append to coordinates.
 
     :param row: Row mapping from the technosphere inventory.
@@ -151,6 +167,8 @@ def _parse_a_exchange_row(
     :type A_coords: dict[str, list]
     :param max_indices: Tracker for maximum indices.
     :type max_indices: dict[str, int]
+    :returns: None.
+    :rtype: None
     """
     act_idx = int(row["index of activity"])
     prod_idx = int(row["index of product"])
@@ -176,8 +194,13 @@ def _parse_a_exchange_row(
 
 
 def _parse_b_exchange_row(
-    row, scenario_label, t, temporal_biosphere_exchanges, B_coords, max_indices
-):
+    row: Mapping[str, Any],
+    scenario_label: str,
+    t: int,
+    temporal_biosphere_exchanges: Dict[tuple[str, int, int], TemporalExchange],
+    B_coords: Dict[str, List[int]],
+    max_indices: Dict[str, int],
+) -> None:
     """Parse a biosphere exchange row and append to coordinates.
 
     :param row: Row mapping from the biosphere inventory.
@@ -192,6 +215,8 @@ def _parse_b_exchange_row(
     :type B_coords: dict[str, list]
     :param max_indices: Tracker for maximum indices.
     :type max_indices: dict[str, int]
+    :returns: None.
+    :rtype: None
     """
     act_idx = int(row["index of activity"])
     flow_idx = int(row["index of biosphere flow"])
@@ -228,7 +253,9 @@ def _label_to_year(label: str) -> int:
     return int(tail)
 
 
-def _years_and_sorted_indices(scenario_labels: List[str]):
+def _years_and_sorted_indices(
+    scenario_labels: Sequence[str],
+) -> tuple[np.ndarray, np.ndarray]:
     """Return numeric years and indices that sort scenario labels by year.
 
     :param scenario_labels: Scenario labels to parse.
@@ -245,30 +272,31 @@ def _years_and_sorted_indices(scenario_labels: List[str]):
 # Public loading functions
 # ----------------------------------------------------------------------
 def load_matrices_from_package(
-    package,
-    value_dtype=np.float32,
-    index_dtype=np.int32,
+    package: Any,
+    value_dtype: np.dtype = np.float32,
+    index_dtype: np.dtype = np.int32,
     debug: bool = False,
-) -> Tuple[
+) -> tuple[
     sparse.COO,
     sparse.COO,
-    List[str],
-    Dict[str, int],
-    Dict[Tuple[str, int, int], TemporalExchange],
-    Dict[Tuple[str, int, int], TemporalExchange],
+    list[str],
+    dict[str, int],
+    dict[tuple[str, int, int], TemporalExchange],
+    dict[tuple[str, int, int], TemporalExchange],
 ]:
-    """
-    Collect all technosphere and biosphere exchanges across scenarios and
-    build sparse 3D matrices A and B.
+    """Load technosphere and biosphere matrices from a data package.
 
-    Returns
-    -------
-    A : sparse.COO
-    B : sparse.COO
-    scenario_labels : List[str]
-    scenario_index : Dict[str, int]
-    temporal_exchanges : Dict[(scenario_label, act_idx, prod_idx), TemporalExchange]
-    temporal_biosphere_exchanges : Dict[(scenario_label, act_idx, bio_idx), TemporalExchange]
+    :param package: Frictionless data package to load.
+    :type package: object
+    :param value_dtype: Data type for matrix values.
+    :type value_dtype: numpy.dtype
+    :param index_dtype: Data type for matrix indices.
+    :type index_dtype: numpy.dtype
+    :param debug: Whether to emit debug logging.
+    :type debug: bool
+    :returns: Tuple of A matrix, B matrix, scenario labels, scenario index,
+        temporal technosphere exchanges, and temporal biosphere exchanges.
+    :rtype: tuple
     """
     scenario_labels: List[str] = []
     scenario_index: Dict[str, int] = {}
@@ -383,30 +411,25 @@ def load_matrices_from_package(
 def interpolate_to_annual(
     A: sparse.COO,
     B: sparse.COO,
-    scenario_labels: List[str],
-    value_dtype=np.float32,
+    scenario_labels: Sequence[str],
+    value_dtype: np.dtype = np.float32,
     debug: bool = False,
-):
-    """
-    Linearly interpolate A and B to annual slices between min and max year.
+) -> tuple[sparse.COO, sparse.COO, list[str], dict[str, int]]:
+    """Interpolate A and B to annual slices between min and max year.
 
-    Parameters
-    ----------
-    A, B : sparse.COO
-        3D matrices with leading dimension = scenario/time.
-    scenario_labels : list of str
-        Scenario labels that are parseable as years.
-    value_dtype :
-        Target floating dtype.
-
-    Returns
-    -------
-    A_interp, B_interp : sparse.COO
-        Interpolated 3D matrices (one slice per year).
-    new_labels : List[str]
-        List of yearly labels (str).
-    new_index : Dict[str, int]
-        Mapping from year label to index.
+    :param A: 3D technosphere matrix with leading dimension = scenario/time.
+    :type A: sparse.COO
+    :param B: 3D biosphere matrix with leading dimension = scenario/time.
+    :type B: sparse.COO
+    :param scenario_labels: Scenario labels that are parseable as years.
+    :type scenario_labels: Sequence[str]
+    :param value_dtype: Target floating dtype.
+    :type value_dtype: numpy.dtype
+    :param debug: Whether to emit debug logging.
+    :type debug: bool
+    :returns: Interpolated A matrix, interpolated B matrix, annual labels,
+        and label-to-index mapping.
+    :rtype: tuple[sparse.COO, sparse.COO, list[str], dict[str, int]]
     """
     years_sorted, order = _years_and_sorted_indices(scenario_labels)
 
@@ -434,7 +457,7 @@ def _interpolate_annual_slices(
     years_sorted: np.ndarray,
     A_sorted: sparse.COO,
     B_sorted: sparse.COO,
-    val_dtype,
+    val_dtype: np.dtype,
 ) -> tuple[list[sparse.COO], list[sparse.COO], list[str]]:
     """Interpolate sparse matrix slices to annual resolution.
 
@@ -487,7 +510,7 @@ def _interpolate_annual_slices(
     return new_As, new_Bs, new_labels
 
 
-def _load_activity_indices(package):
+def _load_activity_indices(package: Any) -> Dict[str, Dict[int, dict]]:
     """Load activity index metadata by scenario label.
 
     :param package: Frictionless data package.
@@ -519,7 +542,7 @@ def _load_activity_indices(package):
     return activity_indices
 
 
-def _load_biosphere_indices(package):
+def _load_biosphere_indices(package: Any) -> Dict[str, Dict[int, dict]]:
     """Load biosphere index metadata by scenario label.
 
     :param package: Frictionless data package.
@@ -548,18 +571,14 @@ def _load_biosphere_indices(package):
     return biosphere_indices
 
 
-def load_indices_from_package(package):
-    """
-    Load scenario-specific dictionaries mapping index -> activity metadata
-    and index -> biosphere-flow metadata.
+def load_indices_from_package(
+    package: Any,
+) -> tuple[Dict[str, Dict[int, dict]], Dict[str, Dict[int, dict]]]:
+    """Load scenario-specific activity and biosphere index metadata.
 
-    Returns
-    -------
-    activity_indices : {scenario_label: {index: row_dict}}
-    biosphere_indices : {scenario_label: {index: row_dict}}
     :param package: Frictionless data package.
-    :type package: Package
-    :returns: Activity and biosphere index mappings.
+    :type package: object
+    :returns: Activity and biosphere index mappings keyed by scenario label.
     :rtype: tuple[dict[str, dict[int, dict]], dict[str, dict[int, dict]]]
     """
     activity_indices = _load_activity_indices(package)

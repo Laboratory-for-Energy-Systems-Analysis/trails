@@ -5,22 +5,34 @@ import pytest
 from trails.temporal_distributions import TemporalDistribution, TemporalExchange
 
 
-def test_default_sigma():
-    """Verify default sigma calculation."""
+def test_default_sigma() -> None:
+    """Verify default sigma calculation.
+
+    :returns: None.
+    :rtype: None
+    """
     offsets = np.array([0, 4])
     assert TemporalDistribution._default_sigma(offsets, None) == 1.0
     assert TemporalDistribution._default_sigma(offsets, 2.0) == 2.0
 
 
-def test_triangular_weights_centered():
-    """Verify centered triangular weights."""
+def test_triangular_weights_centered() -> None:
+    """Verify centered triangular weights.
+
+    :returns: None.
+    :rtype: None
+    """
     offsets = np.array([0, 1, 2])
     weights = TemporalDistribution._triangular_weights(offsets, loc=1.0)
     assert weights.tolist() == [0.0, 1.0, 0.0]
 
 
-def test_normal_weights_truncated():
-    """Verify truncated normal weights."""
+def test_normal_weights_truncated() -> None:
+    """Verify truncated normal weights.
+
+    :returns: None.
+    :rtype: None
+    """
     offsets = np.array([-1, 0, 1])
     weights = TemporalDistribution._normal_weights(
         offsets=offsets, loc=0.0, scale=1.0, offset_min=-1, offset_max=1
@@ -32,8 +44,12 @@ def test_normal_weights_truncated():
     assert np.isclose(weights.sum(), 1.0 / z, atol=1e-6)
 
 
-def test_lognormal_weights_fallback():
-    """Verify lognormal weights fallback behavior."""
+def test_lognormal_weights_fallback() -> None:
+    """Verify lognormal weights fallback behavior.
+
+    :returns: None.
+    :rtype: None
+    """
     tex = TemporalExchange(
         distribution=2, loc=None, scale=None, offset_min=-1, offset_max=1
     )
@@ -44,15 +60,23 @@ def test_lognormal_weights_fallback():
     assert weights[2] > 0.0
 
 
-def test_discrete_weights_default_zero():
-    """Verify discrete weights default to zero offset."""
+def test_discrete_weights_default_zero() -> None:
+    """Verify discrete weights default to zero offset.
+
+    :returns: None.
+    :rtype: None
+    """
     offsets = np.array([-1, 0, 1])
     weights = TemporalDistribution._discrete_weights(offsets, loc=None)
     assert weights.tolist() == [0.0, 1.0, 0.0]
 
 
-def test_iter_offsets_and_weights_with_scaling():
-    """Verify offsets and weights with scaling."""
+def test_iter_offsets_and_weights_with_scaling() -> None:
+    """Verify offsets and weights with scaling.
+
+    :returns: None.
+    :rtype: None
+    """
     tex = TemporalExchange(
         distribution=4,
         loc=None,
@@ -68,8 +92,12 @@ def test_iter_offsets_and_weights_with_scaling():
     assert results == [(0, pytest.approx(1 / 3)), (1, pytest.approx(2 / 3))]
 
 
-def test_iter_offsets_and_weights_unknown_scale_mode():
-    """Verify unknown scale modes raise errors."""
+def test_iter_offsets_and_weights_unknown_scale_mode() -> None:
+    """Verify unknown scale modes raise errors.
+
+    :returns: None.
+    :rtype: None
+    """
     tex = TemporalExchange(
         distribution=4,
         loc=None,
@@ -83,8 +111,12 @@ def test_iter_offsets_and_weights_unknown_scale_mode():
         list(td.iter_offsets_and_weights())
 
 
-def test_scale_factor_modes_and_clip():
-    """Verify scale factor modes and clipping."""
+def test_scale_factor_modes_and_clip() -> None:
+    """Verify scale factor modes and clipping.
+
+    :returns: None.
+    :rtype: None
+    """
     tex = TemporalExchange(
         distribution=1,
         loc=None,
