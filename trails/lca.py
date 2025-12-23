@@ -74,7 +74,6 @@ def _select_metadata_label(trails: Trails, label_for_matrix: str) -> str:
     return _nearest_metadata_label_for_year(trails, int(label_for_matrix))
 
 
-
 def _make_bw_indices_rowcol(row_idx: np.ndarray, col_idx: np.ndarray) -> np.ndarray:
     """Build a bw_processing indices array from row and column indices.
 
@@ -271,7 +270,9 @@ def build_datapackage_for_year_from_trails(
         flip_array=flip_B,
     )
 
-    technosphere_indices, biosphere_indices = _build_metadata_indices(act_meta, bio_meta)
+    technosphere_indices, biosphere_indices = _build_metadata_indices(
+        act_meta, bio_meta
+    )
     uncertain_parameters: list[tuple[int, int]] = []
 
     return dp, technosphere_indices, biosphere_indices, uncertain_parameters
