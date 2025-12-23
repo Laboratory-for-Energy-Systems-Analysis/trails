@@ -5,6 +5,7 @@ from datapackage import Package
 from trails import Trails, lca
 from trails.logging import configure_trails_logging
 
+
 def main() -> None:
     configure_trails_logging(file_level=logging.DEBUG)
 
