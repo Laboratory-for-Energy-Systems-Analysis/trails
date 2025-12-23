@@ -91,7 +91,6 @@ def _parse_temporal_exchange_row(
 
     amount_source = _parse_amount_source(row.get("temporal_amount_source"))
 
-
     return TemporalExchange(
         distribution=dist_code,
         loc=loc,
@@ -579,6 +578,7 @@ def load_indices_from_package(
     activity_indices = _load_activity_indices(package)
     biosphere_indices = _load_biosphere_indices(package)
     return activity_indices, biosphere_indices
+
 
 def _parse_amount_source(value: object) -> str:
     """Parse temporal_amount_source; defaults to 'port'."""
