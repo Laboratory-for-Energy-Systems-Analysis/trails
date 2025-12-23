@@ -9,7 +9,6 @@ from tqdm.auto import tqdm
 
 from .trails import Trails
 from .lcia import fill_characterization_factors_matrices, get_lcia_methods
-from .temporal_distributions import TemporalDistribution
 
 import logging
 
@@ -74,110 +73,6 @@ def _select_metadata_label(trails: Trails, label_for_matrix: str) -> str:
         return label_for_matrix
     return _nearest_metadata_label_for_year(trails, int(label_for_matrix))
 
-
-def _apply_temporal_scaling_to_A(
-    trails: Trails,
-    year: int,
-    A_t: Any,
-    debug: bool,
-    collapse_tech_temporal_scaling: bool,
-) -> np.ndarray:
-    """Apply temporal scaling factors to the technosphere matrix slice.
-
-    :param trails: Trails instance with temporal metadata.
-    :type trails: Trails
-    :param year: Calendar year of the slice.
-    :type year: int
-    :param A_t: Technosphere matrix slice.
-    :type A_t: sparse.COO
-    :param debug: Whether to emit debug logging.
-    :type debug: bool
-    :param collapse_tech_temporal_scaling: Whether to collapse scaling into A.
-    :type collapse_tech_temporal_scaling: bool
-    :returns: Scaled A data array.
-    :rtype: numpy.ndarray
-    """
-    A_signed = A_t.data
-    if not collapse_tech_temporal_scaling:
-        return A_signed
-
-    A_act_idx, A_prod_idx = _ij_from_coords(A_t)
-    multipliers_A = np.ones_like(A_signed, dtype=np.float64)
-
-    for n in range(len(A_signed)):
-        act = int(A_act_idx[n])
-        prod = int(A_prod_idx[n])
-
-        if prod == act and abs(float(A_signed[n])) == 1.0:
-            continue
-
-        tex = trails._get_tech_temporal_exchange(int(year), act, prod)
-        if tex is None:
-            continue
-
-        td = TemporalDistribution(tex)
-        pairs = list(td.iter_offsets_and_weights(debug=debug))
-        if not pairs:
-            multipliers_A[n] = 0.0
-            continue
-
-        m = 0.0
-        for offset, w in pairs:
-            m += float(w) * float(td.scale_factor(offset))
-        multipliers_A[n] = float(m)
-
-    return np.asarray(A_signed, dtype=np.float64) * multipliers_A
-
-
-def _apply_temporal_scaling_to_B(
-    trails: Trails,
-    year: int,
-    B_t: Any,
-    zero_biosphere: bool,
-    collapse_bio_temporal_scaling: bool,
-    debug: bool,
-) -> np.ndarray:
-    """Apply temporal scaling factors to the biosphere matrix slice.
-
-    :param trails: Trails instance with temporal metadata.
-    :type trails: Trails
-    :param year: Calendar year of the slice.
-    :type year: int
-    :param B_t: Biosphere matrix slice.
-    :type B_t: sparse.COO
-    :param zero_biosphere: Whether to zero out biosphere values.
-    :type zero_biosphere: bool
-    :param collapse_bio_temporal_scaling: Whether to collapse scaling into B.
-    :type collapse_bio_temporal_scaling: bool
-    :param debug: Whether to emit debug logging.
-    :type debug: bool
-    :returns: Scaled B data array.
-    :rtype: numpy.ndarray
-    """
-    B_signed = B_t.data.astype(np.float64, copy=False)
-    if not collapse_bio_temporal_scaling or zero_biosphere:
-        return B_signed
-
-    B_act_idx, B_flow_idx = _ij_from_coords(B_t)
-    multipliers = np.ones_like(B_signed, dtype=np.float64)
-
-    for i in range(len(B_signed)):
-        act = int(B_act_idx[i])
-        flow = int(B_flow_idx[i])
-
-        tex = trails._get_bio_temporal_exchange(int(year), act, flow)
-        if tex is None:
-            continue
-
-        td = TemporalDistribution(tex)
-
-        m = 0.0
-        for offset, weight in td.iter_offsets_and_weights(debug=debug):
-            m += float(weight) * float(td.scale_factor(int(offset)))
-
-        multipliers[i] = m if (np.isfinite(m) and m > 0.0) else 1.0
-
-    return B_signed * multipliers
 
 
 def _make_bw_indices_rowcol(row_idx: np.ndarray, col_idx: np.ndarray) -> np.ndarray:
@@ -303,99 +198,41 @@ def build_datapackage_for_year_from_trails(
     trails: Trails,
     year: int,
     zero_biosphere: bool = False,
-    collapse_bio_temporal_scaling: bool = False,
-    collapse_tech_temporal_scaling: bool = False,
     debug: bool = False,
 ) -> tuple[Any, dict[tuple, int], dict[tuple, int], list[tuple[int, int]]]:
-    """Build a bw_processing.Datapackage for a given calendar year.
 
-    :param trails: Trails instance providing matrices and metadata.
-    :type trails: Trails
-    :param year: Calendar year to extract.
-    :type year: int
-    :param zero_biosphere: Whether to zero out biosphere values.
-    :type zero_biosphere: bool
-    :param collapse_bio_temporal_scaling: Whether to fold temporal scaling into B.
-    :type collapse_bio_temporal_scaling: bool
-    :param collapse_tech_temporal_scaling: Whether to fold temporal scaling into A.
-    :type collapse_tech_temporal_scaling: bool
-    :param debug: Whether to emit debug logging.
-    :type debug: bool
-    :returns: Datapackage, technosphere indices, biosphere indices, and
-        uncertain parameter placeholders.
-    :rtype: tuple
-    """
-    # ------------------------------------------------------------------
-    # 1) Map `year` to the matrix slice we actually use
-    # ------------------------------------------------------------------
     label_for_matrix, t = _resolve_matrix_label(trails, int(year))
 
-    # Extract 2D slices
-    A_t = trails.A[t, :, :]  # sparse.COO (activities x products)
-    B_t = trails.B[t, :, :]  # sparse.COO (activities x flows)
+    A_t = trails.A[t, :, :]  # (activity, product)
+    B_t = trails.B[t, :, :]  # (activity, flow)
 
-    # ------------------------------------------------------------------
-    # 2) Choose metadata year: prefer exact, else nearest with warning
-    # ------------------------------------------------------------------
+    A_signed = A_t.data.astype(np.float64, copy=False)
+    B_signed = B_t.data.astype(np.float64, copy=False)
+
     meta_label = _select_metadata_label(trails, label_for_matrix)
-
     act_meta = trails.activity_indices.get(meta_label, {})
     bio_meta = trails.biosphere_indices.get(meta_label, {})
 
-    # ------------------------------------------------------------------
-    # 3) Build technosphere entries from A_t
-    # ------------------------------------------------------------------
-    A_signed = _apply_temporal_scaling_to_A(
-        trails=trails,
-        year=int(year),
-        A_t=A_t,
-        debug=debug,
-        collapse_tech_temporal_scaling=collapse_tech_temporal_scaling,
-    )
-
-    # Brightway convention via bw_processing:
-    # - data must be non-negative
-    # - flip marks entries that should be negated
+    # A -> bw_processing: non-negative data + flip array
     flip_A = A_signed < 0
-    A_data = np.abs(A_signed)
+    data_A = np.abs(A_signed)
 
-    # Build indices array for bw_processing
-    # (keep your existing indices construction, but ensure it uses A_coords)
-    # Example (adapt to your existing code):
-    # indices_A = np.vstack([A_coords[1], A_coords[2]]).T.astype(np.uint32)
-
-    # Ensure dtype compatibility
-    data_A = np.asarray(A_data, dtype=np.float64)
-    flip_A = np.asarray(flip_A, dtype=bool)
-
-    # ------------------------------------------------------------------
-    # 4) Build biosphere entries from B_t
-    # ------------------------------------------------------------------
-
-    B_signed = _apply_temporal_scaling_to_B(
-        trails=trails,
-        year=int(year),
-        B_t=B_t,
-        zero_biosphere=zero_biosphere,
-        collapse_bio_temporal_scaling=collapse_bio_temporal_scaling,
-        debug=debug,
-    )
-
-    # bw_processing convention: biosphere also needs abs+flip (same as technosphere)
-    flip_B = B_signed < 0
-    data_B = np.abs(B_signed)
-
+    # B -> bw_processing: non-negative data + flip array
     if zero_biosphere:
-        data_B = np.zeros_like(data_B)
-        flip_B = np.zeros_like(flip_B, dtype=bool)
+        data_B = np.zeros_like(B_signed, dtype=np.float64)
+        flip_B = np.zeros_like(B_signed, dtype=bool)
+    else:
+        flip_B = B_signed < 0
+        data_B = np.abs(B_signed)
 
-    # ------------------------------------------------------------------
-    # 5) SAFETY CHECK: matrix indices compatible with metadata
-    # ------------------------------------------------------------------
+    # Indices
     A_act_idx, A_prod_idx = _ij_from_coords(A_t)
     B_act_idx, B_flow_idx = _ij_from_coords(B_t)
 
+    # Brightway convention:
+    # technosphere_matrix is (product, activity)
     indices_A = _make_bw_indices_rowcol(A_prod_idx, A_act_idx)
+    # biosphere_matrix is (flow, activity)
     indices_B = _make_bw_indices_rowcol(B_flow_idx, B_act_idx)
 
     _warn_on_missing_metadata(
@@ -408,15 +245,18 @@ def build_datapackage_for_year_from_trails(
         bio_meta=bio_meta,
     )
 
-    # ------------------------------------------------------------------
-    # 6) Create bw_processing datapackage
-    # ------------------------------------------------------------------
     dp = bwp.create_datapackage()
 
+    # Safety checks
     assert indices_A.shape == data_A.shape, (indices_A.shape, data_A.shape)
     assert indices_A.dtype == bwp.INDICES_DTYPE, indices_A.dtype
     assert np.all(data_A >= 0), "A data must be non-negative for flip convention"
     assert flip_A.shape == data_A.shape
+
+    assert indices_B.shape == data_B.shape, (indices_B.shape, data_B.shape)
+    assert indices_B.dtype == bwp.INDICES_DTYPE, indices_B.dtype
+    assert np.all(data_B >= 0), "B data must be non-negative for flip convention"
+    assert flip_B.shape == data_B.shape
 
     dp.add_persistent_vector(
         matrix="technosphere_matrix",
@@ -424,7 +264,6 @@ def build_datapackage_for_year_from_trails(
         data_array=data_A,
         flip_array=flip_A,
     )
-
     dp.add_persistent_vector(
         matrix="biosphere_matrix",
         indices_array=indices_B,
@@ -432,15 +271,8 @@ def build_datapackage_for_year_from_trails(
         flip_array=flip_B,
     )
 
-    # ------------------------------------------------------------------
-    # 7) Build technosphere_indices / biosphere_indices dictionaries
-    #     (respecting CSV indices exactly)
-    # ------------------------------------------------------------------
-    technosphere_indices, biosphere_indices = _build_metadata_indices(
-        act_meta, bio_meta
-    )
-
-    uncertain_parameters: List[Tuple[int, int]] = []  # none for now
+    technosphere_indices, biosphere_indices = _build_metadata_indices(act_meta, bio_meta)
+    uncertain_parameters: list[tuple[int, int]] = []
 
     return dp, technosphere_indices, biosphere_indices, uncertain_parameters
 
@@ -475,8 +307,6 @@ def lca_static_simple(
         trails=trails,
         year=int(year),
         zero_biosphere=False,
-        collapse_bio_temporal_scaling=True,
-        collapse_tech_temporal_scaling=True,
         debug=debug,
     )
 
