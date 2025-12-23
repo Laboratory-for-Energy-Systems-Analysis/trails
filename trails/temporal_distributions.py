@@ -27,11 +27,7 @@ class TemporalExchange:
     :param scale: Scale parameter (stddev for normal, sigma for lognormal).
     :param offset_min: Minimum integer offset (inclusive).
     :param offset_max: Maximum integer offset (inclusive).
-    :param scale_mode: Optional scaling mode for offset-dependent scaling.
-        - "linear": scale factor = scale_base + scale_rate * offset
-        - "compound": scale factor = scale_base * (1 + scale_rate) ** offset
-    :param scale_base: Base scaling factor (default 1.0).
-    :param scale_rate: Rate of scaling per offset (default 0.0).
+    :param amount_source: Source of the amount for each pulse year.
     """
 
     distribution: int
@@ -39,9 +35,9 @@ class TemporalExchange:
     scale: Optional[float]
     offset_min: int
     offset_max: int
-    scale_mode: str | None = None
-    scale_base: float = 1.0
-    scale_rate: float = 0.0
+    # "port" (default): use CSV row value scaled by weights
+    # "matrix": ignore CSV row value; at each pulse year use interpolated A/B[t, i, j] or B[t, i, f]
+    amount_source: str = "port"
 
 
 class TemporalDistribution:
@@ -55,131 +51,6 @@ class TemporalDistribution:
         """
         self.tex = tex
 
-    def iter_offsets_and_weights(
-        self, debug: bool = False
-    ) -> Iterable[Tuple[int, float]]:
-        """Yield weighted integer offsets for the temporal distribution.
-
-        Temporal weights are:
-          1) computed from the distribution shape
-          2) modified by an optional offset-dependent scaling law
-          3) renormalized to sum to 1
-
-        :param debug: Whether to emit debug logging.
-        :type debug: bool
-        :returns: Iterable of ``(offset, weight)`` pairs.
-        :rtype: Iterable[tuple[int, float]]
-        """
-        t = self.tex
-        offsets = np.arange(t.offset_min, t.offset_max + 1, dtype=int)
-        if offsets.size == 0:
-            if debug:
-                logger.warning(
-                    "TemporalDistribution: total weight <= 0 -> returning empty distribution"
-                )
-            return iter(())
-
-        dist = t.distribution
-
-        # ------------------------------------------------------------
-        # 1) Base temporal distribution (unchanged logic)
-        # ------------------------------------------------------------
-        if dist == 5:
-            weights = self._triangular_weights(offsets, t.loc)
-        elif dist == 2:
-            weights = self._lognormal_weights(offsets, t.loc, t.scale)
-
-        elif dist == 3:
-            weights = self._normal_weights(
-                offsets=offsets,
-                loc=t.loc if t.loc is not None else 0.0,
-                scale=t.scale if t.scale is not None else 1.0,
-                offset_min=t.offset_min,
-                offset_max=t.offset_max,
-            )
-        elif dist == 4:
-            weights = np.ones_like(offsets, dtype=float)
-        elif dist == 1:
-            weights = self._discrete_weights(offsets, t.loc)
-        else:
-            weights = np.ones_like(offsets, dtype=float)
-
-        # Guard against degenerate distributions
-        if weights.sum() <= 0.0:
-            return iter(())
-
-        # ------------------------------------------------------------
-        # 2) Optional offset-dependent scaling (applies to weights)
-        #    Then renormalize.
-        # ------------------------------------------------------------
-        mode = (getattr(t, "scale_mode", None) or "").strip()
-        if mode:
-            # Apply scale factors to weights
-            scaled = np.empty_like(weights, dtype=float)
-            for i, k in enumerate(offsets):
-                # scale_factor raises ValueError for unknown modes (desired by tests)
-                sf = float(self.scale_factor(int(k)))
-                scaled[i] = float(weights[i]) * sf
-
-            weights = scaled
-            if float(weights.sum()) <= 0.0:
-                if debug:
-                    logger.warning(
-                        "TemporalDistribution: total scaled weight <= 0 -> returning empty distribution"
-                    )
-                return iter(())
-
-        # ------------------------------------------------------------
-        # 3) Renormalize so total mass is preserved
-        # ------------------------------------------------------------
-        total = float(weights.sum())
-        if total <= 0.0:
-            return iter(())
-
-        weights /= total
-
-        # ------------------------------------------------------------
-        # 3) Yield results
-        # ------------------------------------------------------------
-        for k, w in zip(offsets, weights):
-            if w != 0.0:
-                yield int(k), float(w)
-
-    def scale_factor(
-        self, offset: int, *, clip: Optional[Tuple[float, float]] = None
-    ) -> float:
-        """Compute the scaling factor for a given offset.
-
-        :param offset: Offset value to scale.
-        :type offset: int
-        :param clip: Optional ``(min, max)`` bounds for the scale factor.
-        :type clip: tuple[float, float] | None
-        :returns: Scaling factor to apply to the offset.
-        :rtype: float
-        """
-        t = self.tex
-        raw_mode = getattr(t, "scale_mode", None)
-        mode = (raw_mode or "").strip().lower()
-        if mode:
-            base = float(getattr(t, "scale_base", 1.0))
-            rate = float(getattr(t, "scale_rate", 0.0))
-
-        if not mode:
-            return 1.0
-        if mode == "linear":
-            f = base + rate * float(offset)
-        elif mode == "compound":
-            f = base * ((1.0 + rate) ** float(offset))
-        else:
-            raise ValueError(f"Unknown temporal_scale_mode: {mode}")
-
-        if not np.isfinite(f) or f <= 0.0:
-            return 0.0
-
-        if clip is not None:
-            lo, hi = clip
-            f = max(lo, min(hi, f))
-        return f
 
     # ------------------------------------------------------------------
     # Individual distribution helpers
@@ -359,3 +230,61 @@ class TemporalDistribution:
         idx = int(np.argmin(np.abs(offsets - target)))
         w[idx] = 1.0
         return w
+
+    def iter_offsets_and_weights(self, debug: bool = False) -> Iterable[Tuple[int, float]]:
+        """
+        Yield (offset, weight) pairs for the temporal distribution.
+
+        Scaling modes have been removed: weights are determined purely by the
+        selected distribution and then normalized to sum to 1 over the integer
+        offsets [offset_min, offset_max].
+        """
+        t = self.tex
+
+        offsets = np.arange(int(t.offset_min), int(t.offset_max) + 1, dtype=int)
+        if offsets.size == 0:
+            return iter(())
+
+        dist = int(t.distribution)
+
+        # 1) Base (unnormalized) weights
+        if dist == 5:
+            weights = self._triangular_weights(offsets, t.loc)
+        elif dist == 2:
+            weights = self._lognormal_weights(offsets, t.loc, t.scale)
+        elif dist == 3:
+            weights = self._normal_weights(
+                offsets=offsets,
+                loc=float(t.loc) if t.loc is not None else 0.0,
+                scale=float(t.scale) if (t.scale is not None and t.scale > 0) else 1.0,
+                offset_min=int(t.offset_min),
+                offset_max=int(t.offset_max),
+            )
+        elif dist == 4:
+            weights = np.ones_like(offsets, dtype=float)
+        elif dist == 1:
+            weights = self._discrete_weights(offsets, t.loc)
+        else:
+            # Unknown distribution -> uniform fallback
+            weights = np.ones_like(offsets, dtype=float)
+
+        weights = np.asarray(weights, dtype=float)
+        total = float(weights.sum())
+        if not np.isfinite(total) or total <= 0.0:
+            if debug:
+                logger.warning(
+                    "TemporalDistribution: invalid total weight (dist=%s, offsets=[%d..%d]) -> empty",
+                    dist,
+                    int(t.offset_min),
+                    int(t.offset_max),
+                )
+            return iter(())
+
+        # 2) Normalize
+        weights /= total
+
+        # 3) Yield
+        for k, w in zip(offsets, weights):
+            w = float(w)
+            if w != 0.0:
+                yield int(k), w

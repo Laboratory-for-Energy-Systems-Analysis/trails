@@ -89,9 +89,8 @@ def _parse_temporal_exchange_row(
     off_min = _parse_intish_or_none(row.get("temporal_min")) or 0
     off_max = _parse_intish_or_none(row.get("temporal_max")) or 0
 
-    scale_mode = row.get("temporal_scale_mode")
-    scale_base = _parse_float_or_none(row.get("temporal_scale_base", 1.0))
-    scale_rate = _parse_float_or_none(row.get("temporal_scale_rate", 0.0))
+    amount_source = _parse_amount_source(row.get("temporal_amount_source"))
+
 
     return TemporalExchange(
         distribution=dist_code,
@@ -99,9 +98,7 @@ def _parse_temporal_exchange_row(
         scale=scale,
         offset_min=int(off_min),
         offset_max=int(off_max),
-        scale_mode=scale_mode,
-        scale_base=scale_base,
-        scale_rate=scale_rate,
+        amount_source=amount_source,
     )
 
 
@@ -582,3 +579,15 @@ def load_indices_from_package(
     activity_indices = _load_activity_indices(package)
     biosphere_indices = _load_biosphere_indices(package)
     return activity_indices, biosphere_indices
+
+def _parse_amount_source(value: object) -> str:
+    """Parse temporal_amount_source; defaults to 'port'."""
+    if value is None:
+        return "port"
+    s = str(value).strip().lower()
+    if s == "":
+        return "port"
+    if s in {"port", "matrix"}:
+        return s
+    # Be strict (recommended) or soft fallback. I recommend strict for debugging:
+    raise ValueError(f"Unknown temporal_amount_source: {s}")

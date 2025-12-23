@@ -180,10 +180,10 @@ class Trails:
                 if y1 == y0:
                     return tex0
                 if (
-                    tex0.distribution != tex1.distribution
-                    or tex0.offset_min != tex1.offset_min
-                    or tex0.offset_max != tex1.offset_max
-                    or (tex0.scale_mode or "") != (tex1.scale_mode or "")
+                        tex0.distribution != tex1.distribution
+                        or tex0.offset_min != tex1.offset_min
+                        or tex0.offset_max != tex1.offset_max
+                        or getattr(tex0, "amount_source", "port") != getattr(tex1, "amount_source", "port")
                 ):
                     return tex0 if (year - y0) <= (y1 - year) else tex1
 
@@ -209,9 +209,7 @@ class Trails:
                     scale=interp_optional(tex0.scale, tex1.scale),
                     offset_min=tex0.offset_min,
                     offset_max=tex0.offset_max,
-                    scale_mode=tex0.scale_mode,
-                    scale_base=interp_optional(tex0.scale_base, tex1.scale_base),
-                    scale_rate=interp_optional(tex0.scale_rate, tex1.scale_rate),
+                    amount_source=getattr(tex0, "amount_source", "port"),
                 )
 
         return None
@@ -296,7 +294,6 @@ class Trails:
         self,
         *,
         year: int,
-        scenario_year: int,
         product_index: int,
         child_amount: float,
         tex: TemporalExchange,
@@ -343,12 +340,11 @@ class Trails:
             raw_year = year + offset
             y_eff = self._map_year_to_scenario_year(raw_year)
 
-            factor = td.scale_factor(offset)
             self._add_demand_entry(
                 demand,
                 y_eff,
                 product_index,
-                child_amount * float(weight) * float(factor),
+                child_amount * float(weight),
             )
 
     def get_A_for_scenario(self, label: str) -> sparse.COO:
@@ -407,29 +403,15 @@ class Trails:
         return TemporalDistribution(tex)
 
     def expand_temporal_exchanges(
-        self,
-        year: int,
-        act_idx: int,
-        amount: float = 1.0,
-        *,
-        use_temporal_distributions: bool = True,
-        debug: bool = False,
+            self,
+            year: int,
+            act_idx: int,
+            amount: float = 1.0,
+            *,
+            use_temporal_distributions: bool = True,
+            debug: bool = False,
     ) -> dict[int, dict[int, float]]:
-        """Expand activity-year demand into temporally distributed demands.
-
-        :param year: Calendar year of the demand.
-        :type year: int
-        :param act_idx: Activity index to expand.
-        :type act_idx: int
-        :param amount: Demand amount for the activity.
-        :type amount: float
-        :param use_temporal_distributions: Whether to apply temporal metadata.
-        :type use_temporal_distributions: bool
-        :param debug: Whether to emit debug logging.
-        :type debug: bool
-        :returns: Demand mapping by year and product index.
-        :rtype: dict[int, dict[int, float]]
-        """
+        """Expand activity-year demand into temporally distributed demands."""
         demand: dict[int, dict[int, float]] = {}
 
         context = self._get_scenario_context(year)
@@ -447,85 +429,68 @@ class Trails:
                 float(amount),
             )
 
-            logger.debug(
-                "expand_temporal_exchanges: year=%d act=%d amount=%g scenario_year=%d use_td=%s",
-                year,
-                act_idx,
-                amount,
-                scenario_year,
-                use_temporal_distributions,
-            )
-
         A_row = self.A[t, act_idx, :]
         if A_row.nnz == 0:
-            if debug:
-                logger.debug(
-                    "expand_temporal_exchanges: EMPTY A_row (year=%d mapped=%d t=%d act=%d) -> no children",
-                    year,
-                    scenario_year,
-                    t,
-                    act_idx,
-                )
             return demand
 
         product_indices = A_row.coords[0]
         values = A_row.data
 
-        if debug:
-            logger.debug(
-                "expand_temporal_exchanges: A_row.nnz=%d (before skipping production/diag outputs)",
-                int(A_row.nnz),
-            )
-
         for product_index, exchange_value in zip(product_indices, values):
-            exchange_value = float(exchange_value)
             product_index = int(product_index)
+            exchange_value = float(exchange_value)
 
             if exchange_value == 0.0:
                 continue
 
-            # Always skip the canonical production exchange, if present in your data
-            # (common convention: A[act, act] = 1)
+            # Skip canonical production exchange (A[act, act] = 1)
             if product_index == act_idx and abs(exchange_value) == 1.0:
                 continue
 
-            # Now compute the propagated requirement amount:
-            # - Inputs are negative -> convert to positive requirement magnitude
-            # - Off-diagonal positive entries (e.g., waste treatment services) are kept as-is
-            child_amount = self._child_amount(amount, exchange_value)
-
+            # Fetch TD metadata (template-year lookup; stable across interpolation)
             tex = self._get_tech_temporal_exchange(year, act_idx, product_index)
 
+
+            # ------------------------------------------------------------------
+            # No temporal distribution (or disabled): status quo
+            # ------------------------------------------------------------------
             if (tex is None) or (not use_temporal_distributions):
-                y_eff = scenario_year
-                self._add_demand_entry(demand, y_eff, product_index, child_amount)
+                child_amount = self._child_amount(amount, exchange_value)
+                if child_amount != 0.0:
+                    self._add_demand_entry(demand, int(scenario_year), product_index, float(child_amount))
                 continue
 
-            if debug:
-                logger.debug(
-                    "expand_temporal_exchanges: applying TD for (year=%d act=%d prod=%d) child_amt=%g",
-                    year,
-                    act_idx,
-                    product_index,
-                    child_amount,
+            amount_source = getattr(tex, "amount_source", "port")
+
+            # ------------------------------------------------------------------
+            # TD + matrix-sourced magnitude: read A at each pulse year
+            # ------------------------------------------------------------------
+            if amount_source == "matrix":
+                self._apply_temporal_distribution_matrix_sourced_to_demand(
+                    year=year,
+                    act_idx=act_idx,
+                    product_index=product_index,
+                    parent_amount=amount,
+                    tex=tex,
+                    demand=demand,
+                    debug=debug,
                 )
+                continue
+
+            # ------------------------------------------------------------------
+            # TD + ported magnitude (default): distribute anchor-year child amount
+            # ------------------------------------------------------------------
+            child_amount = self._child_amount(amount, exchange_value)
+            if child_amount == 0.0:
+                continue
 
             self._apply_temporal_distribution_to_demand(
                 year=year,
-                scenario_year=scenario_year,
                 product_index=product_index,
                 child_amount=child_amount,
                 tex=tex,
                 demand=demand,
                 debug=debug,
-            )
-
-        total_children = sum(len(m) for m in demand.values())
-        if debug:
-            logger.debug(
-                "expand_temporal_exchanges: produced years=%d total_children=%d",
-                len(demand),
-                total_children,
             )
 
         return demand
@@ -680,31 +645,37 @@ class Trails:
 
             td = TemporalDistribution(tex)
 
-            # Anchor offsets to scenario_year (because the coefficient came from B[t])
             any_pair = False
             for offset, weight in td.iter_offsets_and_weights(debug=debug):
-                any_pair = True
-
                 raw_year = int(scenario_year + int(offset))
                 y_eff = int(self._map_year_to_scenario_year(raw_year))
-
-                factor = float(td.scale_factor(offset))
+                t_eff = self.scenario_index.get(str(y_eff))
+                if t_eff is None:
+                    continue
 
                 inventory_by_year.setdefault(
                     y_eff,
                     np.zeros(n_flows, dtype=self.value_dtype),
                 )
-                inventory_by_year[y_eff][flow_idx] += scaled * float(weight) * factor
 
-            if not any_pair:
-                if debug:
-                    logger.warning(
-                        "accumulate_bio: TD produced no offsets/weights (template_year=%d scenario_year=%d act=%d flow=%d) -> dropped",
-                        int(template_year),
-                        int(scenario_year),
-                        act_idx,
-                        flow_idx,
-                    )
+                if tex.amount_source == "matrix":
+                    value_eff = float(self.B[t_eff, act_idx, flow_idx])
+                    if value_eff == 0.0:
+                        continue
+
+                    contrib = float(supply_amt) * float(value_eff) * float(weight)
+
+                    # Apply min_amount at the pulse level (not the anchor level)
+                    if min_amount and abs(contrib) < float(min_amount):
+                        continue
+
+                    inventory_by_year[y_eff][flow_idx] += contrib
+
+                else:
+                    contrib = float(scaled) * float(weight)
+                    if min_amount and abs(contrib) < float(min_amount):
+                        continue
+                    inventory_by_year[y_eff][flow_idx] += contrib
 
     def _map_year_to_available(self, year: int) -> int:
         """
@@ -1234,3 +1205,48 @@ class Trails:
                     )
 
         return {d: dict(edges) for d, edges in edges_by_depth.items()}
+
+    def _apply_temporal_distribution_matrix_sourced_to_demand(
+            self,
+            *,
+            year: int,
+            act_idx: int,
+            product_index: int,
+            parent_amount: float,
+            tex: TemporalExchange,
+            demand: dict[int, dict[int, float]],
+            debug: bool,
+    ) -> None:
+        if self.A is None:
+            return
+
+        if int(product_index) == int(act_idx):
+            return
+
+        td = TemporalDistribution(tex)
+        offsets_and_weights = list(td.iter_offsets_and_weights(debug=debug))
+        if not offsets_and_weights:
+            return
+
+        for offset, weight in offsets_and_weights:
+            raw_year = int(year + int(offset))
+            y_eff = int(self._map_year_to_scenario_year(raw_year))
+            t_eff = self.scenario_index.get(str(y_eff))
+            if t_eff is None:
+                continue
+
+            exchange_value = float(self.A[t_eff, int(act_idx), int(product_index)])
+            if exchange_value == 0.0:
+                continue
+
+            # requirement magnitude at that pulse-year
+            child_amount = self._child_amount(float(parent_amount), exchange_value)
+            if child_amount == 0.0:
+                continue
+
+            # IMPORTANT: distribute mass using TD weights
+            weighted_child_amount = float(child_amount) * float(weight)
+            if weighted_child_amount == 0.0:
+                continue
+
+            self._add_demand_entry(demand, y_eff, int(product_index), weighted_child_amount)
