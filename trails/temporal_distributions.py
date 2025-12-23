@@ -51,7 +51,6 @@ class TemporalDistribution:
         """
         self.tex = tex
 
-
     # ------------------------------------------------------------------
     # Individual distribution helpers
     # ------------------------------------------------------------------
@@ -231,7 +230,9 @@ class TemporalDistribution:
         w[idx] = 1.0
         return w
 
-    def iter_offsets_and_weights(self, debug: bool = False) -> Iterable[Tuple[int, float]]:
+    def iter_offsets_and_weights(
+        self, debug: bool = False
+    ) -> Iterable[Tuple[int, float]]:
         """
         Yield (offset, weight) pairs for the temporal distribution.
 

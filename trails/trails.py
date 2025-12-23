@@ -180,10 +180,11 @@ class Trails:
                 if y1 == y0:
                     return tex0
                 if (
-                        tex0.distribution != tex1.distribution
-                        or tex0.offset_min != tex1.offset_min
-                        or tex0.offset_max != tex1.offset_max
-                        or getattr(tex0, "amount_source", "port") != getattr(tex1, "amount_source", "port")
+                    tex0.distribution != tex1.distribution
+                    or tex0.offset_min != tex1.offset_min
+                    or tex0.offset_max != tex1.offset_max
+                    or getattr(tex0, "amount_source", "port")
+                    != getattr(tex1, "amount_source", "port")
                 ):
                     return tex0 if (year - y0) <= (y1 - year) else tex1
 
@@ -403,13 +404,13 @@ class Trails:
         return TemporalDistribution(tex)
 
     def expand_temporal_exchanges(
-            self,
-            year: int,
-            act_idx: int,
-            amount: float = 1.0,
-            *,
-            use_temporal_distributions: bool = True,
-            debug: bool = False,
+        self,
+        year: int,
+        act_idx: int,
+        amount: float = 1.0,
+        *,
+        use_temporal_distributions: bool = True,
+        debug: bool = False,
     ) -> dict[int, dict[int, float]]:
         """Expand activity-year demand into temporally distributed demands."""
         demand: dict[int, dict[int, float]] = {}
@@ -450,14 +451,15 @@ class Trails:
             # Fetch TD metadata (template-year lookup; stable across interpolation)
             tex = self._get_tech_temporal_exchange(year, act_idx, product_index)
 
-
             # ------------------------------------------------------------------
             # No temporal distribution (or disabled): status quo
             # ------------------------------------------------------------------
             if (tex is None) or (not use_temporal_distributions):
                 child_amount = self._child_amount(amount, exchange_value)
                 if child_amount != 0.0:
-                    self._add_demand_entry(demand, int(scenario_year), product_index, float(child_amount))
+                    self._add_demand_entry(
+                        demand, int(scenario_year), product_index, float(child_amount)
+                    )
                 continue
 
             amount_source = getattr(tex, "amount_source", "port")
@@ -1207,15 +1209,15 @@ class Trails:
         return {d: dict(edges) for d, edges in edges_by_depth.items()}
 
     def _apply_temporal_distribution_matrix_sourced_to_demand(
-            self,
-            *,
-            year: int,
-            act_idx: int,
-            product_index: int,
-            parent_amount: float,
-            tex: TemporalExchange,
-            demand: dict[int, dict[int, float]],
-            debug: bool,
+        self,
+        *,
+        year: int,
+        act_idx: int,
+        product_index: int,
+        parent_amount: float,
+        tex: TemporalExchange,
+        demand: dict[int, dict[int, float]],
+        debug: bool,
     ) -> None:
         if self.A is None:
             return
@@ -1249,4 +1251,6 @@ class Trails:
             if weighted_child_amount == 0.0:
                 continue
 
-            self._add_demand_entry(demand, y_eff, int(product_index), weighted_child_amount)
+            self._add_demand_entry(
+                demand, y_eff, int(product_index), weighted_child_amount
+            )
