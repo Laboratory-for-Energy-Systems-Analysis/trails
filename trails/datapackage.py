@@ -1,16 +1,16 @@
 # datapackage.py
 from __future__ import annotations
 
+import logging
 from pathlib import PurePosixPath
-from typing import Any, Dict, Iterable, Iterator, List, Mapping, Sequence, Tuple
+from typing import Any, Dict, Iterator, List, Mapping, Sequence, Tuple
 
 import numpy as np
 import sparse
 
 from .utils import _parse_float_or_none, _parse_int_or_none
+from .utils import _parse_intish_or_none as _parse_intish_or_none_utils
 from .temporal_distributions import TemporalExchange
-
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -23,15 +23,7 @@ def _parse_intish_or_none(value: object) -> int | None:
     :returns: Parsed integer or ``None`` for empty/invalid values.
     :rtype: int | None
     """
-    if value is None:
-        return None
-    s = str(value).strip()
-    if s == "":
-        return None
-    try:
-        return int(float(s))
-    except ValueError:
-        return None
+    return _parse_intish_or_none_utils(value)
 
 
 # ----------------------------------------------------------------------

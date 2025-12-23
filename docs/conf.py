@@ -28,8 +28,3 @@ autodoc_mock_imports = [
 html_theme = "alabaster"
 html_static_path = ["_static"]
 html_logo = "https://raw.githubusercontent.com/Laboratory-for-Energy-Systems-Analysis/trails/refs/heads/main/assets/permanent/edges_logo_tight_frame.png"
-
-import os
-import sys
-
-sys.path.insert(0, os.path.abspath("../"))  # or '../src' if your code is in src/

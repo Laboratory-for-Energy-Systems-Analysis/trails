@@ -1,7 +1,8 @@
 # trails.py
 
-from typing import Any, Dict, List, Optional
 from collections import defaultdict, deque
+import logging
+from typing import Any, Dict, List, Optional
 
 import numpy as np
 import sparse
@@ -15,8 +16,6 @@ from .datapackage import (
 )
 
 from .temporal_distributions import TemporalDistribution, TemporalExchange
-
-import logging
 
 logger = logging.getLogger(__name__)
 

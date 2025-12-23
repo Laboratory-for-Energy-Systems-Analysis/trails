@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import json
 
 import numpy as np
@@ -7,8 +8,6 @@ from scipy import sparse
 from scipy.sparse import csr_matrix
 
 from .filesystem_constants import DATA_DIR
-
-import logging
 
 logger = logging.getLogger(__name__)
 

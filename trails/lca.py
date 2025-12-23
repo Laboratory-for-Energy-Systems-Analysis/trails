@@ -1,16 +1,14 @@
-import numpy as np
-import bw_processing as bwp
-from typing import Dict, Tuple, List, Any
+import logging
 from collections import defaultdict
+from typing import Any, Dict, List
 
+import bw_processing as bwp
 import bw2calc as bc
+import numpy as np
 from tqdm.auto import tqdm
-
 
 from .trails import Trails
 from .lcia import fill_characterization_factors_matrices, get_lcia_methods
-
-import logging
 
 logger = logging.getLogger(__name__)
 

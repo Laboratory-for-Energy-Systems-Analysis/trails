@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import logging
-import logging.handlers
 import os
 from contextlib import contextmanager
 from contextvars import ContextVar

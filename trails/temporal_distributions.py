@@ -1,13 +1,11 @@
 # temporal_distributions.py
 
-from dataclasses import dataclass
-from typing import Optional, Iterable, Tuple
-import numpy as np
-
-import numpy as np
-from math import erf, sqrt, exp, pi
-
 import logging
+from dataclasses import dataclass
+from math import erf, sqrt
+from typing import Iterable, Optional, Tuple
+
+import numpy as np
 
 logger = logging.getLogger(__name__)
 
