@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 from pathlib import Path
 import os
 
+
 def _resource_abspath(package: Any, res: Any) -> Path:
     """
     Resolve a resource to an absolute filesystem path, using Frictionless'
@@ -194,8 +195,16 @@ def _read_matrix_csv_fast(csv_path, kind="A"):
 
     # ---- Cast numeric float columns (allow blanks) ----
     float_cols = [
-        "value", "loc", "scale", "shape", "minimum", "maximum",
-        "temporal_loc", "temporal_scale", "temporal_min", "temporal_max",
+        "value",
+        "loc",
+        "scale",
+        "shape",
+        "minimum",
+        "maximum",
+        "temporal_loc",
+        "temporal_scale",
+        "temporal_min",
+        "temporal_max",
     ]
     for col in float_cols:
         if col not in df.columns:
@@ -236,7 +245,6 @@ def _read_matrix_csv_fast(csv_path, kind="A"):
         df[col] = x
 
     return df
-
 
 
 def _parse_intish_or_none(value: object) -> int | None:
@@ -542,9 +550,13 @@ def load_matrices_from_package(
         val = df["value"].to_numpy(dtype=np.float64, copy=False)
 
         # Apply flip if present
-        flip = df["flip"].to_numpy(dtype=np.int64, copy=False) if "flip" in df.columns else None
+        flip = (
+            df["flip"].to_numpy(dtype=np.int64, copy=False)
+            if "flip" in df.columns
+            else None
+        )
         if flip is not None:
-            m = (flip == 1)
+            m = flip == 1
             if m.any():
                 val = val.copy()
                 val[m] *= -1.0
@@ -567,7 +579,7 @@ def load_matrices_from_package(
         # Temporal exchanges: only rows where temporal_distribution is present and non-empty
         if "temporal_distribution" in df.columns:
             td_col = df["temporal_distribution"]
-            mask_td = (td_col != "")
+            mask_td = td_col != ""
             if mask_td.any():
                 # Select only columns that actually exist; temporal_amount_source is optional
                 cols = [
@@ -575,7 +587,13 @@ def load_matrices_from_package(
                     "index of product",
                     "temporal_distribution",
                 ]
-                for opt in ("temporal_loc", "temporal_scale", "temporal_min", "temporal_max", "temporal_amount_source"):
+                for opt in (
+                    "temporal_loc",
+                    "temporal_scale",
+                    "temporal_min",
+                    "temporal_max",
+                    "temporal_amount_source",
+                ):
                     if opt in df.columns:
                         cols.append(opt)
 
@@ -586,7 +604,11 @@ def load_matrices_from_package(
                     tex = _parse_temporal_exchange_row(row)
                     if tex is not None:
                         temporal_exchanges[
-                            (scenario_label, int(row["index of activity"]), int(row["index of product"]))
+                            (
+                                scenario_label,
+                                int(row["index of activity"]),
+                                int(row["index of product"]),
+                            )
                         ] = tex
 
     # ---------- Load all B_matrix.csv ----------
@@ -617,14 +639,20 @@ def load_matrices_from_package(
         # TD parsing for B: temporal_amount_source is OPTIONAL (and may not exist at all)
         if "temporal_distribution" in df.columns:
             td_col = df["temporal_distribution"]
-            mask_td = (td_col != "")
+            mask_td = td_col != ""
             if mask_td.any():
                 cols = [
                     "index of activity",
                     "index of biosphere flow",
                     "temporal_distribution",
                 ]
-                for opt in ("temporal_loc", "temporal_scale", "temporal_min", "temporal_max", "temporal_amount_source"):
+                for opt in (
+                    "temporal_loc",
+                    "temporal_scale",
+                    "temporal_min",
+                    "temporal_max",
+                    "temporal_amount_source",
+                ):
                     if opt in df.columns:
                         cols.append(opt)
 
@@ -635,7 +663,11 @@ def load_matrices_from_package(
                     tex = _parse_temporal_exchange_row(row)
                     if tex is not None:
                         temporal_biosphere_exchanges[
-                            (scenario_label, int(row["index of activity"]), int(row["index of biosphere flow"]))
+                            (
+                                scenario_label,
+                                int(row["index of activity"]),
+                                int(row["index of biosphere flow"]),
+                            )
                         ] = tex
 
     # ---------- Deduce shapes ----------

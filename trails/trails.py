@@ -575,14 +575,14 @@ class Trails:
         return scenario_year, t, B_t, n_flows
 
     def accumulate_temporalized_biosphere_inventory(
-            self,
-            base_year: int,
-            supply_by_activity: Dict[int, float],
-            inventory_by_year: Dict[int, np.ndarray],
-            *,
-            min_amount: float = 0.0,
-            use_temporal_distributions: bool = True,
-            debug: bool = False,
+        self,
+        base_year: int,
+        supply_by_activity: Dict[int, float],
+        inventory_by_year: Dict[int, np.ndarray],
+        *,
+        min_amount: float = 0.0,
+        use_temporal_distributions: bool = True,
+        debug: bool = False,
     ) -> None:
         """
         Accumulate temporally shifted biosphere emissions for a solved supply vector.
@@ -641,7 +641,9 @@ class Trails:
         # ---------------------------
         # Temporal metadata context
         # ---------------------------
-        bio_td = self.temporal_biosphere_exchanges if use_temporal_distributions else None
+        bio_td = (
+            self.temporal_biosphere_exchanges if use_temporal_distributions else None
+        )
         if bio_td:
             tpl_label = str(self._map_year_to_template_year(base_year))
             bio_td_get = bio_td.get
@@ -702,12 +704,20 @@ class Trails:
         if cached is None:
             act_coords = B_t.coords[0].astype(np.int32, copy=False)
             flow_coords = B_t.coords[1].astype(np.int32, copy=False)
-            data = B_t.data.astype(np.float32, copy=False) if value_dtype == np.float32 else B_t.data
+            data = (
+                B_t.data.astype(np.float32, copy=False)
+                if value_dtype == np.float32
+                else B_t.data
+            )
 
             n_acts = int(B_t.shape[0])
             nnz = int(getattr(B_t, "nnz", 0))
             if nnz == 0:
-                row_cache[int(t)] = (np.zeros(n_acts + 1, dtype=np.int64), flow_coords, data)
+                row_cache[int(t)] = (
+                    np.zeros(n_acts + 1, dtype=np.int64),
+                    flow_coords,
+                    data,
+                )
                 return
 
             order = np.argsort(act_coords, kind="mergesort")
@@ -742,7 +752,9 @@ class Trails:
                 continue
 
             # FULL row arrays (positions refer to these)
-            flows_full = flow_sorted[start:end].astype(np.intp, copy=False)  # for np.add.at
+            flows_full = flow_sorted[start:end].astype(
+                np.intp, copy=False
+            )  # for np.add.at
             vals_full = data_sorted[start:end]
 
             # Precompute scaled contributions for this activity row (anchor-year)
@@ -762,7 +774,9 @@ class Trails:
             if not bio_td:
                 vec = ensure_inventory_vec(base_scenario_year)
                 if keep_full is None:
-                    np.add.at(vec, flows_full, scaled_full.astype(vec.dtype, copy=False))
+                    np.add.at(
+                        vec, flows_full, scaled_full.astype(vec.dtype, copy=False)
+                    )
                 else:
                     np.add.at(
                         vec,
@@ -797,7 +811,9 @@ class Trails:
                         port_groups_pos.setdefault(k, []).append(p)
 
                 no_td_idx = np.array(no_td_pos, dtype=np.intp) if no_td_pos else None
-                port_groups_idx = {k: np.array(v, dtype=np.intp) for k, v in port_groups_pos.items()}
+                port_groups_idx = {
+                    k: np.array(v, dtype=np.intp) for k, v in port_groups_pos.items()
+                }
 
                 td_struct = (no_td_idx, port_groups_idx, matrix_entries)
                 row_td_cache[cache_key] = td_struct
@@ -814,7 +830,11 @@ class Trails:
                     idx = no_td_idx[keep_full[no_td_idx]]
                 if idx.size:
                     vec = ensure_inventory_vec(base_scenario_year)
-                    np.add.at(vec, flows_full[idx], scaled_full[idx].astype(vec.dtype, copy=False))
+                    np.add.at(
+                        vec,
+                        flows_full[idx],
+                        scaled_full[idx].astype(vec.dtype, copy=False),
+                    )
 
             # ---------------------------
             # 2) Ported TD: grouped vector math + add.at per pulse (using cached indices)
@@ -840,8 +860,12 @@ class Trails:
                         tex0 = bio_td_get((tpl_label, a, f0))  # type: ignore[misc]
                         if tex0 is None:
                             continue
-                        pulses = [(int(o), float(w)) for o, w in
-                                  TemporalDistribution(tex0).iter_offsets_and_weights(debug=False)]
+                        pulses = [
+                            (int(o), float(w))
+                            for o, w in TemporalDistribution(
+                                tex0
+                            ).iter_offsets_and_weights(debug=False)
+                        ]
                         pulse_cache[k] = pulses
 
                     for offset, weight in pulses:
@@ -877,8 +901,12 @@ class Trails:
                     k = td_key(tex)
                     pulses = pulse_cache.get(k)
                     if pulses is None:
-                        pulses = [(int(o), float(w)) for o, w in
-                                  TemporalDistribution(tex).iter_offsets_and_weights(debug=False)]
+                        pulses = [
+                            (int(o), float(w))
+                            for o, w in TemporalDistribution(
+                                tex
+                            ).iter_offsets_and_weights(debug=False)
+                        ]
                         pulse_cache[k] = pulses
 
                     for offset, weight in pulses:

@@ -5,11 +5,13 @@ from trails.logging import configure_trails_logging, trails_log_context
 
 configure_trails_logging(file_level=logging.DEBUG)
 
-#dp = Package("datapackage.json")
+# dp = Package("datapackage.json")
 dp = Package("/Users/romain/GitHub/premise/dev/trails_2025-12-31.zip")
 trails = Trails(dp)
 
-methods = ["IPCC 2021 (incl. biogenic CO2) - climate change: total (incl. biogenic CO2) - global warming potential (GWP100)",]
+methods = [
+    "IPCC 2021 (incl. biogenic CO2) - climate change: total (incl. biogenic CO2) - global warming potential (GWP100)",
+]
 
 ref_year = 2050
 
