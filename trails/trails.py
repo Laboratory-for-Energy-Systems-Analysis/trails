@@ -575,109 +575,337 @@ class Trails:
         return scenario_year, t, B_t, n_flows
 
     def accumulate_temporalized_biosphere_inventory(
-        self,
-        base_year: int,
-        supply_by_activity: Dict[int, float],
-        inventory_by_year: Dict[int, np.ndarray],
-        *,
-        min_amount: float = 0.0,
-        use_temporal_distributions: bool = True,
-        debug: bool = False,
+            self,
+            base_year: int,
+            supply_by_activity: Dict[int, float],
+            inventory_by_year: Dict[int, np.ndarray],
+            *,
+            min_amount: float = 0.0,
+            use_temporal_distributions: bool = True,
+            debug: bool = False,
     ) -> None:
         """
-        Accumulate temporally shifted biosphere emissions resulting from a
-        solved technosphere supply vector for a given calendar year.
+        Accumulate temporally shifted biosphere emissions for a solved supply vector.
 
-        supply_by_activity maps Trails activity indices -> supply.
+        Performance strategy:
+          - Iterate only over supplied activities.
+          - Use cached CSR-like row structure for B_t.
+          - Vectorize no-TD adds with np.add.at.
+          - For PORTED TD, group row flows by TD parameter key and apply pulses to
+            whole vectors (scaled values) at once, using np.add.at per (key, pulse, year).
+          - Keep MATRIX TD semantics as scalar per (flow, pulse) because values depend on year.
+          - NEW: Cache TD classification per (tpl_label, t, act) so we don't redo per-flow TD lookups.
+
+        Semantics preserved:
+          - No TD: anchor to scenario_year of B slice.
+          - TD + ported: distribute anchor-year scaled amount across pulse years.
+          - TD + matrix: read B at each pulse-year, multiply by supply and weight.
         """
-        if debug:
-            logger.info(
-                "accumulate_bio: base_year=%d acts_in=%d min_amount=%g use_td=%s",
-                int(base_year),
-                len(supply_by_activity),
-                float(min_amount),
-                bool(use_temporal_distributions),
-            )
-
+        # ---------------------------
+        # Early exits / slice resolve
+        # ---------------------------
         biosphere_slice = self._get_biosphere_slice(base_year, debug)
         if biosphere_slice is None:
             return
         scenario_year, t, B_t, n_flows = biosphere_slice
 
-        act_indices = B_t.coords[0].astype(int)
-        flow_indices = B_t.coords[1].astype(int)
-        values = B_t.data
+        if not supply_by_activity:
+            return
 
-        # Use template year for temporal metadata (distributions defined on original years)
-        template_year = self._map_year_to_template_year(base_year)
+        # ---------------------------
+        # Localize hot attrs / methods
+        # ---------------------------
+        value_dtype = self.value_dtype
+        scenario_index_get = self.scenario_index.get
+        map_year_to_scenario = self._map_year_to_scenario_year
 
-        for act_idx, flow_idx, value in zip(act_indices, flow_indices, values):
-            act_idx = int(act_idx)
-            flow_idx = int(flow_idx)
+        base_scenario_year = int(scenario_year)
+        min_amt = float(min_amount) if min_amount else 0.0
 
-            supply_amt = float(supply_by_activity.get(act_idx, 0.0))
+        # ---------------------------
+        # Inventory allocation helper
+        # ---------------------------
+        vec_cache: dict[int, np.ndarray] = {}
 
+        def ensure_inventory_vec(y_eff: int) -> np.ndarray:
+            arr = vec_cache.get(y_eff)
+            if arr is not None:
+                return arr
+            arr = inventory_by_year.get(y_eff)
+            if arr is None:
+                arr = np.zeros(n_flows, dtype=value_dtype)
+                inventory_by_year[y_eff] = arr
+            vec_cache[y_eff] = arr
+            return arr
+
+        # ---------------------------
+        # Temporal metadata context
+        # ---------------------------
+        bio_td = self.temporal_biosphere_exchanges if use_temporal_distributions else None
+        if bio_td:
+            tpl_label = str(self._map_year_to_template_year(base_year))
+            bio_td_get = bio_td.get
+        else:
+            tpl_label = None
+            bio_td_get = None  # type: ignore[assignment]
+
+        # ---------------------------
+        # Per-call caches
+        # ---------------------------
+        year_map_cache: dict[int, int] = {}
+        t_eff_cache: dict[int, int | None] = {}
+
+        def map_year_cached(raw_year: int) -> int:
+            y = year_map_cache.get(raw_year)
+            if y is None:
+                y = int(map_year_to_scenario(raw_year))
+                year_map_cache[raw_year] = y
+            return y
+
+        def td_key(tex: TemporalExchange) -> tuple:
+            return (
+                tex.distribution,
+                tex.loc,
+                tex.scale,
+                tex.offset_min,
+                tex.offset_max,
+                getattr(tex, "amount_source", "port"),
+            )
+
+        # ---------------------------
+        # Global caches on self (persist across calls)
+        # ---------------------------
+        # Cache TD row classification per (tpl_label, t, act):
+        #   (no_td_idx, port_groups_idx, matrix_entries)
+        # where:
+        #   no_td_idx: np.ndarray[intp] | None  positions in FULL row arrays
+        #   port_groups_idx: dict[td_key -> np.ndarray[intp]] positions in FULL row arrays
+        #   matrix_entries: list[(pos:int, tex:TemporalExchange)] positions in FULL row arrays
+        if not hasattr(self, "_bio_td_row_cache"):
+            self._bio_td_row_cache = {}  # type: ignore[attr-defined]
+        row_td_cache = self._bio_td_row_cache  # type: ignore[attr-defined]
+
+        # Cache pulses per td_key across calls
+        if not hasattr(self, "_td_pulse_cache"):
+            self._td_pulse_cache = {}  # type: ignore[attr-defined]
+        pulse_cache = self._td_pulse_cache  # type: ignore[attr-defined]
+
+        # ---------------------------
+        # Fast row-structure cache (per t)
+        # ---------------------------
+        if not hasattr(self, "_B_row_cache"):
+            self._B_row_cache = {}  # type: ignore[attr-defined]
+
+        row_cache = self._B_row_cache  # type: ignore[attr-defined]
+        cached = row_cache.get(int(t))
+
+        if cached is None:
+            act_coords = B_t.coords[0].astype(np.int32, copy=False)
+            flow_coords = B_t.coords[1].astype(np.int32, copy=False)
+            data = B_t.data.astype(np.float32, copy=False) if value_dtype == np.float32 else B_t.data
+
+            n_acts = int(B_t.shape[0])
+            nnz = int(getattr(B_t, "nnz", 0))
+            if nnz == 0:
+                row_cache[int(t)] = (np.zeros(n_acts + 1, dtype=np.int64), flow_coords, data)
+                return
+
+            order = np.argsort(act_coords, kind="mergesort")
+            act_sorted = act_coords[order]
+            flow_sorted = flow_coords[order]
+            data_sorted = data[order]
+
+            row_ptr = np.zeros(n_acts + 1, dtype=np.int64)
+            counts = np.bincount(act_sorted, minlength=n_acts)
+            np.cumsum(counts, out=row_ptr[1:])
+
+            cached = (row_ptr, flow_sorted, data_sorted)
+            row_cache[int(t)] = cached
+
+        row_ptr, flow_sorted, data_sorted = cached
+
+        # ---------------------------
+        # Main accumulation
+        # ---------------------------
+        for act_idx, supply_amt in supply_by_activity.items():
+            supply_amt = float(supply_amt)
             if supply_amt == 0.0:
                 continue
 
-            # IMPORTANT: biosphere sign is not flipped; value is already the correct sign
-            scaled = supply_amt * float(value)
-            if scaled == 0.0:
+            a = int(act_idx)
+            if a < 0 or a + 1 >= len(row_ptr):
                 continue
 
-            if min_amount and abs(scaled) < min_amount:
+            start = int(row_ptr[a])
+            end = int(row_ptr[a + 1])
+            if start == end:
                 continue
 
-            # Fetch temporal metadata using template year (not base_year)
-            tex = self._get_bio_temporal_exchange(
-                base_year,
-                act_idx,
-                flow_idx,
-            )
+            # FULL row arrays (positions refer to these)
+            flows_full = flow_sorted[start:end].astype(np.intp, copy=False)  # for np.add.at
+            vals_full = data_sorted[start:end]
 
-            if (tex is None) or (not use_temporal_distributions):
-                # Anchor inventory to the same scenario year used for B slice
-                y_eff = int(scenario_year)
-                inventory_by_year.setdefault(
-                    y_eff,
-                    np.zeros(n_flows, dtype=self.value_dtype),
-                )
-                inventory_by_year[y_eff][flow_idx] += scaled
-                continue
+            # Precompute scaled contributions for this activity row (anchor-year)
+            scaled_full = supply_amt * vals_full.astype(np.float64, copy=False)
 
-            td = TemporalDistribution(tex)
-
-            any_pair = False
-            for offset, weight in td.iter_offsets_and_weights(debug=debug):
-                raw_year = int(scenario_year + int(offset))
-                y_eff = int(self._map_year_to_scenario_year(raw_year))
-                t_eff = self.scenario_index.get(str(y_eff))
-                if t_eff is None:
+            # Optional min_amount filter mask on FULL arrays (so cached indices still apply)
+            if min_amt:
+                keep_full = np.abs(scaled_full) >= min_amt
+                if not keep_full.any():
                     continue
+            else:
+                keep_full = None
 
-                inventory_by_year.setdefault(
-                    y_eff,
-                    np.zeros(n_flows, dtype=self.value_dtype),
-                )
-
-                if tex.amount_source == "matrix":
-                    value_eff = float(self.B[t_eff, act_idx, flow_idx])
-                    if value_eff == 0.0:
-                        continue
-
-                    contrib = float(supply_amt) * float(value_eff) * float(weight)
-
-                    # Apply min_amount at the pulse level (not the anchor level)
-                    if min_amount and abs(contrib) < float(min_amount):
-                        continue
-
-                    inventory_by_year[y_eff][flow_idx] += contrib
-
+            # ---------------------------
+            # No TD at all => fast vectorized anchor add
+            # ---------------------------
+            if not bio_td:
+                vec = ensure_inventory_vec(base_scenario_year)
+                if keep_full is None:
+                    np.add.at(vec, flows_full, scaled_full.astype(vec.dtype, copy=False))
                 else:
-                    contrib = float(scaled) * float(weight)
-                    if min_amount and abs(contrib) < float(min_amount):
+                    np.add.at(
+                        vec,
+                        flows_full[keep_full],
+                        scaled_full[keep_full].astype(vec.dtype, copy=False),
+                    )
+                continue
+
+            # ---------------------------
+            # TD enabled: use cached TD classification per (tpl_label, t, act)
+            # ---------------------------
+            cache_key = (tpl_label, int(t), int(a))
+            td_struct = row_td_cache.get(cache_key)
+
+            if td_struct is None:
+                no_td_pos: list[int] = []
+                port_groups_pos: dict[tuple, list[int]] = {}
+                matrix_entries: list[tuple[int, TemporalExchange]] = []
+
+                # Classify on FULL row once
+                for p, f in enumerate(flows_full):
+                    tex = bio_td_get((tpl_label, a, int(f)))  # type: ignore[misc]
+                    if tex is None:
+                        no_td_pos.append(p)
                         continue
-                    inventory_by_year[y_eff][flow_idx] += contrib
+
+                    amount_source = getattr(tex, "amount_source", "port")
+                    if amount_source == "matrix":
+                        matrix_entries.append((p, tex))
+                    else:
+                        k = td_key(tex)
+                        port_groups_pos.setdefault(k, []).append(p)
+
+                no_td_idx = np.array(no_td_pos, dtype=np.intp) if no_td_pos else None
+                port_groups_idx = {k: np.array(v, dtype=np.intp) for k, v in port_groups_pos.items()}
+
+                td_struct = (no_td_idx, port_groups_idx, matrix_entries)
+                row_td_cache[cache_key] = td_struct
+
+            no_td_idx, port_groups_idx, matrix_entries = td_struct
+
+            # ---------------------------
+            # 1) No TD: batch anchor add (using cached indices)
+            # ---------------------------
+            if no_td_idx is not None:
+                if keep_full is None:
+                    idx = no_td_idx
+                else:
+                    idx = no_td_idx[keep_full[no_td_idx]]
+                if idx.size:
+                    vec = ensure_inventory_vec(base_scenario_year)
+                    np.add.at(vec, flows_full[idx], scaled_full[idx].astype(vec.dtype, copy=False))
+
+            # ---------------------------
+            # 2) Ported TD: grouped vector math + add.at per pulse (using cached indices)
+            # ---------------------------
+            if port_groups_idx:
+                for k, idx_full in port_groups_idx.items():
+                    # Apply min_amount mask after selecting idx_full
+                    if keep_full is None:
+                        idx = idx_full
+                    else:
+                        idx = idx_full[keep_full[idx_full]]
+                        if idx.size == 0:
+                            continue
+
+                    f_arr = flows_full[idx]
+                    s_arr = scaled_full[idx]
+
+                    pulses = pulse_cache.get(k)
+                    if pulses is None:
+                        # Need a representative tex to compute pulses.
+                        # We can look up tex for the first flow in this group.
+                        f0 = int(f_arr[0])
+                        tex0 = bio_td_get((tpl_label, a, f0))  # type: ignore[misc]
+                        if tex0 is None:
+                            continue
+                        pulses = [(int(o), float(w)) for o, w in
+                                  TemporalDistribution(tex0).iter_offsets_and_weights(debug=False)]
+                        pulse_cache[k] = pulses
+
+                    for offset, weight in pulses:
+                        if weight == 0.0:
+                            continue
+
+                        y_eff = map_year_cached(base_scenario_year + int(offset))
+                        contrib = s_arr * float(weight)
+
+                        if min_amt:
+                            m = np.abs(contrib) >= min_amt
+                            if not m.any():
+                                continue
+                            f_use = f_arr[m]
+                            c_use = contrib[m]
+                        else:
+                            f_use = f_arr
+                            c_use = contrib
+
+                        vec = ensure_inventory_vec(y_eff)
+                        np.add.at(vec, f_use, c_use.astype(vec.dtype, copy=False))
+
+            # ---------------------------
+            # 3) Matrix-sourced TD: keep semantics (year-dependent values)
+            # ---------------------------
+            if matrix_entries:
+                for p, tex in matrix_entries:
+                    if keep_full is not None and not keep_full[p]:
+                        continue
+
+                    f = int(flows_full[p])
+
+                    k = td_key(tex)
+                    pulses = pulse_cache.get(k)
+                    if pulses is None:
+                        pulses = [(int(o), float(w)) for o, w in
+                                  TemporalDistribution(tex).iter_offsets_and_weights(debug=False)]
+                        pulse_cache[k] = pulses
+
+                    for offset, weight in pulses:
+                        if weight == 0.0:
+                            continue
+
+                        y_eff = map_year_cached(base_scenario_year + int(offset))
+
+                        t_eff = t_eff_cache.get(y_eff)
+                        if t_eff is None and y_eff not in t_eff_cache:
+                            t_eff = scenario_index_get(str(y_eff))
+                            t_eff_cache[y_eff] = t_eff
+                        if t_eff is None:
+                            continue
+
+                        value_eff = float(self.B[int(t_eff), a, f])
+                        if value_eff == 0.0:
+                            continue
+
+                        contrib = supply_amt * value_eff * float(weight)
+                        if contrib == 0.0:
+                            continue
+                        if min_amt and abs(contrib) < min_amt:
+                            continue
+
+                        vec = ensure_inventory_vec(y_eff)
+                        vec[f] += vec.dtype.type(contrib)
 
     def _map_year_to_available(self, year: int) -> int:
         """

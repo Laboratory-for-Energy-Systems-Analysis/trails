@@ -12,7 +12,231 @@ from .temporal_distributions import TemporalExchange
 
 import logging
 
+import os
+from pathlib import Path
+import pandas as pd
+
+
 logger = logging.getLogger(__name__)
+
+
+from pathlib import Path
+import os
+
+def _resource_abspath(package: Any, res: Any) -> Path:
+    """
+    Resolve a resource to an absolute filesystem path, using Frictionless'
+    resolved source if available; otherwise fall back to package.basepath.
+    """
+    # 1) Best: frictionless-resolved source (often absolute or correctly rooted)
+    src = getattr(res, "source", None)
+    if src:
+        try:
+            p = Path(str(src))
+            if p.exists():
+                return p.resolve()
+        except Exception:
+            pass
+
+    # 2) Next: package.basepath is the canonical base for relative resource paths
+    base = getattr(package, "basepath", None)
+    if base:
+        try:
+            basep = Path(str(base))
+            # basepath is usually a directory; sometimes a file path
+            if basep.is_file():
+                basep = basep.parent
+            desc = res.descriptor or {}
+            rel = desc.get("path")
+            if not rel:
+                raise ValueError("Resource has no descriptor['path']")
+            p = basep / rel
+            if p.exists():
+                return p.resolve()
+        except Exception:
+            pass
+
+    # 3) Last resort: package.path (path to datapackage.json) if present
+    pkg_path = getattr(package, "path", None)
+    if pkg_path:
+        pkgp = Path(str(pkg_path))
+        basep = pkgp.parent if pkgp.is_file() else pkgp
+        desc = res.descriptor or {}
+        rel = desc.get("path")
+        if not rel:
+            raise ValueError("Resource has no descriptor['path']")
+        p = basep / rel
+        return p.resolve()
+
+    # 4) Fail loudly with useful diagnostics
+    desc = res.descriptor or {}
+    raise FileNotFoundError(
+        f"Could not resolve resource path. "
+        f"descriptor.path={desc.get('path')!r}, resource.source={getattr(res, 'source', None)!r}, "
+        f"package.basepath={getattr(package, 'basepath', None)!r}, package.path={getattr(package, 'path', None)!r}"
+    )
+
+
+import numpy as np
+import pandas as pd
+
+# Columns we expect in any matrix file (A)
+BASE_COLS_A = [
+    "index of activity",
+    "index of product",
+    "value",
+    "uncertainty type",
+    "loc",
+    "scale",
+    "shape",
+    "minimum",
+    "maximum",
+    "negative",
+    "flip",
+]
+
+# Optional temporal columns (may or may not be present; may include temporal_amount_source)
+TEMPORAL_COLS = [
+    "temporal_distribution",
+    "temporal_loc",
+    "temporal_scale",
+    "temporal_min",
+    "temporal_max",
+    "temporal_amount_source",
+]
+
+# For B you likely have "index of biosphere flow" instead of "index of product"
+BASE_COLS_B = [
+    "index of activity",
+    "index of biosphere flow",
+    "value",
+    "uncertainty type",
+    "loc",
+    "scale",
+    "shape",
+    "minimum",
+    "maximum",
+    "negative",
+    "flip",
+]
+
+
+def _read_matrix_csv_fast(csv_path, kind="A"):
+    """
+    Robust CSV reader that keeps temporal columns and safely casts index columns to int.
+
+    - Reads everything as string first to prevent pandas from shifting/casting surprises.
+    - Then explicitly casts indices to int64 and numeric columns to float64.
+    - Blanks are allowed in numeric columns; they become NaN (or 0 for flags).
+    """
+    if kind == "A":
+        base = BASE_COLS_A
+    elif kind == "B":
+        base = BASE_COLS_B
+    else:
+        raise ValueError(f"Unknown kind={kind}")
+
+    # Read header first to see what we have
+    header = pd.read_csv(csv_path, sep=";", nrows=0)
+    cols_present = list(header.columns)
+
+    # Build the list of columns to read: required base + any temporal columns that exist
+    cols_to_read = [c for c in base if c in cols_present]
+    if len(cols_to_read) != len(base):
+        missing = [c for c in base if c not in cols_present]
+        raise ValueError(f"Missing required columns in {csv_path}: {missing}")
+
+    cols_to_read += [c for c in TEMPORAL_COLS if c in cols_present]
+
+    # Read selected columns, but as strings (object) so we can control casting
+    df = pd.read_csv(
+        csv_path,
+        sep=";",
+        usecols=cols_to_read,
+        dtype=str,
+        keep_default_na=False,  # keep blanks as "" so we can decide how to treat them
+        na_filter=False,
+        engine="c",
+    )
+
+    # Strip whitespace everywhere (cheap insurance)
+    for c in df.columns:
+        df[c] = df[c].astype(str).str.strip()
+
+    # ---- Cast index columns (must be integer-like) ----
+    index_cols = ["index of activity"]
+    if kind == "A":
+        index_cols.append("index of product")
+    else:
+        index_cols.append("index of biosphere flow")
+
+    for col in index_cols:
+        # Blank indices are not allowed; treat "" as NaN then fail with a useful error
+        s = df[col].replace("", np.nan)
+        arr = pd.to_numeric(s, errors="coerce").to_numpy(dtype=np.float64)
+
+        if np.isnan(arr).any():
+            bad_rows = np.where(np.isnan(arr))[0][:10]
+            examples = df.loc[bad_rows, col].tolist()
+            raise ValueError(
+                f"Invalid/missing integer in '{col}' in {csv_path}. "
+                f"Row examples (raw): {examples}"
+            )
+
+        rounded = np.rint(arr)
+        if not np.allclose(arr, rounded, atol=0.0, rtol=0.0):
+            bad = arr[arr != rounded][:10]
+            raise ValueError(
+                f"Non-integer values found in '{col}' in {csv_path}. Examples: {bad}"
+            )
+
+        df[col] = rounded.astype(np.int64)
+
+    # ---- Cast numeric float columns (allow blanks) ----
+    float_cols = [
+        "value", "loc", "scale", "shape", "minimum", "maximum",
+        "temporal_loc", "temporal_scale", "temporal_min", "temporal_max",
+    ]
+    for col in float_cols:
+        if col not in df.columns:
+            continue
+        s = df[col]
+        s = s.where(s != "", np.nan)
+        df[col] = pd.to_numeric(s, errors="coerce").astype(np.float64)
+
+    # ---- Cast int-like parameter columns where appropriate ----
+    int_cols = ["uncertainty type"]
+    # temporal_distribution might be int-coded; if you use strings, remove this
+    if "temporal_distribution" in df.columns:
+        int_cols.append("temporal_distribution")
+
+    for col in int_cols:
+        if col not in df.columns:
+            continue
+
+        s = df[col]
+        s = s.where(s != "", 0)
+
+        x = pd.to_numeric(s, errors="coerce")
+        if x.isna().any():
+            # keep your current permissive behavior
+            x = x.fillna(0)
+
+        df[col] = x.astype(np.int64)
+
+    # ---- Cast flag columns (allow blanks -> 0) ----
+    for col in ("negative", "flip"):
+        if col not in df.columns:
+            continue
+
+        s = df[col]
+        s = s.where(s != "", 0)
+
+        x = pd.to_numeric(s, errors="coerce").fillna(0).astype(np.int64)
+        df[col] = x
+
+    return df
+
 
 
 def _parse_intish_or_none(value: object) -> int | None:
@@ -280,29 +504,13 @@ def load_matrices_from_package(
 ]:
     """Load technosphere and biosphere matrices from a data package.
 
-    :param package: Frictionless data package to load.
-    :type package: object
-    :param value_dtype: Data type for matrix values.
-    :type value_dtype: numpy.dtype
-    :param index_dtype: Data type for matrix indices.
-    :type index_dtype: numpy.dtype
-    :param debug: Whether to emit debug logging.
-    :type debug: bool
-    :returns: Tuple of A matrix, B matrix, scenario labels, scenario index,
-        temporal technosphere exchanges, and temporal biosphere exchanges.
-    :rtype: tuple
+    Fast path: bypass Frictionless row casting for A_matrix.csv and B_matrix.csv by
+    reading them directly with pandas.
     """
     scenario_labels: List[str] = []
     scenario_index: Dict[str, int] = {}
 
     def get_scenario_idx(label: str) -> int:
-        """Get or assign an index for a scenario label.
-
-        :param label: Scenario label to register.
-        :type label: str
-        :returns: Scenario index.
-        :rtype: int
-        """
         if label not in scenario_index:
             scenario_index[label] = len(scenario_labels)
             scenario_labels.append(label)
@@ -321,31 +529,114 @@ def load_matrices_from_package(
         "max_flow_idx": -1,
     }
 
+    # ---------- Load all A_matrix.csv ----------
     for scenario_label, res in _iter_inventory_resources(package, "A_matrix.csv"):
-
         t = get_scenario_idx(scenario_label)
-        for row in res.iter(keyed=True):
-            _parse_a_exchange_row(
-                row=row,
-                scenario_label=scenario_label,
-                t=t,
-                temporal_exchanges=temporal_exchanges,
-                A_coords=A_coords,
-                max_indices=max_indices,
+
+        csv_path = _resource_abspath(package, res)
+        df = _read_matrix_csv_fast(csv_path, kind="A")
+
+        # Required columns
+        act = df["index of activity"].to_numpy(dtype=np.int64, copy=False)
+        prod = df["index of product"].to_numpy(dtype=np.int64, copy=False)
+        val = df["value"].to_numpy(dtype=np.float64, copy=False)
+
+        # Apply flip if present
+        flip = df["flip"].to_numpy(dtype=np.int64, copy=False) if "flip" in df.columns else None
+        if flip is not None:
+            m = (flip == 1)
+            if m.any():
+                val = val.copy()
+                val[m] *= -1.0
+
+        # Append coords/data
+        n = int(len(df))
+        if n:
+            A_coords["t"].extend([t] * n)
+            A_coords["i"].extend(act.tolist())
+            A_coords["j"].extend(prod.tolist())
+            A_coords["data"].extend(val.tolist())
+
+            max_indices["max_activity_idx_for_A"] = max(
+                max_indices["max_activity_idx_for_A"], int(act.max())
             )
+            max_indices["max_product_idx"] = max(
+                max_indices["max_product_idx"], int(prod.max())
+            )
+
+        # Temporal exchanges: only rows where temporal_distribution is present and non-empty
+        if "temporal_distribution" in df.columns:
+            td_col = df["temporal_distribution"]
+            mask_td = (td_col != "")
+            if mask_td.any():
+                # Select only columns that actually exist; temporal_amount_source is optional
+                cols = [
+                    "index of activity",
+                    "index of product",
+                    "temporal_distribution",
+                ]
+                for opt in ("temporal_loc", "temporal_scale", "temporal_min", "temporal_max", "temporal_amount_source"):
+                    if opt in df.columns:
+                        cols.append(opt)
+
+                sub = df.loc[mask_td, cols]
+
+                for r in sub.itertuples(index=False, name=None):
+                    row = dict(zip(cols, r))
+                    tex = _parse_temporal_exchange_row(row)
+                    if tex is not None:
+                        temporal_exchanges[
+                            (scenario_label, int(row["index of activity"]), int(row["index of product"]))
+                        ] = tex
 
     # ---------- Load all B_matrix.csv ----------
     for scenario_label, res in _iter_inventory_resources(package, "B_matrix.csv"):
         t = get_scenario_idx(scenario_label)
-        for row in res.iter(keyed=True):
-            _parse_b_exchange_row(
-                row=row,
-                scenario_label=scenario_label,
-                t=t,
-                temporal_biosphere_exchanges=temporal_biosphere_exchanges,
-                B_coords=B_coords,
-                max_indices=max_indices,
+
+        csv_path = _resource_abspath(package, res)
+        df = _read_matrix_csv_fast(csv_path, kind="B")
+
+        act = df["index of activity"].to_numpy(dtype=np.int64, copy=False)
+        flow = df["index of biosphere flow"].to_numpy(dtype=np.int64, copy=False)
+        val = df["value"].to_numpy(dtype=np.float64, copy=False)
+
+        n = int(len(df))
+        if n:
+            B_coords["t"].extend([t] * n)
+            B_coords["i"].extend(act.tolist())
+            B_coords["j"].extend(flow.tolist())
+            B_coords["data"].extend(val.tolist())
+
+            max_indices["max_activity_idx_for_B"] = max(
+                max_indices["max_activity_idx_for_B"], int(act.max())
             )
+            max_indices["max_flow_idx"] = max(
+                max_indices["max_flow_idx"], int(flow.max())
+            )
+
+        # TD parsing for B: temporal_amount_source is OPTIONAL (and may not exist at all)
+        if "temporal_distribution" in df.columns:
+            td_col = df["temporal_distribution"]
+            mask_td = (td_col != "")
+            if mask_td.any():
+                cols = [
+                    "index of activity",
+                    "index of biosphere flow",
+                    "temporal_distribution",
+                ]
+                for opt in ("temporal_loc", "temporal_scale", "temporal_min", "temporal_max", "temporal_amount_source"):
+                    if opt in df.columns:
+                        cols.append(opt)
+
+                sub = df.loc[mask_td, cols]
+
+                for r in sub.itertuples(index=False, name=None):
+                    row = dict(zip(cols, r))
+                    tex = _parse_temporal_exchange_row(row)
+                    if tex is not None:
+                        temporal_biosphere_exchanges[
+                            (scenario_label, int(row["index of activity"]), int(row["index of biosphere flow"]))
+                        ] = tex
 
     # ---------- Deduce shapes ----------
     n_scenarios = len(scenario_labels)
@@ -361,35 +652,33 @@ def load_matrices_from_package(
     )
     n_flows = max_indices["max_flow_idx"] + 1 if max_indices["max_flow_idx"] >= 0 else 0
 
-    idx_dtype = index_dtype
-    val_dtype = value_dtype
-
     # ---------- Build sparse 3D matrices ----------
     A = _build_sparse_matrix(
         coords=[A_coords["t"], A_coords["i"], A_coords["j"]],
         data=A_coords["data"],
         shape=(n_scenarios, n_activities, n_products),
-        idx_dtype=idx_dtype,
-        val_dtype=val_dtype,
+        idx_dtype=index_dtype,
+        val_dtype=value_dtype,
     )
 
     B = _build_sparse_matrix(
         coords=[B_coords["t"], B_coords["i"], B_coords["j"]],
         data=B_coords["data"],
         shape=(n_scenarios, n_activities, n_flows),
-        idx_dtype=idx_dtype,
-        val_dtype=val_dtype,
+        idx_dtype=index_dtype,
+        val_dtype=value_dtype,
     )
 
     if debug:
         logger.info(
-            "Datapackage: loaded A shape=%s nnz=%d | B shape=%s nnz=%d | scenarios=%d | temporal_exchanges=%d",
+            "Datapackage: loaded A shape=%s nnz=%d | B shape=%s nnz=%d | scenarios=%d | temporal_exchanges=%d | temporal_biosphere_exchanges=%d",
             getattr(A, "shape", None),
             int(getattr(A, "nnz", 0)),
             getattr(B, "shape", None),
             int(getattr(B, "nnz", 0)),
             len(scenario_labels),
             len(temporal_exchanges),
+            len(temporal_biosphere_exchanges),
         )
 
     return (
