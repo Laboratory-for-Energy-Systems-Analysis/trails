@@ -18,7 +18,7 @@ results_by_year_ICEV, provenance = lca(
     start_year=ref_year,
     start_act_idx=27827,
     methods=methods,
-    max_depth=4,
+    max_depth=1,
     return_provenance=True,
     show_progress=True,
 )
