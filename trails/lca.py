@@ -281,11 +281,14 @@ def build_datapackage_for_year_from_trails(
 
     return dp, technosphere_indices, biosphere_indices, uncertain_parameters
 
+
 import numpy as np
+
 
 def _invert_dict(d: dict[int, int]) -> dict[int, int]:
     """Invert a one-to-one mapping {id -> position} into {position -> id}."""
     return {int(pos): int(_id) for _id, pos in d.items()}
+
 
 def _reference_product_id_from_activity_id(lca_obj, activity_id: int) -> int:
     act_map = getattr(lca_obj.dicts, "activity", None)
@@ -364,15 +367,18 @@ def _top_flow_contributions(lca_obj, bio_idx_simple, cf_vector, top_n=30):
     for p in idx:
         fid = pos_to_flow_id.get(int(p))
         key = flow_id_to_key.get(int(fid), None)
-        out.append({
-            "bw_row": int(p),
-            "flow_id": None if fid is None else int(fid),
-            "flow_key": key,  # (name, comp, subcomp)
-            "inventory": float(inv[p]),
-            "cf": float(cf_vector[p]),
-            "contribution": float(contrib[p]),
-        })
+        out.append(
+            {
+                "bw_row": int(p),
+                "flow_id": None if fid is None else int(fid),
+                "flow_key": key,  # (name, comp, subcomp)
+                "inventory": float(inv[p]),
+                "cf": float(cf_vector[p]),
+                "contribution": float(contrib[p]),
+            }
+        )
     return out
+
 
 def top_activity_contributions_from_cfvec(
     lca_obj,
@@ -392,7 +398,11 @@ def top_activity_contributions_from_cfvec(
     act_id_by_pos = {int(pos): int(aid) for aid, pos in lca_obj.dicts.activity.items()}
 
     abs_contrib = np.abs(contrib)
-    idx_all = np.where(abs_contrib >= float(min_abs))[0] if min_abs > 0 else np.arange(contrib.size)
+    idx_all = (
+        np.where(abs_contrib >= float(min_abs))[0]
+        if min_abs > 0
+        else np.arange(contrib.size)
+    )
     if idx_all.size == 0:
         return []
 
@@ -430,6 +440,7 @@ def top_activity_contributions_from_cfvec(
         out.append(row)
 
     return out
+
 
 def lca_static_simple(
     trails: Trails,
@@ -501,7 +512,9 @@ def lca_static_simple(
 
     score = float(cf_vec @ inv_vec.ravel())
 
-    top_flows = _top_flow_contributions(lca_obj, biosphere_dict_simple, cf_vec, top_n=25)
+    top_flows = _top_flow_contributions(
+        lca_obj, biosphere_dict_simple, cf_vec, top_n=25
+    )
 
     top_acts = top_activity_contributions_from_cfvec(
         lca_obj=lca_obj,
@@ -531,7 +544,6 @@ def lca_static_simple(
         "fu_product": {int(fu_prod_id): float(amount)},
         "top_flow_contributions": top_flows,
         "top_activity_contributions": top_acts,
-
     }
 
 
@@ -897,6 +909,7 @@ def _assert_rooted_closure(
             f"Rooted demand does not sum to total demand in year {solve_year} (abs_err={abs_err:g}, tol={tol:g})."
         )
 
+
 def _extract_supply_fast_cached(
     supply_array: np.ndarray,
     act_ids: np.ndarray,
@@ -942,7 +955,6 @@ def _extract_supply_fast(lca_obj: Any, min_amount: float) -> Dict[int, float]:
 
     # Convert back to python dict
     return {int(a): float(v) for a, v in zip(act_ids, vals)}
-
 
 
 def _build_injected_supply(
@@ -1364,14 +1376,18 @@ def lca(
     char_cache: Dict[tuple, Any] = {}
 
     inventory_total_by_impact_year: Dict[int, np.ndarray] = {}
-    inventory_by_root_by_impact_year: Dict[int, Dict[int, np.ndarray]] = defaultdict(dict)
+    inventory_by_root_by_impact_year: Dict[int, Dict[int, np.ndarray]] = defaultdict(
+        dict
+    )
 
     # -----------------------------
     # 2) Solve-year loop
     # -----------------------------
     solve_iter = candidate_years
     if show_progress:
-        solve_iter = tqdm(candidate_years, desc="Temporal LCA: solve years", unit="year")
+        solve_iter = tqdm(
+            candidate_years, desc="Temporal LCA: solve years", unit="year"
+        )
 
     for solve_year in solve_iter:
         solve_year = int(solve_year)
@@ -1418,7 +1434,9 @@ def lca(
             positions = None
         else:
             act_ids = np.fromiter(act_map.keys(), dtype=np.int64, count=len(act_map))
-            positions = np.fromiter(act_map.values(), dtype=np.int64, count=len(act_map))
+            positions = np.fromiter(
+                act_map.values(), dtype=np.int64, count=len(act_map)
+            )
 
         # supply extraction (total) using cached mapping when available
         if act_ids is None or positions is None:
@@ -1463,7 +1481,9 @@ def lca(
         )
 
         # Book FU-direct inventory under FU activity root (fu0)
-        fu_direct_injected = injected_supply_by_first_level_child.get(FU_DIRECT_ROOT, {})
+        fu_direct_injected = injected_supply_by_first_level_child.get(
+            FU_DIRECT_ROOT, {}
+        )
         if fu_direct_injected:
             trails.accumulate_temporalized_biosphere_inventory(
                 base_year=solve_year,
@@ -1554,4 +1574,3 @@ def lca(
         "results_by_impact_year": results_by_impact_year,
     }
     return (out, provenance) if return_provenance else out
-
