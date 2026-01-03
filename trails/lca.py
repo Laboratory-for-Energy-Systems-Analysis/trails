@@ -910,7 +910,6 @@ def _assert_rooted_closure(
         )
 
 
-
 def _make_supply_extractor(lca_obj: Any):
     """
     Return a function extract(min_amount) -> {trails_act_id: supply_value}
@@ -925,8 +924,10 @@ def _make_supply_extractor(lca_obj: Any):
 
     # Fallback: keep old behavior if mapping not available
     if not act_map:
+
         def extract(min_amount: float) -> Dict[int, float]:
             return _extract_supply_fast(lca_obj, min_amount)
+
         return extract
 
     # Cache arrays once per solve_year
@@ -1367,14 +1368,18 @@ def lca(
     char_cache: Dict[tuple, Any] = {}
 
     inventory_total_by_impact_year: Dict[int, np.ndarray] = {}
-    inventory_by_root_by_impact_year: Dict[int, Dict[int, np.ndarray]] = defaultdict(dict)
+    inventory_by_root_by_impact_year: Dict[int, Dict[int, np.ndarray]] = defaultdict(
+        dict
+    )
 
     # -----------------------------
     # 2) Solve-year loop
     # -----------------------------
     solve_iter = candidate_years
     if show_progress:
-        solve_iter = tqdm(candidate_years, desc="Temporal LCA: solve years", unit="year")
+        solve_iter = tqdm(
+            candidate_years, desc="Temporal LCA: solve years", unit="year"
+        )
 
     for solve_year in solve_iter:
         solve_year = int(solve_year)
@@ -1451,7 +1456,9 @@ def lca(
         )
 
         # Book FU-direct inventory under FU activity root (fu0)
-        fu_direct_injected = injected_supply_by_first_level_child.get(FU_DIRECT_ROOT, {})
+        fu_direct_injected = injected_supply_by_first_level_child.get(
+            FU_DIRECT_ROOT, {}
+        )
         if fu_direct_injected:
             trails.accumulate_temporalized_biosphere_inventory(
                 base_year=solve_year,
@@ -1542,4 +1549,3 @@ def lca(
         "results_by_impact_year": results_by_impact_year,
     }
     return (out, provenance) if return_provenance else out
-
