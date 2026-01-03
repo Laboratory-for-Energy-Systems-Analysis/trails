@@ -281,14 +281,11 @@ def build_datapackage_for_year_from_trails(
 
     return dp, technosphere_indices, biosphere_indices, uncertain_parameters
 
-
 import numpy as np
-
 
 def _invert_dict(d: dict[int, int]) -> dict[int, int]:
     """Invert a one-to-one mapping {id -> position} into {position -> id}."""
     return {int(pos): int(_id) for _id, pos in d.items()}
-
 
 def _reference_product_id_from_activity_id(lca_obj, activity_id: int) -> int:
     act_map = getattr(lca_obj.dicts, "activity", None)
@@ -367,18 +364,15 @@ def _top_flow_contributions(lca_obj, bio_idx_simple, cf_vector, top_n=30):
     for p in idx:
         fid = pos_to_flow_id.get(int(p))
         key = flow_id_to_key.get(int(fid), None)
-        out.append(
-            {
-                "bw_row": int(p),
-                "flow_id": None if fid is None else int(fid),
-                "flow_key": key,  # (name, comp, subcomp)
-                "inventory": float(inv[p]),
-                "cf": float(cf_vector[p]),
-                "contribution": float(contrib[p]),
-            }
-        )
+        out.append({
+            "bw_row": int(p),
+            "flow_id": None if fid is None else int(fid),
+            "flow_key": key,  # (name, comp, subcomp)
+            "inventory": float(inv[p]),
+            "cf": float(cf_vector[p]),
+            "contribution": float(contrib[p]),
+        })
     return out
-
 
 def top_activity_contributions_from_cfvec(
     lca_obj,
@@ -398,11 +392,7 @@ def top_activity_contributions_from_cfvec(
     act_id_by_pos = {int(pos): int(aid) for aid, pos in lca_obj.dicts.activity.items()}
 
     abs_contrib = np.abs(contrib)
-    idx_all = (
-        np.where(abs_contrib >= float(min_abs))[0]
-        if min_abs > 0
-        else np.arange(contrib.size)
-    )
+    idx_all = np.where(abs_contrib >= float(min_abs))[0] if min_abs > 0 else np.arange(contrib.size)
     if idx_all.size == 0:
         return []
 
@@ -440,7 +430,6 @@ def top_activity_contributions_from_cfvec(
         out.append(row)
 
     return out
-
 
 def lca_static_simple(
     trails: Trails,
@@ -512,9 +501,7 @@ def lca_static_simple(
 
     score = float(cf_vec @ inv_vec.ravel())
 
-    top_flows = _top_flow_contributions(
-        lca_obj, biosphere_dict_simple, cf_vec, top_n=25
-    )
+    top_flows = _top_flow_contributions(lca_obj, biosphere_dict_simple, cf_vec, top_n=25)
 
     top_acts = top_activity_contributions_from_cfvec(
         lca_obj=lca_obj,
@@ -544,6 +531,7 @@ def lca_static_simple(
         "fu_product": {int(fu_prod_id): float(amount)},
         "top_flow_contributions": top_flows,
         "top_activity_contributions": top_acts,
+
     }
 
 
@@ -909,43 +897,52 @@ def _assert_rooted_closure(
             f"Rooted demand does not sum to total demand in year {solve_year} (abs_err={abs_err:g}, tol={tol:g})."
         )
 
+def _extract_supply_fast_cached(
+    supply_array: np.ndarray,
+    act_ids: np.ndarray,
+    positions: np.ndarray,
+    min_amount: float,
+) -> Dict[int, float]:
+    """Extract supply using precomputed (act_ids, positions) mapping for this solve_year."""
+    supply = np.asarray(supply_array, dtype=np.float64)
+
+    vals = supply[positions]
+    m = np.abs(vals) > float(min_amount)
+    if not m.any():
+        return {}
+
+    a = act_ids[m]
+    v = vals[m]
+    return {int(ai): float(vi) for ai, vi in zip(a, v)}
 
 
-def _make_supply_extractor(lca_obj: Any):
+def _extract_supply_fast(lca_obj: Any, min_amount: float) -> Dict[int, float]:
+    """Extract supply in Trails activity-index space using lca_obj.dicts.activity.
+
+    Uses vectorized thresholding on the BW-ordered supply array.
     """
-    Return a function extract(min_amount) -> {trails_act_id: supply_value}
+    supply = np.asarray(lca_obj.supply_array).astype(np.float64, copy=False)
 
-    Builds and caches the mapping from Trails activity ids (keys of dicts.activity)
-    to positions in lca_obj.supply_array once, and reuses it across redo_lci calls.
-
-    If dicts.activity is missing, falls back to _extract_supply_fast(lca_obj,...)
-    to preserve prior behavior.
-    """
+    # dicts.activity maps Trails act_idx -> position in supply_array
     act_map = getattr(lca_obj.dicts, "activity", None)
-
-    # Fallback: keep old behavior if mapping not available
     if not act_map:
-        def extract(min_amount: float) -> Dict[int, float]:
-            return _extract_supply_fast(lca_obj, min_amount)
-        return extract
+        return {}
 
-    # Cache arrays once per solve_year
+    # Build arrays once
     act_ids = np.fromiter(act_map.keys(), dtype=np.int64, count=len(act_map))
     positions = np.fromiter(act_map.values(), dtype=np.int64, count=len(act_map))
 
-    def extract(min_amount: float) -> Dict[int, float]:
-        supply = np.asarray(lca_obj.supply_array, dtype=np.float64)
-        vals = supply[positions]
+    vals = supply[positions]
+    m = np.abs(vals) > float(min_amount)
+    if not m.any():
+        return {}
 
-        m = np.abs(vals) > float(min_amount)
-        if not m.any():
-            return {}
+    act_ids = act_ids[m]
+    vals = vals[m]
 
-        a = act_ids[m]
-        v = vals[m]
-        return {int(ai): float(vi) for ai, vi in zip(a, v)}
+    # Convert back to python dict
+    return {int(a): float(v) for a, v in zip(act_ids, vals)}
 
-    return extract
 
 
 def _build_injected_supply(
@@ -1408,13 +1405,28 @@ def lca(
         )
 
         lca_obj = bc.LCA(demand=fu_demand, data_objs=[dp])
+        # factorize=True helps when reusing via redo_lci
         lca_obj.lci(factorize=True)
 
-        # Build supply extractor ONCE per solve_year; valid across redo_lci
-        extract_supply = _make_supply_extractor(lca_obj)
-
         # supply extraction (total)
-        supply_total = extract_supply(min_amount)
+        # ---------------------------------------------------------
+        # Cache activity->position mapping once per solve_year
+        # ---------------------------------------------------------
+        act_map = getattr(lca_obj.dicts, "activity", None)
+        if not act_map:
+            act_ids = None
+            positions = None
+        else:
+            act_ids = np.fromiter(act_map.keys(), dtype=np.int64, count=len(act_map))
+            positions = np.fromiter(act_map.values(), dtype=np.int64, count=len(act_map))
+
+        # supply extraction (total) using cached mapping when available
+        if act_ids is None or positions is None:
+            supply_total = _extract_supply_fast(lca_obj, min_amount)
+        else:
+            supply_total = _extract_supply_fast_cached(
+                lca_obj.supply_array, act_ids, positions, min_amount
+            )
 
         # (1) solved-supply contribution
         trails.accumulate_temporalized_biosphere_inventory(
