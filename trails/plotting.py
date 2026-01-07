@@ -110,11 +110,7 @@ def _collect_root_scores(
     :rtype: list[int]
     """
     all_roots = sorted(
-        {
-            root
-            for year in years
-            for root in results_by_year[year].get(score_key, {})
-        }
+        {root for year in years for root in results_by_year[year].get(score_key, {})}
     )
     if not all_roots:
         raise ValueError(f"No {score_key} found.")
