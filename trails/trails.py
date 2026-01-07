@@ -196,8 +196,16 @@ class Trails:
                 logger.debug(
                     "append_inventory: year %d not in inventory range [%s..%s]",
                     int(year),
-                    int(self._inventory_years[0]) if self._inventory_years is not None else -1,
-                    int(self._inventory_years[-1]) if self._inventory_years is not None else -1,
+                    (
+                        int(self._inventory_years[0])
+                        if self._inventory_years is not None
+                        else -1
+                    ),
+                    (
+                        int(self._inventory_years[-1])
+                        if self._inventory_years is not None
+                        else -1
+                    ),
                 )
             return
 
@@ -779,8 +787,16 @@ class Trails:
                 int(base_year),
                 int(scenario_year),
                 int(t),
-                int(self._inventory_years[0]) if self._inventory_years is not None else -1,
-                int(self._inventory_years[-1]) if self._inventory_years is not None else -1,
+                (
+                    int(self._inventory_years[0])
+                    if self._inventory_years is not None
+                    else -1
+                ),
+                (
+                    int(self._inventory_years[-1])
+                    if self._inventory_years is not None
+                    else -1
+                ),
             )
 
         if not supply_by_activity:
