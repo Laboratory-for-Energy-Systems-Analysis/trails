@@ -139,7 +139,12 @@ class Trails:
 
     def reset_inventory(self) -> None:
         """Initialize inventory builders for sparse 3D inventory storage."""
-        years = np.array(self.years_int, dtype=int)
+        min_offset, max_offset = self._inventory_offset_bounds()
+        years = np.arange(
+            int(self.min_year + min_offset),
+            int(self.max_year + max_offset) + 1,
+            dtype=int,
+        )
         self._inventory_years = years
         self._inventory_year_index = {int(y): int(i) for i, y in enumerate(years)}
         self._inventory_coords = [[], [], []]
@@ -148,6 +153,25 @@ class Trails:
         self.characterized_inventory = None
         self.static_score = None
         self.provenance = None
+
+    def _inventory_offset_bounds(self) -> tuple[int, int]:
+        """Return min/max year offsets implied by temporal exchange metadata."""
+        min_offset = 0
+        max_offset = 0
+        for exchanges in (
+            self.temporal_technosphere_exchanges,
+            self.temporal_biosphere_exchanges,
+        ):
+            if not exchanges:
+                continue
+            for tex in exchanges.values():
+                offset_min = getattr(tex, "offset_min", None)
+                offset_max = getattr(tex, "offset_max", None)
+                if offset_min is not None:
+                    min_offset = min(min_offset, int(offset_min))
+                if offset_max is not None:
+                    max_offset = max(max_offset, int(offset_max))
+        return min_offset, max_offset
 
     def _append_inventory_entries(
         self, act_idx: int, year: int, flows: np.ndarray, values: np.ndarray
