@@ -16,6 +16,7 @@ from .bw_interface import (
     build_datapackage_for_year_from_trails,
 )
 from .characterization import build_characterized_inventory
+
 if TYPE_CHECKING:
     from .trails import Trails
 
