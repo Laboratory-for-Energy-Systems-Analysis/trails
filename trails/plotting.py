@@ -1,4 +1,4 @@
-from typing import Any, Callable, Dict, List, Literal, Optional, Tuple
+from typing import Any, Callable, Dict, List, Literal, Optional, Tuple, Union
 
 import math
 
@@ -7,6 +7,8 @@ import numpy as np
 import plotly.graph_objects as go
 import plotly.express as px
 from plotly.subplots import make_subplots
+import sparse
+import xarray as xr
 
 from .trails import Trails
 from .utils import _format_path_label, _format_path_label_with_years
@@ -630,8 +632,57 @@ def to_impact_year_results(
     return out
 
 
+def _characterized_inventory_to_results(
+    characterized_inventory: xr.DataArray,
+) -> Dict[int, Dict[str, Any]]:
+    """Convert a characterized inventory DataArray into impact-year results."""
+    if "flow" not in characterized_inventory.dims:
+        raise ValueError("characterized_inventory must include a 'flow' dimension.")
+    if "activity" not in characterized_inventory.dims:
+        raise ValueError(
+            "characterized_inventory must include an 'activity' dimension."
+        )
+    if "year" not in characterized_inventory.dims:
+        raise ValueError("characterized_inventory must include a 'year' dimension.")
+
+    data = characterized_inventory.data
+    if not isinstance(data, sparse.COO):
+        data = sparse.COO.from_numpy(np.asarray(data))
+
+    summed = data.sum(axis=1)  # activity x year
+    years = characterized_inventory.coords["year"].values
+
+    results: Dict[int, Dict[str, Any]] = {
+        int(year): {"scores": 0.0, "scores_by_first_level_child": {}} for year in years
+    }
+
+    if isinstance(summed, sparse.COO):
+        act_coords = summed.coords[0]
+        year_coords = summed.coords[1]
+        values = summed.data
+        for act_idx, year_idx, val in zip(act_coords, year_coords, values):
+            year = int(years[int(year_idx)])
+            results[year]["scores_by_first_level_child"][int(act_idx)] = float(val)
+            results[year]["scores"] += float(val)
+    else:
+        for year_idx, year in enumerate(years):
+            col = np.asarray(summed[:, year_idx]).ravel()
+            if col.size == 0:
+                continue
+            year_result = results[int(year)]
+            for act_idx, val in enumerate(col):
+                if val == 0.0:
+                    continue
+                year_result["scores_by_first_level_child"][int(act_idx)] = float(val)
+                year_result["scores"] += float(val)
+
+    return results
+
+
 def plot_temporal_scores(
-    results_by_year: Dict[int, Dict[str, Any]],
+    results_by_year: Union[
+        Dict[int, Dict[str, Any]], Dict[str, Any], xr.DataArray, None
+    ],
     trails: Trails,
     title: str = "Temporal impacts by responsible activity",
     method_label: str = "Impact score",
@@ -661,8 +712,8 @@ def plot_temporal_scores(
 ) -> go.Figure:
     """Plot temporal impact scores by responsible activity.
 
-    :param results_by_year: Impact-year results mapping.
-    :type results_by_year: dict[int, dict[str, Any]]
+    :param results_by_year: Impact-year results mapping or characterized inventory.
+    :type results_by_year: dict[int, dict[str, Any]] | xarray.DataArray | None
     :param trails: Trails instance used for labels.
     :type trails: Trails
     :param title: Plot title.
@@ -718,7 +769,15 @@ def plot_temporal_scores(
     :returns: Plotly figure.
     :rtype: plotly.graph_objects.Figure
     """
-    results_by_year = to_impact_year_results(results_by_year)
+    if results_by_year is None:
+        if trails.characterized_inventory is None:
+            raise ValueError("No characterized inventory available for plotting.")
+        results_by_year = trails.characterized_inventory
+
+    if isinstance(results_by_year, xr.DataArray):
+        results_by_year = _characterized_inventory_to_results(results_by_year)
+    else:
+        results_by_year = to_impact_year_results(results_by_year)
 
     if year_tick < 1:
         raise ValueError("year_tick must be >= 1")
