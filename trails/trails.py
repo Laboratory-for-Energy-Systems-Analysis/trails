@@ -495,6 +495,12 @@ class Trails:
             return None
         return TemporalDistribution(tex)
 
+    def lca(self, *args: Any, **kwargs: Any) -> None:
+        """Run temporal LCA using this Trails instance."""
+        from .lca import lca as lca_fn
+
+        return lca_fn(self, *args, **kwargs)
+
     def expand_temporal_exchanges(
         self,
         year: int,
