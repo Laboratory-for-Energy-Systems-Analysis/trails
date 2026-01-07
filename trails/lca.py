@@ -253,11 +253,10 @@ def lca(
             for root, amt in root_map.items():
                 if abs(float(amt)) <= float(min_amount):
                     continue
-                root_demands_by_year.setdefault(int(y), {}).setdefault(
-                    int(root), {}
-                )[int(a)] = (
-                    root_demands_by_year[int(y)][int(root)].get(int(a), 0.0)
-                    + float(amt)
+                root_demands_by_year.setdefault(int(y), {}).setdefault(int(root), {})[
+                    int(a)
+                ] = root_demands_by_year[int(y)][int(root)].get(int(a), 0.0) + float(
+                    amt
                 )
 
         for (y, a), total_amt in injected_supply_by_year_act.items():
@@ -267,11 +266,10 @@ def lca(
             for root, amt in root_map.items():
                 if abs(float(amt)) <= float(min_amount):
                     continue
-                root_injected_by_year.setdefault(int(y), {}).setdefault(
-                    int(root), {}
-                )[int(a)] = (
-                    root_injected_by_year[int(y)][int(root)].get(int(a), 0.0)
-                    + float(amt)
+                root_injected_by_year.setdefault(int(y), {}).setdefault(int(root), {})[
+                    int(a)
+                ] = root_injected_by_year[int(y)][int(root)].get(int(a), 0.0) + float(
+                    amt
                 )
 
     solve_iter = candidate_years
