@@ -208,10 +208,14 @@ def _add_root_traces(
                 mode="lines",
                 hoverinfo="skip" if not showhover else None,
                 hovertemplate=(
-                    "<b>%{meta}</b><br>"
-                    "Year: %{x}<br>"
-                    f"{method_label}: %{{y:.6g}}<extra></extra>"
-                ) if showhover else None,
+                    (
+                        "<b>%{meta}</b><br>"
+                        "Year: %{x}<br>"
+                        f"{method_label}: %{{y:.6g}}<extra></extra>"
+                    )
+                    if showhover
+                    else None
+                ),
                 **(
                     {"stackgroup": "one"}
                     if stacked
@@ -710,6 +714,7 @@ def _characterized_inventory_to_results(
 
     return results
 
+
 def _wrap_hover_label(text: str, max_chars: int = 45) -> str:
     """
     Wrap text for Plotly hoverlabels by inserting <br> at word boundaries.
@@ -722,11 +727,7 @@ def _wrap_hover_label(text: str, max_chars: int = 45) -> str:
 
     # Normalize separators so we can wrap nicely around them
     # (optional but helps LCA-style labels)
-    t = (
-        str(text)
-        .replace(" | ", " | ")
-        .replace("|", " | ")
-    )
+    t = str(text).replace(" | ", " | ").replace("|", " | ")
 
     words = t.split()
     lines: list[str] = []
