@@ -33,6 +33,9 @@ def lca_static_simple(
     debug: bool = False,
 ) -> None:
     """Run a static LCA for a single functional unit and year."""
+    prev_inventory = trails.inventory
+    prev_characterized = trails.characterized_inventory
+
     trails.reset_inventory()
     trails.static_score = None
 
@@ -66,6 +69,9 @@ def lca_static_simple(
         trails=trails, methods=methods, char_cache={}
     )
     trails.static_score = float(characterized.data.sum())
+
+    trails.inventory = prev_inventory
+    trails.characterized_inventory = prev_characterized
 
 
 def lca(
