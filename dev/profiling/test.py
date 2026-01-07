@@ -23,5 +23,5 @@ trails.lca(
     return_provenance=True,
     show_progress=True,
     min_amount=1e-18,
-    debug=False
+    debug=False,
 )

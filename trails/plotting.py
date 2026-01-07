@@ -37,7 +37,6 @@ def _build_activity_label_map(trails: Trails) -> dict[int, str]:
     return labels
 
 
-
 def _build_flow_label_map(trails: Trails) -> dict[int, str]:
     """Build a mapping of biosphere flow indices to display labels.
 
