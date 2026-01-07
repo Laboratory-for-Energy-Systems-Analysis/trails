@@ -5,6 +5,7 @@ from collections import defaultdict, deque
 
 import numpy as np
 import sparse
+import xarray as xr
 
 from tqdm import tqdm
 
@@ -61,6 +62,13 @@ class Trails:
 
         self.A: Optional[sparse.COO] = None
         self.B: Optional[sparse.COO] = None
+        self.inventory: Optional[xr.DataArray] = None
+        self.characterized_inventory: Optional[xr.DataArray] = None
+        self._inventory_years: Optional[np.ndarray] = None
+        self._inventory_year_index: dict[int, int] = {}
+        self._inventory_coords: Optional[list[list[np.ndarray]]] = None
+        self._inventory_data: Optional[list[np.ndarray]] = None
+        self.provenance: Optional[dict] = None
 
         print("Loading matrices from data package          [1/3]")
         (
@@ -127,6 +135,86 @@ class Trails:
             )
             self.min_year = int(self.years_int.min())
             self.max_year = int(self.years_int.max())
+
+    def reset_inventory(self) -> None:
+        """Initialize inventory builders for sparse 3D inventory storage."""
+        years = np.array(self.years_int, dtype=int)
+        self._inventory_years = years
+        self._inventory_year_index = {int(y): int(i) for i, y in enumerate(years)}
+        self._inventory_coords = [[], [], []]
+        self._inventory_data = []
+        self.inventory = None
+        self.characterized_inventory = None
+        self.provenance = None
+
+    def _append_inventory_entries(
+        self, act_idx: int, year: int, flows: np.ndarray, values: np.ndarray
+    ) -> None:
+        if self._inventory_coords is None or self._inventory_data is None:
+            raise RuntimeError("Inventory builders not initialized. Call reset_inventory().")
+
+        year_idx = self._inventory_year_index.get(int(year))
+        if year_idx is None:
+            return
+
+        flows = np.asarray(flows, dtype=np.int64)
+        values = np.asarray(values, dtype=np.float64)
+        if flows.size == 0:
+            return
+
+        mask = values != 0.0
+        if not np.any(mask):
+            return
+
+        flows = flows[mask]
+        values = values[mask]
+
+        self._inventory_coords[0].append(
+            np.full(flows.size, int(act_idx), dtype=np.int64)
+        )
+        self._inventory_coords[1].append(flows.astype(np.int64, copy=False))
+        self._inventory_coords[2].append(
+            np.full(flows.size, int(year_idx), dtype=np.int64)
+        )
+        self._inventory_data.append(values.astype(self.value_dtype, copy=False))
+
+    def finalize_inventory(self) -> xr.DataArray:
+        """Finalize and store sparse inventory as a 3D xarray."""
+        if self.A is None or self.B is None:
+            raise ValueError("Cannot finalize inventory: A or B is None.")
+
+        n_activities = int(self.A.shape[1])
+        n_flows = int(self.B.shape[2])
+        years = self._inventory_years
+        if years is None:
+            raise RuntimeError("Inventory years not initialized. Call reset_inventory().")
+
+        if self._inventory_coords is None or self._inventory_data is None:
+            raise RuntimeError("Inventory builders not initialized. Call reset_inventory().")
+
+        if self._inventory_data:
+            coords = np.vstack(
+                [np.concatenate(part) for part in self._inventory_coords]
+            )
+            data = np.concatenate(self._inventory_data)
+            inv = sparse.COO(
+                coords, data, shape=(n_activities, n_flows, len(years))
+            )
+        else:
+            inv = sparse.COO.zeros(
+                (n_activities, n_flows, len(years)), dtype=self.value_dtype
+            )
+
+        self.inventory = xr.DataArray(
+            inv,
+            dims=("activity", "flow", "year"),
+            coords={
+                "activity": np.arange(n_activities, dtype=int),
+                "flow": np.arange(n_flows, dtype=int),
+                "year": years,
+            },
+        )
+        return self.inventory
 
     # ------------------------------------------------------------------
     # Convenience accessors
@@ -578,14 +666,14 @@ class Trails:
         self,
         base_year: int,
         supply_by_activity: Dict[int, float],
-        inventory_by_year: Dict[int, np.ndarray],
         *,
         min_amount: float = 0.0,
         use_temporal_distributions: bool = True,
         debug: bool = False,
     ) -> None:
         """
-        Accumulate temporally shifted biosphere emissions for a solved supply vector.
+        Accumulate temporally shifted biosphere emissions for a solved supply vector,
+        storing results in the Trails inventory builder.
 
         Performance strategy:
           - Iterate only over supplied activities.
@@ -621,22 +709,6 @@ class Trails:
 
         base_scenario_year = int(scenario_year)
         min_amt = float(min_amount) if min_amount else 0.0
-
-        # ---------------------------
-        # Inventory allocation helper
-        # ---------------------------
-        vec_cache: dict[int, np.ndarray] = {}
-
-        def ensure_inventory_vec(y_eff: int) -> np.ndarray:
-            arr = vec_cache.get(y_eff)
-            if arr is not None:
-                return arr
-            arr = inventory_by_year.get(y_eff)
-            if arr is None:
-                arr = np.zeros(n_flows, dtype=value_dtype)
-                inventory_by_year[y_eff] = arr
-            vec_cache[y_eff] = arr
-            return arr
 
         # ---------------------------
         # Temporal metadata context
@@ -772,16 +844,16 @@ class Trails:
             # No TD at all => fast vectorized anchor add
             # ---------------------------
             if not bio_td:
-                vec = ensure_inventory_vec(base_scenario_year)
                 if keep_full is None:
-                    np.add.at(
-                        vec, flows_full, scaled_full.astype(vec.dtype, copy=False)
+                    self._append_inventory_entries(
+                        a, base_scenario_year, flows_full, scaled_full
                     )
                 else:
-                    np.add.at(
-                        vec,
+                    self._append_inventory_entries(
+                        a,
+                        base_scenario_year,
                         flows_full[keep_full],
-                        scaled_full[keep_full].astype(vec.dtype, copy=False),
+                        scaled_full[keep_full],
                     )
                 continue
 
@@ -829,11 +901,8 @@ class Trails:
                 else:
                     idx = no_td_idx[keep_full[no_td_idx]]
                 if idx.size:
-                    vec = ensure_inventory_vec(base_scenario_year)
-                    np.add.at(
-                        vec,
-                        flows_full[idx],
-                        scaled_full[idx].astype(vec.dtype, copy=False),
+                    self._append_inventory_entries(
+                        a, base_scenario_year, flows_full[idx], scaled_full[idx]
                     )
 
             # ---------------------------
@@ -885,8 +954,7 @@ class Trails:
                             f_use = f_arr
                             c_use = contrib
 
-                        vec = ensure_inventory_vec(y_eff)
-                        np.add.at(vec, f_use, c_use.astype(vec.dtype, copy=False))
+                        self._append_inventory_entries(a, y_eff, f_use, c_use)
 
             # ---------------------------
             # 3) Matrix-sourced TD: keep semantics (year-dependent values)
@@ -932,8 +1000,12 @@ class Trails:
                         if min_amt and abs(contrib) < min_amt:
                             continue
 
-                        vec = ensure_inventory_vec(y_eff)
-                        vec[f] += vec.dtype.type(contrib)
+                        self._append_inventory_entries(
+                            a,
+                            y_eff,
+                            np.array([f], dtype=np.int64),
+                            np.array([contrib]),
+                        )
 
     def _map_year_to_available(self, year: int) -> int:
         """
