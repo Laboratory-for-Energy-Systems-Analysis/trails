@@ -151,6 +151,7 @@ def _add_root_traces(
     method_label: str,
     stacked: bool,
     showlegend_roots: Optional[set[int]] = None,
+    showhover_roots: Optional[set[int]] = None,
 ) -> None:
     """Add root score traces to a Plotly figure.
 
@@ -170,6 +171,8 @@ def _add_root_traces(
     :type stacked: bool
     :param showlegend_roots: Optional set of root ids to show in the legend.
     :type showlegend_roots: set[int] | None
+    :param showhover_roots: Optional set of root ids to show in hover.
+    :type showhover_roots: set[int] | None
     """
     alpha = 0.4 if not stacked else 1.0
 
@@ -187,18 +190,28 @@ def _add_root_traces(
         showlegend = True
         if showlegend_roots is not None:
             showlegend = root in showlegend_roots
+
+        showhover = True
+        if showhover_roots is not None:
+            showhover = root in showhover_roots
+
+        root_label = label_for_root(root)
+        root_label_wrapped = _wrap_hover_label(root_label, max_chars=45)
+
         fig.add_trace(
             go.Scatter(
                 x=years,
                 y=Y[:, ri],
-                name=label_for_root(root),
+                name=root_label,  # keep legend name as before
+                meta=root_label_wrapped,  # wrapped version for hover
                 showlegend=showlegend,
                 mode="lines",
+                hoverinfo="skip" if not showhover else None,
                 hovertemplate=(
-                    "<b>%{fullData.name}</b><br>"
+                    "<b>%{meta}</b><br>"
                     "Year: %{x}<br>"
                     f"{method_label}: %{{y:.6g}}<extra></extra>"
-                ),
+                ) if showhover else None,
                 **(
                     {"stackgroup": "one"}
                     if stacked
@@ -380,6 +393,10 @@ def _apply_base_layout(
         height=height,
         template="plotly_white",
         hovermode="x unified",
+        hoverlabel=dict(
+            align="left",
+            font=dict(size=11),
+        ),
         title=dict(
             text=title,
             x=0.5,
@@ -693,6 +710,47 @@ def _characterized_inventory_to_results(
 
     return results
 
+def _wrap_hover_label(text: str, max_chars: int = 45) -> str:
+    """
+    Wrap text for Plotly hoverlabels by inserting <br> at word boundaries.
+
+    Plotly hoverlabels don't support fixed pixel widths reliably; wrapping the
+    content is the most consistent way to keep hover popups narrow.
+    """
+    if not text:
+        return ""
+
+    # Normalize separators so we can wrap nicely around them
+    # (optional but helps LCA-style labels)
+    t = (
+        str(text)
+        .replace(" | ", " | ")
+        .replace("|", " | ")
+    )
+
+    words = t.split()
+    lines: list[str] = []
+    current: list[str] = []
+    current_len = 0
+
+    for w in words:
+        w_len = len(w) + (1 if current else 0)
+        if current and (current_len + w_len) > max_chars:
+            lines.append(" ".join(current))
+            current = [w]
+            current_len = len(w)
+        else:
+            current.append(w)
+            current_len += w_len
+
+    if current:
+        lines.append(" ".join(current))
+
+    # Extra nicety: encourage breaks after separators
+    joined = "<br>".join(lines)
+    joined = joined.replace(" | ", " |<br>")
+    return joined
+
 
 def plot_temporal_scores(
     results_by_year: Union[
@@ -853,6 +911,7 @@ def plot_temporal_scores(
         method_label=method_label,
         stacked=stacked,
         showlegend_roots=legend_roots,
+        showhover_roots=legend_roots,
     )
 
     cum_vals = None

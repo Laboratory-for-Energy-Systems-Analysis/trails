@@ -6,7 +6,7 @@ from typing import Any, Dict, List, TYPE_CHECKING
 import bw2calc as bc
 import numpy as np
 from scikits.umfpack import UmfpackWarning
-from tqdm.auto import tqdm
+from tqdm import tqdm
 
 from .bw_interface import (
     _extract_supply_fast,
@@ -21,6 +21,7 @@ if TYPE_CHECKING:
     from .trails import Trails
 
 warnings.filterwarnings("ignore", category=UmfpackWarning)
+warnings.filterwarnings("ignore", module="scikits")
 
 
 def lca_static_simple(
