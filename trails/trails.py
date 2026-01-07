@@ -433,11 +433,10 @@ class Trails:
 
         for offset, weight in offsets_and_weights:
             raw_year = year + offset
-            y_eff = self._map_year_to_scenario_year(raw_year)
 
             self._add_demand_entry(
                 demand,
-                y_eff,
+                int(raw_year),
                 product_index,
                 child_amount * float(weight),
             )
@@ -578,7 +577,7 @@ class Trails:
                 child_amount = self._child_amount(amount, exchange_value)
                 if child_amount != 0.0:
                     self._add_demand_entry(
-                        demand, int(scenario_year), product_index, float(child_amount)
+                        demand, int(year), product_index, float(child_amount)
                     )
                 continue
 
@@ -1612,5 +1611,5 @@ class Trails:
                 continue
 
             self._add_demand_entry(
-                demand, y_eff, int(product_index), weighted_child_amount
+                demand, int(raw_year), int(product_index), weighted_child_amount
             )
