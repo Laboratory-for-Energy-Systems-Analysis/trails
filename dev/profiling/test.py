@@ -6,7 +6,7 @@ from trails.logging import configure_trails_logging, trails_log_context
 configure_trails_logging(file_level=logging.DEBUG)
 
 # dp = Package("datapackage.json")
-dp = Package("/Users/romain/GitHub/premise/dev/trails_2025-12-31.zip")
+dp = Package("/Users/romain/GitHub/premise/dev/trails_2026-01-07.zip")
 trails = Trails(dp)
 
 methods = [
@@ -15,12 +15,13 @@ methods = [
 
 ref_year = 2050
 
-results_by_year_ICEV, provenance = lca(
-    trails,
+trails.lca(
     start_year=ref_year,
     start_act_idx=27827,
     methods=methods,
     max_depth=1,
     return_provenance=True,
     show_progress=True,
+    min_amount=1e-18,
+    debug=False
 )

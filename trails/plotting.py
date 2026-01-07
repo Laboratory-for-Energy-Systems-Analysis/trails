@@ -17,26 +17,25 @@ from .utils import _format_path_label, _format_path_label_with_years
 def _build_activity_label_map(trails: Trails) -> dict[int, str]:
     """Build a mapping of activity indices to display labels.
 
-    :param trails: Trails instance with activity metadata.
-    :type trails: Trails
-    :returns: Mapping from activity index to label.
-    :rtype: dict[int, str]
+    For plot_temporal_scores we want labels to show ONLY the reference product
+    (used in both legend and hover).
     """
-    labels = {}
+    labels: dict[int, str] = {}
     for scen_label, mapping in trails.activity_indices.items():
         for idx, meta in mapping.items():
-            if idx not in labels:
-                name = meta.get("name") or f"Activity {idx}"
-                rp = meta.get("reference product")
-                loc = meta.get("location")
+            if idx in labels:
+                continue
 
-                label = name
-                if rp:
-                    label += f" | {rp}"
-                if loc:
-                    label += f" ({loc})"
-                labels[idx] = label
+            rp = (meta.get("reference product") or "").strip()
+            if rp:
+                labels[idx] = rp
+            else:
+                # Fallback if reference product missing
+                name = (meta.get("name") or "").strip()
+                labels[idx] = name if name else f"Activity {idx}"
+
     return labels
+
 
 
 def _build_flow_label_map(trails: Trails) -> dict[int, str]:
