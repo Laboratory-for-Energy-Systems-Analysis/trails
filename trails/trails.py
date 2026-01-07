@@ -64,8 +64,7 @@ class Trails:
         self.B: Optional[sparse.COO] = None
         self.inventory: Optional[xr.DataArray] = None
         self.characterized_inventory: Optional[xr.DataArray] = None
-        self.static_inventory: Optional[xr.DataArray] = None
-        self.static_characterized_inventory: Optional[xr.DataArray] = None
+        self.static_score: Optional[float] = None
         self._inventory_years: Optional[np.ndarray] = None
         self._inventory_year_index: dict[int, int] = {}
         self._inventory_coords: Optional[list[list[np.ndarray]]] = None
@@ -147,8 +146,7 @@ class Trails:
         self._inventory_data = []
         self.inventory = None
         self.characterized_inventory = None
-        self.static_inventory = None
-        self.static_characterized_inventory = None
+        self.static_score = None
         self.provenance = None
 
     def _append_inventory_entries(
@@ -504,6 +502,26 @@ class Trails:
         from .lca import lca as lca_fn
 
         return lca_fn(self, *args, **kwargs)
+
+    def static_lca(
+        self,
+        year: int,
+        act_idx: int,
+        methods: list[str],
+        amount: float = 1.0,
+        debug: bool = False,
+    ) -> None:
+        """Run static LCA using this Trails instance."""
+        from .lca import lca_static_simple
+
+        return lca_static_simple(
+            trails=self,
+            year=int(year),
+            fu_act_idx=int(act_idx),
+            methods=methods,
+            amount=float(amount),
+            debug=debug,
+        )
 
     def expand_temporal_exchanges(
         self,
