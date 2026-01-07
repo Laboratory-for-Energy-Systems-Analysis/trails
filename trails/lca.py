@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 import warnings
-from typing import Any, Dict, List
+from typing import Any, Dict, List, TYPE_CHECKING
 
 import bw2calc as bc
 import numpy as np
@@ -14,7 +16,9 @@ from .bw_interface import (
     build_datapackage_for_year_from_trails,
 )
 from .characterization import build_characterized_inventory
-from .trails import Trails
+
+if TYPE_CHECKING:
+    from .trails import Trails
 
 warnings.filterwarnings("ignore", category=UmfpackWarning)
 

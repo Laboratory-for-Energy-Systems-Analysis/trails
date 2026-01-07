@@ -39,30 +39,6 @@ def _build_activity_label_map(trails: Trails) -> dict[int, str]:
     return labels
 
 
-def _activity_label_map(trails: Trails) -> dict[int, str]:
-    """Build a mapping of activity indices to display labels.
-
-    :param trails: Trails instance with activity metadata.
-    :type trails: Trails
-    :returns: Mapping from activity index to label.
-    :rtype: dict[int, str]
-    """
-    labels = {}
-    for scen_label, mapping in trails.activity_indices.items():
-        for idx, meta in mapping.items():
-            if idx not in labels:
-                name = meta.get("name") or f"Activity {idx}"
-                rp = meta.get("reference product")
-                loc = meta.get("location")
-                label = name
-                if rp:
-                    label += f" | {rp}"
-                if loc:
-                    label += f" ({loc})"
-                labels[idx] = label
-    return labels
-
-
 def _select_years_from_results(
     results_by_year: dict[int, dict[str, Any]],
     year_range: tuple[int, int] | None,
@@ -1896,7 +1872,7 @@ def plot_traversal_grid_flow(
     acts = _collect_activities(
         edges_by_depth, trails, depths_list, include_all_activities
     )
-    idx_to_label = _activity_label_map(trails)
+    idx_to_label = _build_activity_label_map(trails)
     act_to_row = {act: i for i, act in enumerate(acts)}
 
     year_min, year_max, years_global = _collect_global_years(
