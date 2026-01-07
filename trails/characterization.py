@@ -7,6 +7,7 @@ import sparse
 import xarray as xr
 
 from .lcia import get_lcia_methods
+
 if TYPE_CHECKING:
     from .trails import Trails
 
