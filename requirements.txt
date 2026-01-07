@@ -9,3 +9,4 @@ bw2calc
 pyprind
 plotly
 tqdm
+xarray
