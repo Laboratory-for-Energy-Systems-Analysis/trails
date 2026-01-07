@@ -753,6 +753,7 @@ class Trails:
         supply_by_activity: Dict[int, float],
         *,
         min_amount: float = 0.0,
+        store_activity: int | None = None,
         use_temporal_distributions: bool = True,
         debug: bool = False,
     ) -> None:
@@ -773,6 +774,7 @@ class Trails:
           - No TD: anchor to scenario_year of B slice.
           - TD + ported: distribute anchor-year scaled amount across pulse years.
           - TD + matrix: read B at each pulse-year, multiply by supply and weight.
+          - Optional store_activity: attribute biosphere flows to a different activity index.
         """
         # ---------------------------
         # Early exits / slice resolve
@@ -917,6 +919,7 @@ class Trails:
                 continue
 
             a = int(act_idx)
+            inventory_act = int(store_activity) if store_activity is not None else a
             if a < 0 or a + 1 >= len(row_ptr):
                 continue
 
@@ -948,11 +951,11 @@ class Trails:
             if not bio_td:
                 if keep_full is None:
                     self._append_inventory_entries(
-                        a, base_year, flows_full, scaled_full
+                        inventory_act, base_year, flows_full, scaled_full
                     )
                 else:
                     self._append_inventory_entries(
-                        a,
+                        inventory_act,
                         base_year,
                         flows_full[keep_full],
                         scaled_full[keep_full],
@@ -1004,7 +1007,7 @@ class Trails:
                     idx = no_td_idx[keep_full[no_td_idx]]
                 if idx.size:
                     self._append_inventory_entries(
-                        a, base_year, flows_full[idx], scaled_full[idx]
+                        inventory_act, base_year, flows_full[idx], scaled_full[idx]
                     )
 
             # ---------------------------
@@ -1063,7 +1066,9 @@ class Trails:
                             f_use = f_arr
                             c_use = contrib
 
-                        self._append_inventory_entries(a, raw_year, f_use, c_use)
+                        self._append_inventory_entries(
+                            inventory_act, raw_year, f_use, c_use
+                        )
 
             # ---------------------------
             # 3) Matrix-sourced TD: keep semantics (year-dependent values)
@@ -1117,7 +1122,7 @@ class Trails:
                             continue
 
                         self._append_inventory_entries(
-                            a,
+                            inventory_act,
                             raw_year,
                             np.array([f], dtype=np.int64),
                             np.array([contrib]),
