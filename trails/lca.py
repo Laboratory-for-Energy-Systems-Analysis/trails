@@ -33,6 +33,7 @@ def lca_static_simple(
 ) -> None:
     """Run a static LCA for a single functional unit and year."""
     trails.reset_inventory()
+    trails.static_score = None
 
     dp, _, _, _ = build_datapackage_for_year_from_trails(
         trails=trails,
@@ -55,14 +56,15 @@ def lca_static_simple(
         base_year=int(year),
         supply_by_activity=supply_total,
         min_amount=0.0,
-        use_temporal_distributions=True,
+        use_temporal_distributions=False,
         debug=debug,
     )
 
     trails.finalize_inventory()
-    build_characterized_inventory(trails=trails, methods=methods, char_cache={})
-    trails.static_inventory = trails.inventory
-    trails.static_characterized_inventory = trails.characterized_inventory
+    characterized = build_characterized_inventory(
+        trails=trails, methods=methods, char_cache={}
+    )
+    trails.static_score = float(characterized.data.sum())
 
 
 def lca(
