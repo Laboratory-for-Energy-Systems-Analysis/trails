@@ -61,6 +61,8 @@ def lca_static_simple(
 
     trails.finalize_inventory()
     build_characterized_inventory(trails=trails, methods=methods, char_cache={})
+    trails.static_inventory = trails.inventory
+    trails.static_characterized_inventory = trails.characterized_inventory
 
 
 def lca(

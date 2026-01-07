@@ -39,6 +39,33 @@ def _build_activity_label_map(trails: Trails) -> dict[int, str]:
     return labels
 
 
+def _build_flow_label_map(trails: Trails) -> dict[int, str]:
+    """Build a mapping of biosphere flow indices to display labels.
+
+    :param trails: Trails instance with biosphere metadata.
+    :type trails: Trails
+    :returns: Mapping from flow index to label.
+    :rtype: dict[int, str]
+    """
+    labels = {}
+    for scen_label, mapping in trails.biosphere_indices.items():
+        for idx, meta in mapping.items():
+            if idx not in labels:
+                name = meta.get("name") or f"Flow {idx}"
+                compartment = meta.get("compartment") or ""
+                subcompartment = meta.get("subcompartment") or ""
+                unit = meta.get("unit") or ""
+
+                label = name
+                if compartment or subcompartment:
+                    parts = [p for p in (compartment, subcompartment) if p]
+                    label += " | " + "/".join(parts)
+                if unit:
+                    label += f" ({unit})"
+                labels[idx] = label
+    return labels
+
+
 def _select_years_from_results(
     results_by_year: dict[int, dict[str, Any]],
     year_range: tuple[int, int] | None,
@@ -69,7 +96,9 @@ def _select_years_from_results(
 
 
 def _collect_root_scores(
-    results_by_year: dict[int, dict[str, Any]], years: list[int]
+    results_by_year: dict[int, dict[str, Any]],
+    years: list[int],
+    score_key: str,
 ) -> list[int]:
     """Collect unique root indices with scores across years.
 
@@ -84,11 +113,11 @@ def _collect_root_scores(
         {
             root
             for year in years
-            for root in results_by_year[year].get("scores_by_first_level_child", {})
+            for root in results_by_year[year].get(score_key, {})
         }
     )
     if not all_roots:
-        raise ValueError("No scores_by_first_level_child found.")
+        raise ValueError(f"No {score_key} found.")
     return all_roots
 
 
@@ -96,6 +125,7 @@ def _build_score_matrix(
     results_by_year: dict[int, dict[str, Any]],
     years: list[int],
     all_roots: list[int],
+    score_key: str,
 ) -> np.ndarray:
     """Build a score matrix of shape ``(years, roots)``.
 
@@ -110,7 +140,7 @@ def _build_score_matrix(
     """
     Y = np.zeros((len(years), len(all_roots)), dtype=float)
     for yi, year in enumerate(years):
-        spr = results_by_year[year].get("scores_by_first_level_child", {})
+        spr = results_by_year[year].get(score_key, {})
         for ri, root in enumerate(all_roots):
             Y[yi, ri] = spr.get(root, 0.0)
     return Y
@@ -124,6 +154,7 @@ def _add_root_traces(
     idx_to_label: dict[int, str],
     method_label: str,
     stacked: bool,
+    showlegend_roots: Optional[set[int]] = None,
 ) -> None:
     """Add root score traces to a Plotly figure.
 
@@ -141,6 +172,8 @@ def _add_root_traces(
     :type method_label: str
     :param stacked: Whether to stack traces.
     :type stacked: bool
+    :param showlegend_roots: Optional set of root ids to show in the legend.
+    :type showlegend_roots: set[int] | None
     """
     alpha = 0.4 if not stacked else 1.0
 
@@ -155,11 +188,15 @@ def _add_root_traces(
         return idx_to_label.get(idx, f"Activity {idx}")
 
     for ri, root in enumerate(all_roots):
+        showlegend = True
+        if showlegend_roots is not None:
+            showlegend = root in showlegend_roots
         fig.add_trace(
             go.Scatter(
                 x=years,
                 y=Y[:, ri],
                 name=label_for_root(root),
+                showlegend=showlegend,
                 mode="lines",
                 hovertemplate=(
                     "<b>%{fullData.name}</b><br>"
@@ -610,6 +647,7 @@ def to_impact_year_results(
 
 def _characterized_inventory_to_results(
     characterized_inventory: xr.DataArray,
+    by_flow: bool = False,
 ) -> Dict[int, Dict[str, Any]]:
     """Convert a characterized inventory DataArray into impact-year results."""
     if "flow" not in characterized_inventory.dims:
@@ -625,11 +663,16 @@ def _characterized_inventory_to_results(
     if not isinstance(data, sparse.COO):
         data = sparse.COO.from_numpy(np.asarray(data))
 
-    summed = data.sum(axis=1)  # activity x year
+    if by_flow:
+        summed = data.sum(axis=0)  # flow x year
+        score_key = "scores_by_flow"
+    else:
+        summed = data.sum(axis=1)  # activity x year
+        score_key = "scores_by_first_level_child"
     years = characterized_inventory.coords["year"].values
 
     results: Dict[int, Dict[str, Any]] = {
-        int(year): {"scores": 0.0, "scores_by_first_level_child": {}} for year in years
+        int(year): {"scores": 0.0, score_key: {}} for year in years
     }
 
     if isinstance(summed, sparse.COO):
@@ -638,7 +681,7 @@ def _characterized_inventory_to_results(
         values = summed.data
         for act_idx, year_idx, val in zip(act_coords, year_coords, values):
             year = int(years[int(year_idx)])
-            results[year]["scores_by_first_level_child"][int(act_idx)] = float(val)
+            results[year][score_key][int(act_idx)] = float(val)
             results[year]["scores"] += float(val)
     else:
         for year_idx, year in enumerate(years):
@@ -649,7 +692,7 @@ def _characterized_inventory_to_results(
             for act_idx, val in enumerate(col):
                 if val == 0.0:
                     continue
-                year_result["scores_by_first_level_child"][int(act_idx)] = float(val)
+                year_result[score_key][int(act_idx)] = float(val)
                 year_result["scores"] += float(val)
 
     return results
@@ -664,6 +707,8 @@ def plot_temporal_scores(
     method_label: str = "Impact score",
     cumulative: bool = False,
     stacked: bool = True,
+    legend_top_n: int = 5,
+    show_flow_contributions: bool = False,
     width: Optional[int] = None,
     height: Optional[int] = None,
     year_tick: int = 1,
@@ -700,6 +745,10 @@ def plot_temporal_scores(
     :type cumulative: bool
     :param stacked: Whether to stack root traces.
     :type stacked: bool
+    :param legend_top_n: Number of top-contributing items to show in legend.
+    :type legend_top_n: int
+    :param show_flow_contributions: Whether to plot flow contributions instead of activities.
+    :type show_flow_contributions: bool
     :param width: Figure width in pixels.
     :type width: int | None
     :param height: Figure height in pixels.
@@ -751,19 +800,29 @@ def plot_temporal_scores(
         results_by_year = trails.characterized_inventory
 
     if isinstance(results_by_year, xr.DataArray):
-        results_by_year = _characterized_inventory_to_results(results_by_year)
+        results_by_year = _characterized_inventory_to_results(
+            results_by_year, by_flow=show_flow_contributions
+        )
     else:
         results_by_year = to_impact_year_results(results_by_year)
 
     if year_tick < 1:
         raise ValueError("year_tick must be >= 1")
 
+    score_key = (
+        "scores_by_flow" if show_flow_contributions else "scores_by_first_level_child"
+    )
     years = _select_years_from_results(results_by_year, year_range)
-    all_roots = _collect_root_scores(results_by_year, years)
+    if not any(score_key in results_by_year[year] for year in years):
+        raise ValueError(f"Expected {score_key} in results_by_year for plotting.")
 
-    Y = _build_score_matrix(results_by_year, years, all_roots)
+    all_roots = _collect_root_scores(results_by_year, years, score_key)
+
+    Y_raw = _build_score_matrix(results_by_year, years, all_roots, score_key)
     if cumulative:
-        Y = np.cumsum(Y, axis=0)
+        Y = np.cumsum(Y_raw, axis=0)
+    else:
+        Y = Y_raw
 
     total_raw = Y.sum(axis=1)
 
@@ -772,7 +831,21 @@ def plot_temporal_scores(
         if static_score is not None:
             static_score = max(static_score, log_eps)
 
-    idx_to_label = _build_activity_label_map(trails)
+    idx_to_label = (
+        _build_flow_label_map(trails)
+        if show_flow_contributions
+        else _build_activity_label_map(trails)
+    )
+
+    if legend_top_n < 0:
+        raise ValueError("legend_top_n must be >= 0")
+    if legend_top_n == 0:
+        legend_roots = set()
+    else:
+        contributions = np.sum(np.abs(Y_raw), axis=0)
+        top_count = min(legend_top_n, len(all_roots))
+        top_idx = np.argsort(contributions)[::-1][:top_count]
+        legend_roots = {all_roots[i] for i in top_idx}
 
     fig = go.Figure()
     _add_root_traces(
@@ -783,6 +856,7 @@ def plot_temporal_scores(
         idx_to_label=idx_to_label,
         method_label=method_label,
         stacked=stacked,
+        showlegend_roots=legend_roots,
     )
 
     cum_vals = None
@@ -807,7 +881,7 @@ def plot_temporal_scores(
             method_label=method_label,
         )
 
-    n_items = len(all_roots)
+    n_items = len(legend_roots)
     if show_cumulative_axis and show_cumulative_in_legend:
         n_items += 1
     if static_score is not None:

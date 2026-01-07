@@ -64,6 +64,8 @@ class Trails:
         self.B: Optional[sparse.COO] = None
         self.inventory: Optional[xr.DataArray] = None
         self.characterized_inventory: Optional[xr.DataArray] = None
+        self.static_inventory: Optional[xr.DataArray] = None
+        self.static_characterized_inventory: Optional[xr.DataArray] = None
         self._inventory_years: Optional[np.ndarray] = None
         self._inventory_year_index: dict[int, int] = {}
         self._inventory_coords: Optional[list[list[np.ndarray]]] = None
@@ -145,6 +147,8 @@ class Trails:
         self._inventory_data = []
         self.inventory = None
         self.characterized_inventory = None
+        self.static_inventory = None
+        self.static_characterized_inventory = None
         self.provenance = None
 
     def _append_inventory_entries(
