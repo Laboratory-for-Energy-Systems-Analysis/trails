@@ -639,7 +639,9 @@ def _characterized_inventory_to_results(
     if "flow" not in characterized_inventory.dims:
         raise ValueError("characterized_inventory must include a 'flow' dimension.")
     if "activity" not in characterized_inventory.dims:
-        raise ValueError("characterized_inventory must include an 'activity' dimension.")
+        raise ValueError(
+            "characterized_inventory must include an 'activity' dimension."
+        )
     if "year" not in characterized_inventory.dims:
         raise ValueError("characterized_inventory must include a 'year' dimension.")
 
@@ -678,7 +680,9 @@ def _characterized_inventory_to_results(
 
 
 def plot_temporal_scores(
-    results_by_year: Union[Dict[int, Dict[str, Any]], Dict[str, Any], xr.DataArray, None],
+    results_by_year: Union[
+        Dict[int, Dict[str, Any]], Dict[str, Any], xr.DataArray, None
+    ],
     trails: Trails,
     title: str = "Temporal impacts by responsible activity",
     method_label: str = "Impact score",
