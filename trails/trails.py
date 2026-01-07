@@ -56,6 +56,7 @@ class Trails:
         self.package = package
         self.value_dtype = value_dtype
         self.index_dtype = index_dtype
+        self.debug = debug
 
         self.scenario_labels: List[str] = []
         self.scenario_index: Dict[str, int] = {}
@@ -139,7 +140,20 @@ class Trails:
 
     def reset_inventory(self) -> None:
         """Initialize inventory builders for sparse 3D inventory storage."""
-        years = np.array(self.years_int, dtype=int)
+        min_offset, max_offset = self._inventory_offset_bounds()
+        years = np.arange(
+            int(self.min_year + min_offset),
+            int(self.max_year + max_offset) + 1,
+            dtype=int,
+        )
+        if self.debug:
+            logger.debug(
+                "reset_inventory: years [%d..%d] (min_offset=%d max_offset=%d)",
+                int(years[0]) if years.size else -1,
+                int(years[-1]) if years.size else -1,
+                int(min_offset),
+                int(max_offset),
+            )
         self._inventory_years = years
         self._inventory_year_index = {int(y): int(i) for i, y in enumerate(years)}
         self._inventory_coords = [[], [], []]
@@ -148,6 +162,25 @@ class Trails:
         self.characterized_inventory = None
         self.static_score = None
         self.provenance = None
+
+    def _inventory_offset_bounds(self) -> tuple[int, int]:
+        """Return min/max year offsets implied by temporal exchange metadata."""
+        min_offset = 0
+        max_offset = 0
+        for exchanges in (
+            self.temporal_technosphere_exchanges,
+            self.temporal_biosphere_exchanges,
+        ):
+            if not exchanges:
+                continue
+            for tex in exchanges.values():
+                offset_min = getattr(tex, "offset_min", None)
+                offset_max = getattr(tex, "offset_max", None)
+                if offset_min is not None:
+                    min_offset = min(min_offset, int(offset_min))
+                if offset_max is not None:
+                    max_offset = max(max_offset, int(offset_max))
+        return min_offset, max_offset
 
     def _append_inventory_entries(
         self, act_idx: int, year: int, flows: np.ndarray, values: np.ndarray
@@ -159,6 +192,13 @@ class Trails:
 
         year_idx = self._inventory_year_index.get(int(year))
         if year_idx is None:
+            if self.debug:
+                logger.debug(
+                    "append_inventory: year %d not in inventory range [%s..%s]",
+                    int(year),
+                    int(self._inventory_years[0]) if self._inventory_years is not None else -1,
+                    int(self._inventory_years[-1]) if self._inventory_years is not None else -1,
+                )
             return
 
         flows = np.asarray(flows, dtype=np.int64)
@@ -433,11 +473,16 @@ class Trails:
 
         for offset, weight in offsets_and_weights:
             raw_year = year + offset
-            y_eff = self._map_year_to_scenario_year(raw_year)
 
+            if debug:
+                logger.debug(
+                    "expand_temporal_exchanges: ported pulse raw_year=%d weight=%g",
+                    int(raw_year),
+                    float(weight),
+                )
             self._add_demand_entry(
                 demand,
-                y_eff,
+                int(raw_year),
                 product_index,
                 child_amount * float(weight),
             )
@@ -578,7 +623,7 @@ class Trails:
                 child_amount = self._child_amount(amount, exchange_value)
                 if child_amount != 0.0:
                     self._add_demand_entry(
-                        demand, int(scenario_year), product_index, float(child_amount)
+                        demand, int(year), product_index, float(child_amount)
                     )
                 continue
 
@@ -728,6 +773,15 @@ class Trails:
         if biosphere_slice is None:
             return
         scenario_year, t, B_t, n_flows = biosphere_slice
+        if debug or self.debug:
+            logger.debug(
+                "accumulate_bio: base_year=%d scenario_year=%d t=%d inv_years=[%s..%s]",
+                int(base_year),
+                int(scenario_year),
+                int(t),
+                int(self._inventory_years[0]) if self._inventory_years is not None else -1,
+                int(self._inventory_years[-1]) if self._inventory_years is not None else -1,
+            )
 
         if not supply_by_activity:
             return
@@ -739,7 +793,7 @@ class Trails:
         scenario_index_get = self.scenario_index.get
         map_year_to_scenario = self._map_year_to_scenario_year
 
-        base_scenario_year = int(scenario_year)
+        base_year = int(base_year)
         min_amt = float(min_amount) if min_amount else 0.0
 
         # ---------------------------
@@ -878,12 +932,12 @@ class Trails:
             if not bio_td:
                 if keep_full is None:
                     self._append_inventory_entries(
-                        a, base_scenario_year, flows_full, scaled_full
+                        a, base_year, flows_full, scaled_full
                     )
                 else:
                     self._append_inventory_entries(
                         a,
-                        base_scenario_year,
+                        base_year,
                         flows_full[keep_full],
                         scaled_full[keep_full],
                     )
@@ -934,7 +988,7 @@ class Trails:
                     idx = no_td_idx[keep_full[no_td_idx]]
                 if idx.size:
                     self._append_inventory_entries(
-                        a, base_scenario_year, flows_full[idx], scaled_full[idx]
+                        a, base_year, flows_full[idx], scaled_full[idx]
                     )
 
             # ---------------------------
@@ -973,7 +1027,14 @@ class Trails:
                         if weight == 0.0:
                             continue
 
-                        y_eff = map_year_cached(base_scenario_year + int(offset))
+                        raw_year = base_year + int(offset)
+                        y_eff = map_year_cached(raw_year)
+                        if debug:
+                            logger.debug(
+                                "accumulate_bio: ported pulse raw_year=%d mapped_year=%d",
+                                int(raw_year),
+                                int(y_eff),
+                            )
                         contrib = s_arr * float(weight)
 
                         if min_amt:
@@ -986,7 +1047,7 @@ class Trails:
                             f_use = f_arr
                             c_use = contrib
 
-                        self._append_inventory_entries(a, y_eff, f_use, c_use)
+                        self._append_inventory_entries(a, raw_year, f_use, c_use)
 
             # ---------------------------
             # 3) Matrix-sourced TD: keep semantics (year-dependent values)
@@ -1013,7 +1074,14 @@ class Trails:
                         if weight == 0.0:
                             continue
 
-                        y_eff = map_year_cached(base_scenario_year + int(offset))
+                        raw_year = base_year + int(offset)
+                        y_eff = map_year_cached(raw_year)
+                        if debug:
+                            logger.debug(
+                                "accumulate_bio: matrix pulse raw_year=%d mapped_year=%d",
+                                int(raw_year),
+                                int(y_eff),
+                            )
 
                         t_eff = t_eff_cache.get(y_eff)
                         if t_eff is None and y_eff not in t_eff_cache:
@@ -1034,7 +1102,7 @@ class Trails:
 
                         self._append_inventory_entries(
                             a,
-                            y_eff,
+                            raw_year,
                             np.array([f], dtype=np.int64),
                             np.array([contrib]),
                         )
@@ -1611,6 +1679,13 @@ class Trails:
             if weighted_child_amount == 0.0:
                 continue
 
+            if debug:
+                logger.debug(
+                    "expand_temporal_exchanges: matrix pulse raw_year=%d mapped_year=%d weight=%g",
+                    int(raw_year),
+                    int(y_eff),
+                    float(weight),
+                )
             self._add_demand_entry(
-                demand, y_eff, int(product_index), weighted_child_amount
+                demand, int(raw_year), int(product_index), weighted_child_amount
             )
