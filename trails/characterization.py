@@ -1,13 +1,15 @@
 from __future__ import annotations
 
-from typing import List
+from typing import List, TYPE_CHECKING
 
 import numpy as np
 import sparse
 import xarray as xr
 
 from .lcia import get_lcia_methods
-from .trails import Trails
+
+if TYPE_CHECKING:
+    from .trails import Trails
 
 
 def _build_flowkey_to_flowid(trails: Trails) -> dict[tuple, int]:

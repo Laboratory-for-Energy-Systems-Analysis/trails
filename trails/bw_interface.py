@@ -1,9 +1,12 @@
-from typing import Any, Dict, Tuple
+from __future__ import annotations
+
+from typing import Any, Dict, Tuple, TYPE_CHECKING
 
 import bw_processing as bwp
 import numpy as np
 
-from .trails import Trails
+if TYPE_CHECKING:
+    from .trails import Trails
 
 
 def _ij_from_coords(X_t: Any) -> tuple[np.ndarray, np.ndarray]:
