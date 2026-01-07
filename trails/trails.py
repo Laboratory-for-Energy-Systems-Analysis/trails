@@ -151,7 +151,9 @@ class Trails:
         self, act_idx: int, year: int, flows: np.ndarray, values: np.ndarray
     ) -> None:
         if self._inventory_coords is None or self._inventory_data is None:
-            raise RuntimeError("Inventory builders not initialized. Call reset_inventory().")
+            raise RuntimeError(
+                "Inventory builders not initialized. Call reset_inventory()."
+            )
 
         year_idx = self._inventory_year_index.get(int(year))
         if year_idx is None:
@@ -187,19 +189,21 @@ class Trails:
         n_flows = int(self.B.shape[2])
         years = self._inventory_years
         if years is None:
-            raise RuntimeError("Inventory years not initialized. Call reset_inventory().")
+            raise RuntimeError(
+                "Inventory years not initialized. Call reset_inventory()."
+            )
 
         if self._inventory_coords is None or self._inventory_data is None:
-            raise RuntimeError("Inventory builders not initialized. Call reset_inventory().")
+            raise RuntimeError(
+                "Inventory builders not initialized. Call reset_inventory()."
+            )
 
         if self._inventory_data:
             coords = np.vstack(
                 [np.concatenate(part) for part in self._inventory_coords]
             )
             data = np.concatenate(self._inventory_data)
-            inv = sparse.COO(
-                coords, data, shape=(n_activities, n_flows, len(years))
-            )
+            inv = sparse.COO(coords, data, shape=(n_activities, n_flows, len(years)))
         else:
             inv = sparse.COO.zeros(
                 (n_activities, n_flows, len(years)), dtype=self.value_dtype
