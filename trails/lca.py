@@ -86,8 +86,13 @@ def lca(
     debug: bool = False,
     return_provenance: bool = False,
     use_temporal_distributions: bool = True,
+    attribute_to_roots: bool = False,
 ) -> None:
-    """Run temporal LCA for a functional unit and year."""
+    """Run temporal LCA for a functional unit and year.
+
+    When ``attribute_to_roots`` is enabled, biosphere impacts are accumulated under
+    the first-level root activities while still stored in the Trails inventory arrays.
+    """
 
     def _run_temporal_traversal(
         trails: Trails,
@@ -166,6 +171,11 @@ def lca(
         return injected_supply
 
     if not use_temporal_distributions:
+        if attribute_to_roots:
+            warnings.warn(
+                "attribute_to_roots is ignored when use_temporal_distributions=False.",
+                stacklevel=2,
+            )
         return lca_static_simple(
             trails=trails,
             year=int(start_year),
@@ -183,7 +193,9 @@ def lca(
     y0 = int(start_year)
     amt0 = float(amount)
 
-    if return_provenance:
+    need_provenance = bool(return_provenance or attribute_to_roots)
+
+    if need_provenance:
         (
             frontier,
             provenance,
@@ -230,6 +242,32 @@ def lca(
 
     dp_cache: Dict[tuple, Any] = {}
 
+    root_demands_by_year: dict[int, dict[int, dict[int, float]]] = {}
+    root_injected_by_year: dict[int, dict[int, dict[int, float]]] = {}
+
+    if attribute_to_roots:
+        for (y, a), total_amt in frontier.items():
+            root_map = provenance.get((y, a))
+            if not root_map:
+                root_map = {int(a): float(total_amt)}
+            year_bucket = root_demands_by_year.setdefault(int(y), {})
+            for root, amt in root_map.items():
+                if abs(float(amt)) <= float(min_amount):
+                    continue
+                root_bucket = year_bucket.setdefault(int(root), {})
+                root_bucket[int(a)] = root_bucket.get(int(a), 0.0) + float(amt)
+
+        for (y, a), total_amt in injected_supply_by_year_act.items():
+            root_map = injected_supply_prov_by_year_act.get((y, a))
+            if not root_map:
+                root_map = {int(a): float(total_amt)}
+            year_bucket = root_injected_by_year.setdefault(int(y), {})
+            for root, amt in root_map.items():
+                if abs(float(amt)) <= float(min_amount):
+                    continue
+                root_bucket = year_bucket.setdefault(int(root), {})
+                root_bucket[int(a)] = root_bucket.get(int(a), 0.0) + float(amt)
+
     solve_iter = candidate_years
     if show_progress:
         solve_iter = tqdm(
@@ -267,34 +305,68 @@ def lca(
                 act_map.values(), dtype=np.int64, count=len(act_map)
             )
 
-        if act_ids is None or positions is None:
-            supply_total = _extract_supply_fast(lca_obj, min_amount)
+        if attribute_to_roots:
+            per_root_demands = root_demands_by_year.get(solve_year, {})
+            for root_act, root_demand in per_root_demands.items():
+                lca_obj.redo_lci(demand=root_demand)
+                if act_ids is None or positions is None:
+                    supply_total = _extract_supply_fast(lca_obj, min_amount)
+                else:
+                    supply_total = _extract_supply_fast_cached(
+                        lca_obj.supply_array, act_ids, positions, min_amount
+                    )
+
+                trails.accumulate_temporalized_biosphere_inventory(
+                    base_year=solve_year,
+                    supply_by_activity=supply_total,
+                    min_amount=float(min_amount),
+                    store_activity=int(root_act),
+                    use_temporal_distributions=True,
+                    debug=debug,
+                )
         else:
-            supply_total = _extract_supply_fast_cached(
-                lca_obj.supply_array, act_ids, positions, min_amount
-            )
+            if act_ids is None or positions is None:
+                supply_total = _extract_supply_fast(lca_obj, min_amount)
+            else:
+                supply_total = _extract_supply_fast_cached(
+                    lca_obj.supply_array, act_ids, positions, min_amount
+                )
 
-        trails.accumulate_temporalized_biosphere_inventory(
-            base_year=solve_year,
-            supply_by_activity=supply_total,
-            min_amount=float(min_amount),
-            use_temporal_distributions=True,
-            debug=debug,
-        )
-
-        injected_supply = _build_injected_supply(
-            injected_supply_by_year_act=injected_supply_by_year_act,
-            solve_year=solve_year,
-            min_amount=min_amount,
-        )
-        if injected_supply:
             trails.accumulate_temporalized_biosphere_inventory(
                 base_year=solve_year,
-                supply_by_activity=injected_supply,
+                supply_by_activity=supply_total,
                 min_amount=float(min_amount),
                 use_temporal_distributions=True,
                 debug=debug,
             )
+
+        if attribute_to_roots:
+            per_root_injected = root_injected_by_year.get(solve_year, {})
+            for root_act, injected_supply in per_root_injected.items():
+                if not injected_supply:
+                    continue
+                trails.accumulate_temporalized_biosphere_inventory(
+                    base_year=solve_year,
+                    supply_by_activity=injected_supply,
+                    min_amount=float(min_amount),
+                    store_activity=int(root_act),
+                    use_temporal_distributions=True,
+                    debug=debug,
+                )
+        else:
+            injected_supply = _build_injected_supply(
+                injected_supply_by_year_act=injected_supply_by_year_act,
+                solve_year=solve_year,
+                min_amount=min_amount,
+            )
+            if injected_supply:
+                trails.accumulate_temporalized_biosphere_inventory(
+                    base_year=solve_year,
+                    supply_by_activity=injected_supply,
+                    min_amount=float(min_amount),
+                    use_temporal_distributions=True,
+                    debug=debug,
+                )
 
     trails.finalize_inventory()
     build_characterized_inventory(trails=trails, methods=methods, char_cache={})
