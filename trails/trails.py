@@ -738,7 +738,7 @@ class Trails:
         scenario_index_get = self.scenario_index.get
         map_year_to_scenario = self._map_year_to_scenario_year
 
-        base_scenario_year = int(scenario_year)
+        base_year = int(base_year)
         min_amt = float(min_amount) if min_amount else 0.0
 
         # ---------------------------
@@ -877,12 +877,12 @@ class Trails:
             if not bio_td:
                 if keep_full is None:
                     self._append_inventory_entries(
-                        a, base_scenario_year, flows_full, scaled_full
+                        a, base_year, flows_full, scaled_full
                     )
                 else:
                     self._append_inventory_entries(
                         a,
-                        base_scenario_year,
+                        base_year,
                         flows_full[keep_full],
                         scaled_full[keep_full],
                     )
@@ -933,7 +933,7 @@ class Trails:
                     idx = no_td_idx[keep_full[no_td_idx]]
                 if idx.size:
                     self._append_inventory_entries(
-                        a, base_scenario_year, flows_full[idx], scaled_full[idx]
+                        a, base_year, flows_full[idx], scaled_full[idx]
                     )
 
             # ---------------------------
@@ -972,7 +972,8 @@ class Trails:
                         if weight == 0.0:
                             continue
 
-                        y_eff = map_year_cached(base_scenario_year + int(offset))
+                        raw_year = base_year + int(offset)
+                        y_eff = map_year_cached(raw_year)
                         contrib = s_arr * float(weight)
 
                         if min_amt:
@@ -985,7 +986,7 @@ class Trails:
                             f_use = f_arr
                             c_use = contrib
 
-                        self._append_inventory_entries(a, y_eff, f_use, c_use)
+                        self._append_inventory_entries(a, raw_year, f_use, c_use)
 
             # ---------------------------
             # 3) Matrix-sourced TD: keep semantics (year-dependent values)
@@ -1012,7 +1013,8 @@ class Trails:
                         if weight == 0.0:
                             continue
 
-                        y_eff = map_year_cached(base_scenario_year + int(offset))
+                        raw_year = base_year + int(offset)
+                        y_eff = map_year_cached(raw_year)
 
                         t_eff = t_eff_cache.get(y_eff)
                         if t_eff is None and y_eff not in t_eff_cache:
@@ -1033,7 +1035,7 @@ class Trails:
 
                         self._append_inventory_entries(
                             a,
-                            y_eff,
+                            raw_year,
                             np.array([f], dtype=np.int64),
                             np.array([contrib]),
                         )
