@@ -713,6 +713,61 @@ def _characterized_inventory_to_results(
     return results
 
 
+def _characterized_inventory_to_root_results(
+    characterized_inventory: xr.DataArray,
+) -> Dict[int, Dict[str, Any]]:
+    """Convert a characterized inventory with root activity dimension into results."""
+    if "flow" not in characterized_inventory.dims:
+        raise ValueError("characterized_inventory must include a 'flow' dimension.")
+    if "activity" not in characterized_inventory.dims:
+        raise ValueError(
+            "characterized_inventory must include an 'activity' dimension."
+        )
+    if "year" not in characterized_inventory.dims:
+        raise ValueError("characterized_inventory must include a 'year' dimension.")
+    if "root activity" not in characterized_inventory.dims:
+        raise ValueError(
+            "characterized_inventory must include a 'root activity' dimension."
+        )
+
+    data = characterized_inventory.data
+    if not isinstance(data, sparse.COO):
+        data = sparse.COO.from_numpy(np.asarray(data))
+
+    summed = data.sum(axis=(0, 1))  # year x root activity
+    years = characterized_inventory.coords["year"].values
+    roots = characterized_inventory.coords["root activity"].values
+    score_key = "scores_by_first_level_child"
+
+    results: Dict[int, Dict[str, Any]] = {
+        int(year): {"scores": 0.0, score_key: {}} for year in years
+    }
+
+    if isinstance(summed, sparse.COO):
+        year_coords = summed.coords[0]
+        root_coords = summed.coords[1]
+        values = summed.data
+        for year_idx, root_idx, val in zip(year_coords, root_coords, values):
+            year = int(years[int(year_idx)])
+            root = int(roots[int(root_idx)])
+            results[year][score_key][root] = float(val)
+            results[year]["scores"] += float(val)
+    else:
+        for year_idx, year in enumerate(years):
+            col = np.asarray(summed[year_idx, :]).ravel()
+            if col.size == 0:
+                continue
+            year_result = results[int(year)]
+            for root_idx, val in enumerate(col):
+                if val == 0.0:
+                    continue
+                root = int(roots[int(root_idx)])
+                year_result[score_key][root] = float(val)
+                year_result["scores"] += float(val)
+
+    return results
+
+
 def _wrap_hover_label(text: str, max_chars: int = 45) -> str:
     """
     Wrap text for Plotly hoverlabels by inserting <br> at word boundaries.
@@ -853,9 +908,20 @@ def plot_temporal_scores(
         results_by_year = trails.characterized_inventory
 
     if isinstance(results_by_year, xr.DataArray):
-        results_by_year = _characterized_inventory_to_results(
-            results_by_year, by_flow=show_flow_contributions
-        )
+        if "root activity" in results_by_year.dims:
+            if show_flow_contributions:
+                results_by_year = results_by_year.sum(dim="root activity")
+                results_by_year = _characterized_inventory_to_results(
+                    results_by_year, by_flow=True
+                )
+            else:
+                results_by_year = _characterized_inventory_to_root_results(
+                    results_by_year
+                )
+        else:
+            results_by_year = _characterized_inventory_to_results(
+                results_by_year, by_flow=show_flow_contributions
+            )
     else:
         results_by_year = to_impact_year_results(results_by_year)
 

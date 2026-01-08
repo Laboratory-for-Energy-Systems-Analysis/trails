@@ -36,7 +36,7 @@ def lca_static_simple(
     prev_inventory = trails.inventory
     prev_characterized = trails.characterized_inventory
 
-    trails.reset_inventory()
+    trails.reset_inventory(attribute_to_roots=attribute_to_roots)
     trails.static_score = None
 
     dp, _, _, _ = build_datapackage_for_year_from_trails(
@@ -91,7 +91,8 @@ def lca(
     """Run temporal LCA for a functional unit and year.
 
     When ``attribute_to_roots`` is enabled, biosphere impacts are accumulated under
-    the first-level root activities while still stored in the Trails inventory arrays.
+    the first-level root activities while stored in the Trails inventory arrays with
+    an added "root activity" dimension.
     """
 
     def _run_temporal_traversal(
@@ -185,7 +186,7 @@ def lca(
             debug=debug,
         )
 
-    trails.reset_inventory()
+    trails.reset_inventory(attribute_to_roots=attribute_to_roots)
 
     LEGACY_FU_DIRECT_ROOT = -1
 
