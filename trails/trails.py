@@ -1353,7 +1353,9 @@ class Trails:
           - Optional store_activity: attribute biosphere flows to a root activity index.
         """
         ctx = self._build_bio_accumulation_context(
-            base_year, use_temporal_distributions=use_temporal_distributions, debug=debug
+            base_year,
+            use_temporal_distributions=use_temporal_distributions,
+            debug=debug,
         )
         if ctx is None:
             return
@@ -1396,7 +1398,9 @@ class Trails:
         if not supplies:
             return
         ctx = self._build_bio_accumulation_context(
-            base_year, use_temporal_distributions=use_temporal_distributions, debug=debug
+            base_year,
+            use_temporal_distributions=use_temporal_distributions,
+            debug=debug,
         )
         if ctx is None:
             return
