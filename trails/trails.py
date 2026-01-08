@@ -330,7 +330,10 @@ class Trails:
 
         if flows_arr.size == 0 or vals_arr.size == 0 or acts_arr.size == 0:
             return
-        if flows_arr.shape[0] != vals_arr.shape[0] or flows_arr.shape[0] != acts_arr.shape[0]:
+        if (
+            flows_arr.shape[0] != vals_arr.shape[0]
+            or flows_arr.shape[0] != acts_arr.shape[0]
+        ):
             raise ValueError(
                 "act, flow, and value arrays must have the same length for bulk append."
             )
@@ -342,10 +345,7 @@ class Trails:
                     "year array must match act/flow/value length for bulk append."
                 )
             year_idx = np.array(
-                [
-                    self._inventory_year_index.get(int(y), -1)
-                    for y in years_arr
-                ],
+                [self._inventory_year_index.get(int(y), -1) for y in years_arr],
                 dtype=np.int64,
             )
         else:
@@ -424,9 +424,7 @@ class Trails:
                 np.asarray(self._inv_chunk_year, dtype=np.int64), lens
             )
 
-            coords_parts.append(
-                np.vstack([act_chunk, flows_chunk, year_chunk])
-            )
+            coords_parts.append(np.vstack([act_chunk, flows_chunk, year_chunk]))
             data_parts.append(data_chunk)
 
             if has_root:
@@ -437,12 +435,8 @@ class Trails:
 
         if self._inv_bulk_flow:
             act_bulk = np.concatenate(self._inv_bulk_act).astype(np.int64, copy=False)
-            flow_bulk = np.concatenate(self._inv_bulk_flow).astype(
-                np.int64, copy=False
-            )
-            year_bulk = np.concatenate(self._inv_bulk_year).astype(
-                np.int64, copy=False
-            )
+            flow_bulk = np.concatenate(self._inv_bulk_flow).astype(np.int64, copy=False)
+            year_bulk = np.concatenate(self._inv_bulk_year).astype(np.int64, copy=False)
             data_bulk = np.concatenate(self._inv_bulk_value)
             coords_parts.append(np.vstack([act_bulk, flow_bulk, year_bulk]))
             data_parts.append(data_bulk)
@@ -1225,9 +1219,9 @@ class Trails:
                 if 0 <= a_idx < ctx.n_acts:
                     supply_vec[a_idx] = float(supply_amt)
 
-            scaled = ctx.data.astype(np.float64, copy=False) * supply_vec[
-                ctx.act_coords
-            ]
+            scaled = (
+                ctx.data.astype(np.float64, copy=False) * supply_vec[ctx.act_coords]
+            )
             if min_amt:
                 mask = np.abs(scaled) >= min_amt
                 if not mask.any():
@@ -1448,7 +1442,9 @@ class Trails:
                             contrib = contrib[m]
 
                     if idx.size:
-                        acts_use = np.full_like(flows_use, inventory_act, dtype=np.int64)
+                        acts_use = np.full_like(
+                            flows_use, inventory_act, dtype=np.int64
+                        )
                         self._append_inventory_entries_bulk(
                             acts_use,
                             years_use,
@@ -1530,9 +1526,7 @@ class Trails:
                         row_vals_eff = data_sorted_eff[start_eff:end_eff]
                         if f_arr.size == 0:
                             continue
-                        row_index_map = self._get_B_row_index_map_for_t_act(
-                            t_eff_i, a
-                        )
+                        row_index_map = self._get_B_row_index_map_for_t_act(t_eff_i, a)
                         pos = row_index_map[f_arr]
                         valid = pos >= 0
                         if not np.any(valid):
@@ -1540,9 +1534,11 @@ class Trails:
                         vals_eff = row_vals_eff[pos[valid]]
                         f_arr = f_arr[valid]
 
-                        contrib = supply_amt * vals_eff.astype(
-                            np.float64, copy=False
-                        ) * float(weight)
+                        contrib = (
+                            supply_amt
+                            * vals_eff.astype(np.float64, copy=False)
+                            * float(weight)
+                        )
 
                         if min_amt:
                             m = np.abs(contrib) >= min_amt
@@ -1701,7 +1697,9 @@ class Trails:
           - Optional store_activity: attribute biosphere flows to a root activity index.
         """
         ctx = self._build_bio_accumulation_context(
-            base_year, use_temporal_distributions=use_temporal_distributions, debug=debug
+            base_year,
+            use_temporal_distributions=use_temporal_distributions,
+            debug=debug,
         )
         if ctx is None:
             return
@@ -1744,7 +1742,9 @@ class Trails:
         if not supplies:
             return
         ctx = self._build_bio_accumulation_context(
-            base_year, use_temporal_distributions=use_temporal_distributions, debug=debug
+            base_year,
+            use_temporal_distributions=use_temporal_distributions,
+            debug=debug,
         )
         if ctx is None:
             return
@@ -1768,9 +1768,9 @@ class Trails:
                 if store_activity is not None and merged_store_activity is None:
                     merged_store_activity = int(store_activity)
                 for act_idx, supply_amt in supply_by_activity.items():
-                    merged_supply[int(act_idx)] = (
-                        merged_supply.get(int(act_idx), 0.0) + float(supply_amt)
-                    )
+                    merged_supply[int(act_idx)] = merged_supply.get(
+                        int(act_idx), 0.0
+                    ) + float(supply_amt)
             self._accumulate_temporalized_biosphere_inventory_core(
                 ctx,
                 merged_supply,
