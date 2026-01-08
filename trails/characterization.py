@@ -103,7 +103,7 @@ def build_characterized_inventory(
     debug: bool = False,
     ei_version: str = "3.11",
 ) -> xr.DataArray:
-    """Characterize a Trails inventory into a sparse (activity, flow, year) array."""
+    """Characterize a Trails inventory into a sparse array."""
     if trails.inventory is None:
         raise ValueError("Trails.inventory is empty; run LCA first.")
 
@@ -120,15 +120,25 @@ def build_characterized_inventory(
     if not isinstance(inv_data, sparse.COO):
         inv_data = sparse.COO.from_numpy(np.asarray(inv_data))
 
-    characterized = inv_data * cf.astype(np.float64)[None, :, None]
+    has_root = "root activity" in inventory.dims
+    if has_root:
+        characterized = inv_data * cf.astype(np.float64)[None, :, None, None]
+    else:
+        characterized = inv_data * cf.astype(np.float64)[None, :, None]
+
+    dims = ("activity", "flow", "year")
+    coords = {
+        "activity": inventory.coords["activity"],
+        "flow": inventory.coords["flow"],
+        "year": inventory.coords["year"],
+    }
+    if has_root:
+        dims = ("activity", "flow", "year", "root activity")
+        coords["root activity"] = inventory.coords["root activity"]
 
     trails.characterized_inventory = xr.DataArray(
         characterized,
-        dims=("activity", "flow", "year"),
-        coords={
-            "activity": inventory.coords["activity"],
-            "flow": inventory.coords["flow"],
-            "year": inventory.coords["year"],
-        },
+        dims=dims,
+        coords=coords,
     )
     return trails.characterized_inventory

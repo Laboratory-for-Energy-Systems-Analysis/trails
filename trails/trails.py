@@ -138,8 +138,8 @@ class Trails:
             self.min_year = int(self.years_int.min())
             self.max_year = int(self.years_int.max())
 
-    def reset_inventory(self) -> None:
-        """Initialize inventory builders for sparse 3D inventory storage."""
+    def reset_inventory(self, *, attribute_to_roots: bool = False) -> None:
+        """Initialize inventory builders for sparse inventory storage."""
         min_offset, max_offset = self._inventory_offset_bounds()
         years = np.arange(
             int(self.min_year + min_offset),
@@ -156,7 +156,11 @@ class Trails:
             )
         self._inventory_years = years
         self._inventory_year_index = {int(y): int(i) for i, y in enumerate(years)}
-        self._inventory_coords = [[], [], []]
+        self._inventory_has_root = bool(attribute_to_roots)
+        if self._inventory_has_root:
+            self._inventory_coords = [[], [], [], []]
+        else:
+            self._inventory_coords = [[], [], []]
         self._inventory_data = []
         self.inventory = None
         self.characterized_inventory = None
@@ -183,7 +187,13 @@ class Trails:
         return min_offset, max_offset
 
     def _append_inventory_entries(
-        self, act_idx: int, year: int, flows: np.ndarray, values: np.ndarray
+        self,
+        act_idx: int,
+        year: int,
+        flows: np.ndarray,
+        values: np.ndarray,
+        *,
+        root_activity: int | None = None,
     ) -> None:
         if self._inventory_coords is None or self._inventory_data is None:
             raise RuntimeError(
@@ -228,10 +238,16 @@ class Trails:
         self._inventory_coords[2].append(
             np.full(flows.size, int(year_idx), dtype=np.int64)
         )
+        if getattr(self, "_inventory_has_root", False):
+            if root_activity is None:
+                root_activity = int(act_idx)
+            self._inventory_coords[3].append(
+                np.full(flows.size, int(root_activity), dtype=np.int64)
+            )
         self._inventory_data.append(values.astype(self.value_dtype, copy=False))
 
     def finalize_inventory(self) -> xr.DataArray:
-        """Finalize and store sparse inventory as a 3D xarray."""
+        """Finalize and store sparse inventory as an xarray."""
         if self.A is None or self.B is None:
             raise ValueError("Cannot finalize inventory: A or B is None.")
 
@@ -248,26 +264,44 @@ class Trails:
                 "Inventory builders not initialized. Call reset_inventory()."
             )
 
+        has_root = bool(getattr(self, "_inventory_has_root", False))
         if self._inventory_data:
             coords = np.vstack(
                 [np.concatenate(part) for part in self._inventory_coords]
             )
             data = np.concatenate(self._inventory_data)
-            inv = sparse.COO(coords, data, shape=(n_activities, n_flows, len(years)))
+            if has_root:
+                inv = sparse.COO(
+                    coords,
+                    data,
+                    shape=(n_activities, n_flows, len(years), n_activities),
+                )
+            else:
+                inv = sparse.COO(
+                    coords, data, shape=(n_activities, n_flows, len(years))
+                )
         else:
-            inv = sparse.COO.zeros(
-                (n_activities, n_flows, len(years)), dtype=self.value_dtype
-            )
+            if has_root:
+                inv = sparse.COO.zeros(
+                    (n_activities, n_flows, len(years), n_activities),
+                    dtype=self.value_dtype,
+                )
+            else:
+                inv = sparse.COO.zeros(
+                    (n_activities, n_flows, len(years)), dtype=self.value_dtype
+                )
 
-        self.inventory = xr.DataArray(
-            inv,
-            dims=("activity", "flow", "year"),
-            coords={
-                "activity": np.arange(n_activities, dtype=int),
-                "flow": np.arange(n_flows, dtype=int),
-                "year": years,
-            },
-        )
+        dims = ("activity", "flow", "year")
+        coords = {
+            "activity": np.arange(n_activities, dtype=int),
+            "flow": np.arange(n_flows, dtype=int),
+            "year": years,
+        }
+        if has_root:
+            dims = ("activity", "flow", "year", "root activity")
+            coords["root activity"] = np.arange(n_activities, dtype=int)
+
+        self.inventory = xr.DataArray(inv, dims=dims, coords=coords)
         return self.inventory
 
     # ------------------------------------------------------------------
@@ -774,7 +808,7 @@ class Trails:
           - No TD: anchor to scenario_year of B slice.
           - TD + ported: distribute anchor-year scaled amount across pulse years.
           - TD + matrix: read B at each pulse-year, multiply by supply and weight.
-          - Optional store_activity: attribute biosphere flows to a different activity index.
+          - Optional store_activity: attribute biosphere flows to a root activity index.
         """
         # ---------------------------
         # Early exits / slice resolve
@@ -919,7 +953,13 @@ class Trails:
                 continue
 
             a = int(act_idx)
-            inventory_act = int(store_activity) if store_activity is not None else a
+            has_root = bool(getattr(self, "_inventory_has_root", False))
+            if has_root:
+                inventory_act = a
+                root_activity = int(store_activity) if store_activity is not None else a
+            else:
+                inventory_act = int(store_activity) if store_activity is not None else a
+                root_activity = None
             if a < 0 or a + 1 >= len(row_ptr):
                 continue
 
@@ -951,7 +991,11 @@ class Trails:
             if not bio_td:
                 if keep_full is None:
                     self._append_inventory_entries(
-                        inventory_act, base_year, flows_full, scaled_full
+                        inventory_act,
+                        base_year,
+                        flows_full,
+                        scaled_full,
+                        root_activity=root_activity,
                     )
                 else:
                     self._append_inventory_entries(
@@ -959,6 +1003,7 @@ class Trails:
                         base_year,
                         flows_full[keep_full],
                         scaled_full[keep_full],
+                        root_activity=root_activity,
                     )
                 continue
 
@@ -1007,7 +1052,11 @@ class Trails:
                     idx = no_td_idx[keep_full[no_td_idx]]
                 if idx.size:
                     self._append_inventory_entries(
-                        inventory_act, base_year, flows_full[idx], scaled_full[idx]
+                        inventory_act,
+                        base_year,
+                        flows_full[idx],
+                        scaled_full[idx],
+                        root_activity=root_activity,
                     )
 
             # ---------------------------
@@ -1067,7 +1116,11 @@ class Trails:
                             c_use = contrib
 
                         self._append_inventory_entries(
-                            inventory_act, raw_year, f_use, c_use
+                            inventory_act,
+                            raw_year,
+                            f_use,
+                            c_use,
+                            root_activity=root_activity,
                         )
 
             # ---------------------------
@@ -1126,6 +1179,7 @@ class Trails:
                             raw_year,
                             np.array([f], dtype=np.int64),
                             np.array([contrib]),
+                            root_activity=root_activity,
                         )
 
     def _map_year_to_available(self, year: int) -> int:
