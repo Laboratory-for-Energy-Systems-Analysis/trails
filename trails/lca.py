@@ -214,7 +214,10 @@ def lca(
         )
 
     try:
-        def _solve_year(solve_year: int) -> tuple[int, list[tuple[Dict[int, float], int | None]]]:
+
+        def _solve_year(
+            solve_year: int,
+        ) -> tuple[int, list[tuple[Dict[int, float], int | None]]]:
             local_cache: Dict[tuple, Any] = {}
             solve_year = int(solve_year)
             arr = np.asarray(f_by_year[solve_year])
