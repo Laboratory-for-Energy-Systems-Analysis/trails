@@ -245,6 +245,7 @@ def lca(
                 positions = None
 
             if attribute_to_roots:
+                supplies: list[tuple[Dict[int, float], int | None]] = []
                 per_root_demands = root_demands_by_year.get(solve_year, {})
                 for root_act, root_demand in per_root_demands.items():
                     lca_obj.redo_lci(demand=root_demand)
@@ -254,26 +255,18 @@ def lca(
                         supply_total = _extract_supply_fast_cached(
                             lca_obj.supply_array, act_ids, positions, min_amount
                         )
-                    trails.accumulate_temporalized_biosphere_inventory(
-                        base_year=solve_year,
-                        supply_by_activity=supply_total,
-                        min_amount=float(min_amount),
-                        store_activity=int(root_act),
-                        debug=debug,
-                    )
+                    if supply_total:
+                        supplies.append((supply_total, int(root_act)))
             else:
+                supplies = []
                 if act_ids is None or positions is None:
                     supply_total = _extract_supply_fast(lca_obj, min_amount)
                 else:
                     supply_total = _extract_supply_fast_cached(
                         lca_obj.supply_array, act_ids, positions, min_amount
                     )
-                trails.accumulate_temporalized_biosphere_inventory(
-                    base_year=solve_year,
-                    supply_by_activity=supply_total,
-                    min_amount=float(min_amount),
-                    debug=debug,
-                )
+                if supply_total:
+                    supplies.append((supply_total, None))
 
             # Injected supply
             if attribute_to_roots:
@@ -281,13 +274,7 @@ def lca(
                 for root_act, injected_supply in per_root_injected.items():
                     if not injected_supply:
                         continue
-                    trails.accumulate_temporalized_biosphere_inventory(
-                        base_year=solve_year,
-                        supply_by_activity=injected_supply,
-                        min_amount=float(min_amount),
-                        store_activity=int(root_act),
-                        debug=debug,
-                    )
+                    supplies.append((injected_supply, int(root_act)))
             else:
                 injected_supply: Dict[int, float] = {}
                 for (y, a), v in injected_supply_by_year_act.items():
@@ -299,12 +286,15 @@ def lca(
                     injected_supply[int(a)] = injected_supply.get(int(a), 0.0) + v
 
                 if injected_supply:
-                    trails.accumulate_temporalized_biosphere_inventory(
-                        base_year=solve_year,
-                        supply_by_activity=injected_supply,
-                        min_amount=float(min_amount),
-                        debug=debug,
-                    )
+                    supplies.append((injected_supply, None))
+
+            if supplies:
+                trails.accumulate_temporalized_biosphere_inventory_batch(
+                    base_year=solve_year,
+                    supplies=supplies,
+                    min_amount=float(min_amount),
+                    debug=debug,
+                )
 
             if pbar is not None:
                 pbar.update(1)
