@@ -3,6 +3,8 @@ import sys
 
 import warnings
 from typing import Any, Dict, List, TYPE_CHECKING
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import os
 
 import bw2calc as bc
 import numpy as np
@@ -93,6 +95,8 @@ def lca(
     min_amount: float = 1e-18,
     show_progress: bool = True,
     attribute_to_roots: bool = False,
+    parallel_years: bool = False,
+    max_workers: int | None = None,
     debug: bool = False,
 ) -> None:
     """Run temporal LCA for a functional unit and year.
@@ -210,19 +214,18 @@ def lca(
         )
 
     try:
-        for solve_year in candidate_years:
+        def _solve_year(solve_year: int) -> tuple[int, list[tuple[Dict[int, float], int | None]]]:
+            local_cache: Dict[tuple, Any] = {}
             solve_year = int(solve_year)
             arr = np.asarray(f_by_year[solve_year])
             nz_idx = np.where(np.abs(arr) > float(min_amount))[0]
             if nz_idx.size == 0:
-                if pbar is not None:
-                    pbar.update(1)
-                continue
+                return solve_year, []
 
             fu_demand = {int(i): float(arr[i]) for i in nz_idx}
 
             dp, _, _, _ = _get_datapackage(
-                dp_cache=dp_cache,
+                dp_cache=local_cache,
                 trails=trails,
                 year=solve_year,
                 zero_bio=True,
@@ -245,6 +248,7 @@ def lca(
                 positions = None
 
             if attribute_to_roots:
+                supplies: list[tuple[Dict[int, float], int | None]] = []
                 per_root_demands = root_demands_by_year.get(solve_year, {})
                 for root_act, root_demand in per_root_demands.items():
                     lca_obj.redo_lci(demand=root_demand)
@@ -254,40 +258,25 @@ def lca(
                         supply_total = _extract_supply_fast_cached(
                             lca_obj.supply_array, act_ids, positions, min_amount
                         )
-                    trails.accumulate_temporalized_biosphere_inventory(
-                        base_year=solve_year,
-                        supply_by_activity=supply_total,
-                        min_amount=float(min_amount),
-                        store_activity=int(root_act),
-                        debug=debug,
-                    )
+                    if supply_total:
+                        supplies.append((supply_total, int(root_act)))
             else:
+                supplies = []
                 if act_ids is None or positions is None:
                     supply_total = _extract_supply_fast(lca_obj, min_amount)
                 else:
                     supply_total = _extract_supply_fast_cached(
                         lca_obj.supply_array, act_ids, positions, min_amount
                     )
-                trails.accumulate_temporalized_biosphere_inventory(
-                    base_year=solve_year,
-                    supply_by_activity=supply_total,
-                    min_amount=float(min_amount),
-                    debug=debug,
-                )
+                if supply_total:
+                    supplies.append((supply_total, None))
 
-            # Injected supply
             if attribute_to_roots:
                 per_root_injected = root_injected_by_year.get(solve_year, {})
                 for root_act, injected_supply in per_root_injected.items():
                     if not injected_supply:
                         continue
-                    trails.accumulate_temporalized_biosphere_inventory(
-                        base_year=solve_year,
-                        supply_by_activity=injected_supply,
-                        min_amount=float(min_amount),
-                        store_activity=int(root_act),
-                        debug=debug,
-                    )
+                    supplies.append((injected_supply, int(root_act)))
             else:
                 injected_supply: Dict[int, float] = {}
                 for (y, a), v in injected_supply_by_year_act.items():
@@ -299,15 +288,40 @@ def lca(
                     injected_supply[int(a)] = injected_supply.get(int(a), 0.0) + v
 
                 if injected_supply:
-                    trails.accumulate_temporalized_biosphere_inventory(
+                    supplies.append((injected_supply, None))
+
+            return solve_year, supplies
+
+        if parallel_years:
+            worker_count = max_workers or (os.cpu_count() or 1)
+            with ThreadPoolExecutor(max_workers=worker_count) as executor:
+                futures = {
+                    executor.submit(_solve_year, solve_year): int(solve_year)
+                    for solve_year in candidate_years
+                }
+                for future in as_completed(futures):
+                    solve_year, supplies = future.result()
+                    if supplies:
+                        trails.accumulate_temporalized_biosphere_inventory_batch(
+                            base_year=solve_year,
+                            supplies=supplies,
+                            min_amount=float(min_amount),
+                            debug=debug,
+                        )
+                    if pbar is not None:
+                        pbar.update(1)
+        else:
+            for solve_year in candidate_years:
+                solve_year, supplies = _solve_year(solve_year)
+                if supplies:
+                    trails.accumulate_temporalized_biosphere_inventory_batch(
                         base_year=solve_year,
-                        supply_by_activity=injected_supply,
+                        supplies=supplies,
                         min_amount=float(min_amount),
                         debug=debug,
                     )
-
-            if pbar is not None:
-                pbar.update(1)
+                if pbar is not None:
+                    pbar.update(1)
 
     finally:
         if pbar is not None:
