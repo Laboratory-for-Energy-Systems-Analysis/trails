@@ -26,6 +26,7 @@ warnings.filterwarnings("ignore", module="scikits")
 
 _CHAR_CACHE: dict = {}
 
+
 def lca_static_simple(
     trails: Trails,
     year: int,
@@ -105,11 +106,11 @@ def lca(
     # Fail fast with a precise message if inventory builders are not live
     # Fail fast: chunk-based inventory builder must be initialized
     required = (
-            hasattr(trails, "_inventory_years")
-            and trails._inventory_years is not None
-            and hasattr(trails, "_inv_chunk_flows")
-            and hasattr(trails, "_inv_chunk_values")
-            and hasattr(trails, "_inv_chunk_len")
+        hasattr(trails, "_inventory_years")
+        and trails._inventory_years is not None
+        and hasattr(trails, "_inv_chunk_flows")
+        and hasattr(trails, "_inv_chunk_values")
+        and hasattr(trails, "_inv_chunk_len")
     )
     if not required:
         raise RuntimeError(
@@ -159,9 +160,13 @@ def lca(
         injected_supply_prov_by_year_act = {}
 
     # Always inject FU directly
-    injected_supply_by_year_act[(y0, fu0)] = float(injected_supply_by_year_act.get((y0, fu0), 0.0)) + amt0
+    injected_supply_by_year_act[(y0, fu0)] = (
+        float(injected_supply_by_year_act.get((y0, fu0), 0.0)) + amt0
+    )
     injected_supply_prov_by_year_act.setdefault((y0, fu0), {})
-    injected_supply_prov_by_year_act[(y0, fu0)][fu0] = float(injected_supply_prov_by_year_act[(y0, fu0)].get(fu0, 0.0)) + amt0
+    injected_supply_prov_by_year_act[(y0, fu0)][fu0] = (
+        float(injected_supply_prov_by_year_act[(y0, fu0)].get(fu0, 0.0)) + amt0
+    )
 
     # Frontier -> demand vectors (calendar years preserved)
     f_by_year = trails.frontier_to_demand_vectors(frontier)
@@ -229,8 +234,12 @@ def lca(
 
             act_map = getattr(lca_obj.dicts, "activity", None)
             if act_map:
-                act_ids = np.fromiter(act_map.keys(), dtype=np.int64, count=len(act_map))
-                positions = np.fromiter(act_map.values(), dtype=np.int64, count=len(act_map))
+                act_ids = np.fromiter(
+                    act_map.keys(), dtype=np.int64, count=len(act_map)
+                )
+                positions = np.fromiter(
+                    act_map.values(), dtype=np.int64, count=len(act_map)
+                )
             else:
                 act_ids = None
                 positions = None
@@ -305,4 +314,6 @@ def lca(
             pbar.close()
 
     trails.finalize_inventory()
-    build_characterized_inventory(trails=trails, methods=methods, char_cache=_CHAR_CACHE)
+    build_characterized_inventory(
+        trails=trails, methods=methods, char_cache=_CHAR_CACHE
+    )

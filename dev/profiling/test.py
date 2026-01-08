@@ -21,9 +21,9 @@ trails.lca(
     start_act_idx=27827,
     methods=methods,
     max_depth=1,
-    #max_depth=4,
+    # max_depth=4,
     show_progress=True,
     min_amount=1e-22,
     attribute_to_roots=True,
-    debug=False
+    debug=False,
 )

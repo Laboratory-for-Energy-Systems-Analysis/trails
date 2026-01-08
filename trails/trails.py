@@ -194,13 +194,13 @@ class Trails:
         return min_offset, max_offset
 
     def _append_inventory_entries(
-            self,
-            act_idx: int,
-            year: int,
-            flows: np.ndarray,
-            values: np.ndarray,
-            *,
-            root_activity: int | None = None,
+        self,
+        act_idx: int,
+        year: int,
+        flows: np.ndarray,
+        values: np.ndarray,
+        *,
+        root_activity: int | None = None,
     ) -> None:
         """
         Append one (activity, year, [root]) block of biosphere contributions to the
@@ -284,17 +284,23 @@ class Trails:
 
         years = self._inventory_years
         if years is None:
-            raise RuntimeError("Inventory years not initialized. Call reset_inventory().")
+            raise RuntimeError(
+                "Inventory years not initialized. Call reset_inventory()."
+            )
 
         if not hasattr(self, "_inv_chunk_len"):
-            raise RuntimeError("Inventory chunk builders not initialized. Call reset_inventory().")
+            raise RuntimeError(
+                "Inventory chunk builders not initialized. Call reset_inventory()."
+            )
 
         n_activities = int(self.A.shape[1])
         n_flows = int(self.B.shape[2])
         has_root = bool(getattr(self, "_inventory_has_root", False))
 
         if self._inv_chunk_len:
-            flows_all = np.concatenate(self._inv_chunk_flows).astype(np.int64, copy=False)
+            flows_all = np.concatenate(self._inv_chunk_flows).astype(
+                np.int64, copy=False
+            )
             data = np.concatenate(self._inv_chunk_values)
 
             lens = np.asarray(self._inv_chunk_len, dtype=np.int64)
@@ -303,7 +309,9 @@ class Trails:
             year_all = np.repeat(np.asarray(self._inv_chunk_year, dtype=np.int64), lens)
 
             if has_root:
-                root_all = np.repeat(np.asarray(self._inv_chunk_root, dtype=np.int64), lens)
+                root_all = np.repeat(
+                    np.asarray(self._inv_chunk_root, dtype=np.int64), lens
+                )
                 coords = np.vstack([act_all, flows_all, year_all, root_all])
                 inv = sparse.COO(
                     coords,
@@ -624,6 +632,7 @@ class Trails:
 
     def lca(self, *args: Any, **kwargs: Any) -> None:
         from .lca import lca as lca_fn
+
         return lca_fn(self, *args, **kwargs)
 
     def static_lca(
@@ -817,7 +826,9 @@ class Trails:
         n_flows = int(self.B.shape[2])
         return scenario_year, t, B_t, n_flows
 
-    def _get_B_row_cache_for_t(self, t: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    def _get_B_row_cache_for_t(
+        self, t: int
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
         Return CSR-like row cache for B[t,:,:] as (row_ptr, flow_sorted, data_sorted),
         where entries are sorted by (act, flow). This enables fast per-row lookup.
@@ -870,9 +881,9 @@ class Trails:
 
     @staticmethod
     def _row_values_for_flows_sorted(
-            row_flows_sorted: np.ndarray,
-            row_vals_sorted: np.ndarray,
-            query_flows_sorted: np.ndarray,
+        row_flows_sorted: np.ndarray,
+        row_vals_sorted: np.ndarray,
+        query_flows_sorted: np.ndarray,
     ) -> np.ndarray:
         """
         Given a row with flows sorted ascending, return values for query_flows_sorted
@@ -881,7 +892,9 @@ class Trails:
         # positions where each query flow would be inserted
         pos = np.searchsorted(row_flows_sorted, query_flows_sorted)
         out = np.zeros(query_flows_sorted.size, dtype=np.float64)
-        m = (pos < row_flows_sorted.size) & (row_flows_sorted[pos] == query_flows_sorted)
+        m = (pos < row_flows_sorted.size) & (
+            row_flows_sorted[pos] == query_flows_sorted
+        )
         if np.any(m):
             out[m] = row_vals_sorted[pos[m]].astype(np.float64, copy=False)
         return out
@@ -1269,7 +1282,9 @@ class Trails:
                     if pulses is None:
                         pulses = [
                             (int(o), float(w))
-                            for o, w in TemporalDistribution(tex0).iter_offsets_and_weights(debug=False)
+                            for o, w in TemporalDistribution(
+                                tex0
+                            ).iter_offsets_and_weights(debug=False)
                         ]
                         pulse_cache[k] = pulses
 
@@ -1300,7 +1315,9 @@ class Trails:
                         if start_eff == end_eff:
                             continue
 
-                        row_flows_eff = flow_sorted_eff[start_eff:end_eff].astype(np.intp, copy=False)
+                        row_flows_eff = flow_sorted_eff[start_eff:end_eff].astype(
+                            np.intp, copy=False
+                        )
                         row_vals_eff = data_sorted_eff[start_eff:end_eff]
 
                         # We already have f_arr = flows_full[idx], not guaranteed sorted.
@@ -1311,7 +1328,9 @@ class Trails:
                         ord_f = np.argsort(f_arr, kind="mergesort")
                         f_sorted = f_arr[ord_f].astype(np.intp, copy=False)
 
-                        vals_sorted = self._row_values_for_flows_sorted(row_flows_eff, row_vals_eff, f_sorted)
+                        vals_sorted = self._row_values_for_flows_sorted(
+                            row_flows_eff, row_vals_eff, f_sorted
+                        )
 
                         # unsort
                         vals_eff = np.empty_like(vals_sorted)
