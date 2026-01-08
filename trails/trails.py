@@ -141,27 +141,34 @@ class Trails:
     def reset_inventory(self, *, attribute_to_roots: bool = False) -> None:
         """Initialize inventory builders for sparse inventory storage."""
         min_offset, max_offset = self._inventory_offset_bounds()
+
         years = np.arange(
             int(self.min_year + min_offset),
             int(self.max_year + max_offset) + 1,
             dtype=int,
         )
-        if self.debug:
-            logger.debug(
-                "reset_inventory: years [%d..%d] (min_offset=%d max_offset=%d)",
-                int(years[0]) if years.size else -1,
-                int(years[-1]) if years.size else -1,
-                int(min_offset),
-                int(max_offset),
-            )
+
         self._inventory_years = years
         self._inventory_year_index = {int(y): int(i) for i, y in enumerate(years)}
         self._inventory_has_root = bool(attribute_to_roots)
-        if self._inventory_has_root:
-            self._inventory_coords = [[], [], [], []]
-        else:
-            self._inventory_coords = [[], [], []]
-        self._inventory_data = []
+
+        # ------------------------------------------------------------------
+        # Chunked builder (single source of truth)
+        # Each append stores: act, year_idx, (optional root), flows[], values[]
+        # finalize_inventory expands scalar coords using np.repeat.
+        # ------------------------------------------------------------------
+        self._inv_chunk_act: list[int] = []
+        self._inv_chunk_year: list[int] = []
+        self._inv_chunk_root: list[int] = []  # only used if _inventory_has_root
+        self._inv_chunk_flows: list[np.ndarray] = []
+        self._inv_chunk_values: list[np.ndarray] = []
+        self._inv_chunk_len: list[int] = []
+
+        # Legacy builders explicitly disabled to avoid accidental use/mismatch
+        self._inventory_coords = None
+        self._inventory_data = None
+
+        # Reset outputs
         self.inventory = None
         self.characterized_inventory = None
         self.static_score = None
@@ -187,98 +194,128 @@ class Trails:
         return min_offset, max_offset
 
     def _append_inventory_entries(
-        self,
-        act_idx: int,
-        year: int,
-        flows: np.ndarray,
-        values: np.ndarray,
-        *,
-        root_activity: int | None = None,
+            self,
+            act_idx: int,
+            year: int,
+            flows: np.ndarray,
+            values: np.ndarray,
+            *,
+            root_activity: int | None = None,
     ) -> None:
-        if self._inventory_coords is None or self._inventory_data is None:
+        """
+        Append one (activity, year, [root]) block of biosphere contributions to the
+        chunked inventory builder.
+
+        Contract:
+          - `year` is a *calendar year*; we map to `year_idx` using `_inventory_year_index`.
+          - `flows` are flow indices; `values` are amounts for those flows.
+          - Stores compact chunks; `finalize_inventory()` expands coords via np.repeat.
+
+        Performance notes:
+          - Avoids unnecessary copies.
+          - Filters zeros quickly.
+          - Converts dtypes only at the end, and with copy=False when possible.
+        """
+        # Chunk builders must exist (single source of truth)
+        if not hasattr(self, "_inv_chunk_len"):
             raise RuntimeError(
-                "Inventory builders not initialized. Call reset_inventory()."
+                "Inventory chunk builders not initialized. Call reset_inventory() first."
             )
 
         year_idx = self._inventory_year_index.get(int(year))
         if year_idx is None:
-            if self.debug:
-                logger.debug(
-                    "append_inventory: year %d not in inventory range [%s..%s]",
-                    int(year),
-                    (
-                        int(self._inventory_years[0])
-                        if self._inventory_years is not None
-                        else -1
-                    ),
-                    (
-                        int(self._inventory_years[-1])
-                        if self._inventory_years is not None
-                        else -1
-                    ),
-                )
+            # out of configured inventory year range
             return
 
-        flows = np.asarray(flows, dtype=np.int64)
-        values = np.asarray(values, dtype=np.float64)
-        if flows.size == 0:
-            return
+        # Fast-path: accept ndarray-like without forcing copies
+        flows_arr = np.asarray(flows)
+        vals_arr = np.asarray(values)
 
-        mask = values != 0.0
+        # Basic validation
+        if flows_arr.size == 0 or vals_arr.size == 0:
+            return
+        if flows_arr.shape[0] != vals_arr.shape[0]:
+            raise ValueError(
+                f"flows and values must have same length. Got {flows_arr.shape[0]} and {vals_arr.shape[0]}."
+            )
+
+        # Filter exact zeros (cheap and avoids storing empty chunks)
+        # (If you want tolerance-based filtering, keep that at the caller level via min_amount.)
+        mask = vals_arr != 0.0
         if not np.any(mask):
             return
+        if not np.all(mask):
+            flows_arr = flows_arr[mask]
+            vals_arr = vals_arr[mask]
+            if flows_arr.size == 0:
+                return
 
-        flows = flows[mask]
-        values = values[mask]
+        # Enforce dtypes late, avoid copies when possible
+        flows_i64 = flows_arr.astype(np.int64, copy=False)
 
-        self._inventory_coords[0].append(
-            np.full(flows.size, int(act_idx), dtype=np.int64)
-        )
-        self._inventory_coords[1].append(flows.astype(np.int64, copy=False))
-        self._inventory_coords[2].append(
-            np.full(flows.size, int(year_idx), dtype=np.int64)
-        )
+        # Values: ensure numeric dtype + match configured value_dtype
+        # (This keeps memory small and makes concatenation cheaper.)
+        if vals_arr.dtype != self.value_dtype:
+            vals_out = vals_arr.astype(self.value_dtype, copy=False)
+        else:
+            vals_out = vals_arr
+
+        n = int(flows_i64.size)
+        if n == 0:
+            return
+
+        # Append one chunk
+        self._inv_chunk_act.append(int(act_idx))
+        self._inv_chunk_year.append(int(year_idx))
+
         if getattr(self, "_inventory_has_root", False):
             if root_activity is None:
                 root_activity = int(act_idx)
-            self._inventory_coords[3].append(
-                np.full(flows.size, int(root_activity), dtype=np.int64)
-            )
-        self._inventory_data.append(values.astype(self.value_dtype, copy=False))
+            self._inv_chunk_root.append(int(root_activity))
+
+        self._inv_chunk_flows.append(flows_i64)
+        self._inv_chunk_values.append(vals_out)
+        self._inv_chunk_len.append(n)
 
     def finalize_inventory(self) -> xr.DataArray:
         """Finalize and store sparse inventory as an xarray."""
         if self.A is None or self.B is None:
             raise ValueError("Cannot finalize inventory: A or B is None.")
 
-        n_activities = int(self.A.shape[1])
-        n_flows = int(self.B.shape[2])
         years = self._inventory_years
         if years is None:
-            raise RuntimeError(
-                "Inventory years not initialized. Call reset_inventory()."
-            )
+            raise RuntimeError("Inventory years not initialized. Call reset_inventory().")
 
-        if self._inventory_coords is None or self._inventory_data is None:
-            raise RuntimeError(
-                "Inventory builders not initialized. Call reset_inventory()."
-            )
+        if not hasattr(self, "_inv_chunk_len"):
+            raise RuntimeError("Inventory chunk builders not initialized. Call reset_inventory().")
 
+        n_activities = int(self.A.shape[1])
+        n_flows = int(self.B.shape[2])
         has_root = bool(getattr(self, "_inventory_has_root", False))
-        if self._inventory_data:
-            coords = np.vstack(
-                [np.concatenate(part) for part in self._inventory_coords]
-            )
-            data = np.concatenate(self._inventory_data)
+
+        if self._inv_chunk_len:
+            flows_all = np.concatenate(self._inv_chunk_flows).astype(np.int64, copy=False)
+            data = np.concatenate(self._inv_chunk_values)
+
+            lens = np.asarray(self._inv_chunk_len, dtype=np.int64)
+
+            act_all = np.repeat(np.asarray(self._inv_chunk_act, dtype=np.int64), lens)
+            year_all = np.repeat(np.asarray(self._inv_chunk_year, dtype=np.int64), lens)
+
             if has_root:
+                root_all = np.repeat(np.asarray(self._inv_chunk_root, dtype=np.int64), lens)
+                coords = np.vstack([act_all, flows_all, year_all, root_all])
                 inv = sparse.COO(
                     coords,
                     data,
                     shape=(n_activities, n_flows, len(years), n_activities),
                 )
             else:
+                coords = np.vstack([act_all, flows_all, year_all])
                 inv = sparse.COO(
-                    coords, data, shape=(n_activities, n_flows, len(years))
+                    coords,
+                    data,
+                    shape=(n_activities, n_flows, len(years)),
                 )
         else:
             if has_root:
@@ -288,20 +325,21 @@ class Trails:
                 )
             else:
                 inv = sparse.COO.zeros(
-                    (n_activities, n_flows, len(years)), dtype=self.value_dtype
+                    (n_activities, n_flows, len(years)),
+                    dtype=self.value_dtype,
                 )
 
         dims = ("activity", "flow", "year")
-        coords = {
+        coords_xr = {
             "activity": np.arange(n_activities, dtype=int),
             "flow": np.arange(n_flows, dtype=int),
             "year": years,
         }
         if has_root:
             dims = ("activity", "flow", "year", "root activity")
-            coords["root activity"] = np.arange(n_activities, dtype=int)
+            coords_xr["root activity"] = np.arange(n_activities, dtype=int)
 
-        self.inventory = xr.DataArray(inv, dims=dims, coords=coords)
+        self.inventory = xr.DataArray(inv, dims=dims, coords=coords_xr)
         return self.inventory
 
     # ------------------------------------------------------------------
@@ -585,9 +623,7 @@ class Trails:
         return TemporalDistribution(tex)
 
     def lca(self, *args: Any, **kwargs: Any) -> None:
-        """Run temporal LCA using this Trails instance."""
         from .lca import lca as lca_fn
-
         return lca_fn(self, *args, **kwargs)
 
     def static_lca(
@@ -781,6 +817,75 @@ class Trails:
         n_flows = int(self.B.shape[2])
         return scenario_year, t, B_t, n_flows
 
+    def _get_B_row_cache_for_t(self, t: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """
+        Return CSR-like row cache for B[t,:,:] as (row_ptr, flow_sorted, data_sorted),
+        where entries are sorted by (act, flow). This enables fast per-row lookup.
+        """
+        if not hasattr(self, "_B_row_cache"):
+            self._B_row_cache = {}  # type: ignore[attr-defined]
+
+        cache = self._B_row_cache  # type: ignore[attr-defined]
+        cached = cache.get(int(t))
+        if cached is not None:
+            return cached
+
+        if self.B is None:
+            raise RuntimeError("B is None")
+
+        B_t = self.B[int(t), :, :]
+        n_acts = int(B_t.shape[0])
+        nnz = int(getattr(B_t, "nnz", 0))
+
+        if nnz == 0:
+            row_ptr = np.zeros(n_acts + 1, dtype=np.int64)
+            flow_sorted = np.zeros(0, dtype=np.int32)
+            data_sorted = np.zeros(0, dtype=self.value_dtype)
+            cached = (row_ptr, flow_sorted, data_sorted)
+            cache[int(t)] = cached
+            return cached
+
+        act_coords = B_t.coords[0].astype(np.int32, copy=False)
+        flow_coords = B_t.coords[1].astype(np.int32, copy=False)
+
+        # IMPORTANT: sort by (act, flow), not just act
+        order = np.lexsort((flow_coords, act_coords))
+        act_sorted = act_coords[order]
+        flow_sorted = flow_coords[order]
+
+        data = B_t.data
+        if self.value_dtype == np.float32:
+            data_sorted = data.astype(np.float32, copy=False)[order]
+        else:
+            data_sorted = data[order]
+
+        # row_ptr: counts per activity
+        row_ptr = np.zeros(n_acts + 1, dtype=np.int64)
+        counts = np.bincount(act_sorted, minlength=n_acts)
+        np.cumsum(counts, out=row_ptr[1:])
+
+        cached = (row_ptr, flow_sorted, data_sorted)
+        cache[int(t)] = cached
+        return cached
+
+    @staticmethod
+    def _row_values_for_flows_sorted(
+            row_flows_sorted: np.ndarray,
+            row_vals_sorted: np.ndarray,
+            query_flows_sorted: np.ndarray,
+    ) -> np.ndarray:
+        """
+        Given a row with flows sorted ascending, return values for query_flows_sorted
+        using searchsorted. Flows not present get value 0.
+        """
+        # positions where each query flow would be inserted
+        pos = np.searchsorted(row_flows_sorted, query_flows_sorted)
+        out = np.zeros(query_flows_sorted.size, dtype=np.float64)
+        m = (pos < row_flows_sorted.size) & (row_flows_sorted[pos] == query_flows_sorted)
+        if np.any(m):
+            out[m] = row_vals_sorted[pos[m]].astype(np.float64, copy=False)
+        return out
+
     def accumulate_temporalized_biosphere_inventory(
         self,
         base_year: int,
@@ -813,6 +918,8 @@ class Trails:
         # ---------------------------
         # Early exits / slice resolve
         # ---------------------------
+        B_row_cache_local: dict[int, tuple[np.ndarray, np.ndarray, np.ndarray]] = {}
+
         biosphere_slice = self._get_biosphere_slice(base_year, debug)
         if biosphere_slice is None:
             return
@@ -1124,38 +1231,55 @@ class Trails:
                         )
 
             # ---------------------------
-            # 3) Matrix-sourced TD: keep semantics (year-dependent values)
+            # 3) Matrix-sourced TD: batch by td_key and pulse year (same semantics)
             # ---------------------------
             if matrix_entries:
-                for p, tex in matrix_entries:
-                    if keep_full is not None and not keep_full[p]:
-                        continue
+                # Backward compatible: older cache stored list[(pos, tex)]
+                # New batched structure: dict[td_key] -> (idx_full: np.ndarray[intp], tex: TemporalExchange)
+                if isinstance(matrix_entries, list):
+                    grouped: dict[tuple, tuple[list[int], TemporalExchange]] = {}
+                    for p, tex in matrix_entries:
+                        k = td_key(tex)
+                        if k in grouped:
+                            grouped[k][0].append(int(p))
+                        else:
+                            grouped[k] = ([int(p)], tex)
+                    matrix_groups = {
+                        k: (np.array(pos_list, dtype=np.intp), tex0)
+                        for k, (pos_list, tex0) in grouped.items()
+                    }
+                    # Update cache so we don’t re-group next call
+                    td_struct = (no_td_idx, port_groups_idx, matrix_groups)
+                    row_td_cache[cache_key] = td_struct
+                    matrix_entries = matrix_groups  # type: ignore[assignment]
 
-                    f = int(flows_full[p])
+                # Now matrix_entries is dict[td_key] -> (idx_full, tex0)
+                for k, (idx_full, tex0) in matrix_entries.items():  # type: ignore[union-attr]
+                    # Apply min_amount mask on FULL positions
+                    if keep_full is None:
+                        idx = idx_full
+                    else:
+                        idx = idx_full[keep_full[idx_full]]
+                        if idx.size == 0:
+                            continue
 
-                    k = td_key(tex)
+                    f_arr = flows_full[idx]
+
                     pulses = pulse_cache.get(k)
                     if pulses is None:
                         pulses = [
                             (int(o), float(w))
-                            for o, w in TemporalDistribution(
-                                tex
-                            ).iter_offsets_and_weights(debug=False)
+                            for o, w in TemporalDistribution(tex0).iter_offsets_and_weights(debug=False)
                         ]
                         pulse_cache[k] = pulses
 
+                    # For each pulse year: read B at that year for ALL flows in this TD-group
                     for offset, weight in pulses:
                         if weight == 0.0:
                             continue
 
                         raw_year = base_year + int(offset)
                         y_eff = map_year_cached(raw_year)
-                        if debug:
-                            logger.debug(
-                                "accumulate_bio: matrix pulse raw_year=%d mapped_year=%d",
-                                int(raw_year),
-                                int(y_eff),
-                            )
 
                         t_eff = t_eff_cache.get(y_eff)
                         if t_eff is None and y_eff not in t_eff_cache:
@@ -1164,21 +1288,55 @@ class Trails:
                         if t_eff is None:
                             continue
 
-                        value_eff = float(self.B[int(t_eff), a, f])
-                        if value_eff == 0.0:
+                        t_eff_i = int(t_eff)
+                        cached_eff = B_row_cache_local.get(t_eff_i)
+                        if cached_eff is None:
+                            cached_eff = self._get_B_row_cache_for_t(t_eff_i)
+                            B_row_cache_local[t_eff_i] = cached_eff
+                        row_ptr_eff, flow_sorted_eff, data_sorted_eff = cached_eff
+
+                        start_eff = int(row_ptr_eff[a])
+                        end_eff = int(row_ptr_eff[a + 1])
+                        if start_eff == end_eff:
                             continue
 
-                        contrib = supply_amt * value_eff * float(weight)
-                        if contrib == 0.0:
+                        row_flows_eff = flow_sorted_eff[start_eff:end_eff].astype(np.intp, copy=False)
+                        row_vals_eff = data_sorted_eff[start_eff:end_eff]
+
+                        # We already have f_arr = flows_full[idx], not guaranteed sorted.
+                        # Sort once for efficient searchsorted, then unsort back.
+                        if f_arr.size == 0:
                             continue
-                        if min_amt and abs(contrib) < min_amt:
+
+                        ord_f = np.argsort(f_arr, kind="mergesort")
+                        f_sorted = f_arr[ord_f].astype(np.intp, copy=False)
+
+                        vals_sorted = self._row_values_for_flows_sorted(row_flows_eff, row_vals_eff, f_sorted)
+
+                        # unsort
+                        vals_eff = np.empty_like(vals_sorted)
+                        vals_eff[ord_f] = vals_sorted
+
+                        if vals_eff.size == 0:
                             continue
+
+                        contrib = supply_amt * vals_eff * float(weight)
+
+                        if min_amt:
+                            m = np.abs(contrib) >= min_amt
+                            if not m.any():
+                                continue
+                            f_use = f_arr[m]
+                            c_use = contrib[m]
+                        else:
+                            f_use = f_arr
+                            c_use = contrib
 
                         self._append_inventory_entries(
                             inventory_act,
                             raw_year,
-                            np.array([f], dtype=np.int64),
-                            np.array([contrib]),
+                            f_use,
+                            c_use,
                             root_activity=root_activity,
                         )
 
