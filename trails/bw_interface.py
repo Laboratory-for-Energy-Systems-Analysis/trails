@@ -45,7 +45,6 @@ def _resolve_matrix_label(trails: Trails, year: int) -> tuple[str, int]:
         idx = int(np.argmin(np.abs(years - year)))
         label_for_matrix = trails.scenario_labels[idx]
 
-
     t = trails.scenario_index[label_for_matrix]
     return label_for_matrix, t
 

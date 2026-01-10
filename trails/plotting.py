@@ -805,6 +805,7 @@ def _wrap_hover_label(text: str, max_chars: int = 45) -> str:
     joined = joined.replace(" | ", " |<br>")
     return joined
 
+
 def _scores_to_results(
     scores: xr.DataArray,
     *,
@@ -890,7 +891,9 @@ def _scores_to_results(
 
     attrib_ids = data.coords[attrib_dim].values
 
-    results: Dict[int, Dict[str, Any]] = {int(y): {"scores": 0.0, score_key: {}} for y in years}
+    results: Dict[int, Dict[str, Any]] = {
+        int(y): {"scores": 0.0, score_key: {}} for y in years
+    }
 
     # vals shape: (attrib, year)
     for yi, year in enumerate(years):
@@ -1013,7 +1016,9 @@ def plot_temporal_scores(
         elif getattr(trails, "scores", None) is not None:
             results_by_year = trails.scores
         else:
-            raise ValueError("No characterized inventory or scores available for plotting.")
+            raise ValueError(
+                "No characterized inventory or scores available for plotting."
+            )
 
     if isinstance(results_by_year, xr.DataArray):
         # Inventory-style arrays have a "flow" dim; score arrays generally do not.
@@ -1022,9 +1027,13 @@ def plot_temporal_scores(
             if "root activity" in results_by_year.dims:
                 if show_flow_contributions:
                     tmp = results_by_year.sum(dim="root activity")
-                    results_by_year = _characterized_inventory_to_results(tmp, by_flow=True)
+                    results_by_year = _characterized_inventory_to_results(
+                        tmp, by_flow=True
+                    )
                 else:
-                    results_by_year = _characterized_inventory_to_root_results(results_by_year)
+                    results_by_year = _characterized_inventory_to_root_results(
+                        results_by_year
+                    )
             else:
                 results_by_year = _characterized_inventory_to_results(
                     results_by_year, by_flow=show_flow_contributions

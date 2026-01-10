@@ -100,7 +100,6 @@ def lca(
     compute_score: bool = True,
     ei_version: str = "3.11",
 ) -> None:
-
     """Run temporal LCA for a functional unit and year.
 
     When ``attribute_to_roots`` is enabled, biosphere impacts are accumulated under
@@ -127,11 +126,11 @@ def lca(
     # Only require inventory builders if we will store inventory
     if store_inventory:
         required = (
-                hasattr(trails, "_inventory_years")
-                and trails._inventory_years is not None
-                and hasattr(trails, "_inv_chunk_flows")
-                and hasattr(trails, "_inv_chunk_values")
-                and hasattr(trails, "_inv_chunk_len")
+            hasattr(trails, "_inventory_years")
+            and trails._inventory_years is not None
+            and hasattr(trails, "_inv_chunk_flows")
+            and hasattr(trails, "_inv_chunk_values")
+            and hasattr(trails, "_inv_chunk_len")
         )
         if not required:
             raise RuntimeError(
@@ -230,7 +229,6 @@ def lca(
             leave=True,
         )
 
-
     for solve_year in candidate_years:
         solve_year = int(solve_year)
         arr = np.asarray(f_by_year[solve_year])
@@ -255,9 +253,7 @@ def lca(
 
         act_map = getattr(lca_obj.dicts, "activity", None)
         if act_map:
-            act_ids = np.fromiter(
-                act_map.keys(), dtype=np.int64, count=len(act_map)
-            )
+            act_ids = np.fromiter(act_map.keys(), dtype=np.int64, count=len(act_map))
             positions = np.fromiter(
                 act_map.values(), dtype=np.int64, count=len(act_map)
             )
@@ -349,5 +345,6 @@ def lca(
 
     # Characterized inventory is optional now
     if store_inventory and (not compute_score):
-        build_characterized_inventory(trails=trails, methods=methods, char_cache=_CHAR_CACHE)
-
+        build_characterized_inventory(
+            trails=trails, methods=methods, char_cache=_CHAR_CACHE
+        )

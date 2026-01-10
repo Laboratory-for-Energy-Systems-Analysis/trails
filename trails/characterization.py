@@ -143,6 +143,7 @@ def build_characterized_inventory(
     )
     return trails.characterized_inventory
 
+
 def get_cf_vector(
     trails: Trails,
     methods: List[str],
@@ -159,4 +160,3 @@ def get_cf_vector(
         char_cache=char_cache,
         debug=debug,
     )
-
