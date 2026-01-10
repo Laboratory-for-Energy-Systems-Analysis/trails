@@ -30,6 +30,7 @@ warnings.filterwarnings("ignore", module="scikits")
 
 _CHAR_CACHE: dict = {}
 
+
 def _get_mapping_arrays(mapping) -> tuple[np.ndarray, np.ndarray] | tuple[None, None]:
     """Return (ids, positions) arrays for a bw2calc dict mapping-like object."""
     if mapping:
@@ -78,7 +79,9 @@ def _build_rhs_matrix_from_root_demands(
     return roots, B
 
 
-def solve_many_rhs_umfpack_factorized(A_csc: sp.csc_matrix, B: np.ndarray) -> np.ndarray:
+def solve_many_rhs_umfpack_factorized(
+    A_csc: sp.csc_matrix, B: np.ndarray
+) -> np.ndarray:
     """
     Solve A X = B using a single UMFPACK factorization.
 
@@ -121,7 +124,6 @@ def solve_many_rhs_umfpack_factorized(A_csc: sp.csc_matrix, B: np.ndarray) -> np
         X[:, j] = ctx.solve(UMFPACK_A, A_csc, B[:, j])
 
     return X
-
 
 
 def lca_static_simple(
@@ -418,7 +420,6 @@ def lca(
                 )
             if supply_total:
                 supplies.append((supply_total, None))
-
 
         # Injected supply
         if attribute_to_roots:

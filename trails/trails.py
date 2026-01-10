@@ -200,7 +200,6 @@ class Trails:
         self._score_bulk_root = []
         self._score_bulk_value = []
 
-
         self.scores = None
 
     def _append_scores_from_yearidx_map(
@@ -282,7 +281,6 @@ class Trails:
             self._score_bulk_root = []
             self._score_bulk_value = []
 
-
             self.scores = None
 
     def _append_score_entry(
@@ -327,7 +325,9 @@ class Trails:
         n_activities = int(self.A.shape[1])
         has_root = bool(self._scores_has_root)
 
-        has_any = bool(self._score_chunk_act) or bool(getattr(self, "_score_bulk_act", []))
+        has_any = bool(self._score_chunk_act) or bool(
+            getattr(self, "_score_bulk_act", [])
+        )
         if not has_any:
             if has_root:
                 arr = sparse.COO.zeros(
@@ -375,23 +375,28 @@ class Trails:
         if getattr(self, "_score_bulk_act", []):
             act_b = np.concatenate(self._score_bulk_act).astype(np.int64, copy=False)
             yr_b = np.concatenate(self._score_bulk_year).astype(np.int64, copy=False)
-            data_b = np.concatenate(self._score_bulk_value).astype(self.value_dtype, copy=False)
+            data_b = np.concatenate(self._score_bulk_value).astype(
+                self.value_dtype, copy=False
+            )
 
             coords_parts.append((act_b, yr_b))
             data_parts.append(data_b)
             if has_root:
-                root_b = np.concatenate(self._score_bulk_root).astype(np.int64, copy=False)
+                root_b = np.concatenate(self._score_bulk_root).astype(
+                    np.int64, copy=False
+                )
                 root_parts.append(root_b)
 
         act = np.concatenate([p[0] for p in coords_parts])
         yr = np.concatenate([p[1] for p in coords_parts])
         data = np.concatenate(data_parts).astype(self.value_dtype, copy=False)
 
-
         if has_root:
             root = np.concatenate(root_parts).astype(np.int64, copy=False)
             coords = np.vstack([act, yr, root])
-            arr = sparse.COO(coords, data, shape=(n_activities, len(years), n_activities))
+            arr = sparse.COO(
+                coords, data, shape=(n_activities, len(years), n_activities)
+            )
 
             self.scores = xr.DataArray(
                 arr,
@@ -526,7 +531,9 @@ class Trails:
     ) -> None:
         """Append aligned arrays of (act, year_idx, value[, root]) into score bulk builder."""
         if not hasattr(self, "_score_bulk_value"):
-            raise RuntimeError("Score bulk builders not initialized. Call reset_scores() or reset_inventory() first.")
+            raise RuntimeError(
+                "Score bulk builders not initialized. Call reset_scores() or reset_inventory() first."
+            )
 
         a = np.asarray(act_idx)
         y = np.asarray(year_idx)
@@ -556,13 +563,13 @@ class Trails:
 
         if getattr(self, "_scores_has_root", False):
             if root_activity is None:
-                raise ValueError("root_activity must be provided when scores have root dimension")
+                raise ValueError(
+                    "root_activity must be provided when scores have root dimension"
+                )
             r = np.asarray(root_activity)
             if r.shape != a.shape:
                 raise ValueError("root_activity must match act_idx shape")
             self._score_bulk_root.append(r[m].astype(np.int64, copy=False))
-
-
 
     def _append_inventory_entries_bulk(
         self,
@@ -1475,9 +1482,9 @@ class Trails:
     def accumulate_temporalized_biosphere_score_matrix(
         self,
         base_year: int,
-        supply_matrix: np.ndarray,          # shape (n_acts, n_roots)
-        root_activities: np.ndarray,        # shape (n_roots,)
-        cf: np.ndarray,                     # shape (n_flows,)
+        supply_matrix: np.ndarray,  # shape (n_acts, n_roots)
+        root_activities: np.ndarray,  # shape (n_roots,)
+        cf: np.ndarray,  # shape (n_flows,)
         *,
         min_amount: float = 0.0,
         use_temporal_distributions: bool = True,
@@ -1496,7 +1503,9 @@ class Trails:
         base_year = int(base_year)
 
         # Ensure score builders exist
-        if not hasattr(self, "_score_year_index") or not hasattr(self, "_score_bulk_value"):
+        if not hasattr(self, "_score_year_index") or not hasattr(
+            self, "_score_bulk_value"
+        ):
             self.reset_scores(attribute_to_roots=True)
 
         # Resolve B slice
@@ -1675,7 +1684,12 @@ class Trails:
                 offset_max=off_max,
                 amount_source=amt_src,
             )
-            return [(int(o), float(w)) for o, w in TemporalDistribution(tex).iter_offsets_and_weights(debug=False)]
+            return [
+                (int(o), float(w))
+                for o, w in TemporalDistribution(tex).iter_offsets_and_weights(
+                    debug=False
+                )
+            ]
 
         # We will append contributions for (act, year_idx, root) in bulk by accumulating
         # sparse triplets in local python lists then flush via _append_scores_bulk per group.
@@ -1716,17 +1730,27 @@ class Trails:
                         port_groups_pos.setdefault(k, []).append(p)
 
                 # Pre-characterize anchor-year coefficients
-                no_td_coeff = float(np.dot(vals_full[no_td_pos], cf[flows_full[no_td_pos]])) if no_td_pos else 0.0
+                no_td_coeff = (
+                    float(np.dot(vals_full[no_td_pos], cf[flows_full[no_td_pos]]))
+                    if no_td_pos
+                    else 0.0
+                )
 
                 ported_coeffs = {}
                 for k, plist in port_groups_pos.items():
                     pos = np.asarray(plist, dtype=np.intp)
-                    ported_coeffs[k] = float(np.dot(vals_full[pos], cf[flows_full[pos]])) if pos.size else 0.0
+                    ported_coeffs[k] = (
+                        float(np.dot(vals_full[pos], cf[flows_full[pos]]))
+                        if pos.size
+                        else 0.0
+                    )
 
                 grouped: dict[tuple, list[int]] = {}
                 for p, tex in matrix_entries_pos:
                     grouped.setdefault(td_key(tex), []).append(int(p))
-                matrix_groups = {k: np.asarray(v, dtype=np.intp) for k, v in grouped.items()}
+                matrix_groups = {
+                    k: np.asarray(v, dtype=np.intp) for k, v in grouped.items()
+                }
 
                 cached = (no_td_coeff, ported_coeffs, matrix_groups)
                 row_char_cache[cache_key] = cached
@@ -1746,7 +1770,9 @@ class Trails:
                 if np.any(m):
                     r_idx = np.where(m)[0]
                     out_act.append(np.full(r_idx.size, int(a), dtype=np.int64))
-                    out_year.append(np.full(r_idx.size, int(base_year_idx), dtype=np.int64))
+                    out_year.append(
+                        np.full(r_idx.size, int(base_year_idx), dtype=np.int64)
+                    )
                     out_root.append(roots[r_idx])
                     out_val.append(vals[r_idx])
 
@@ -1788,7 +1814,9 @@ class Trails:
                 scenario_index_get = self.scenario_index.get
                 year_map_cache: dict[int, int] = {}
                 t_eff_cache: dict[int, int | None] = {}
-                B_row_cache_local: dict[int, tuple[np.ndarray, np.ndarray, np.ndarray]] = {}
+                B_row_cache_local: dict[
+                    int, tuple[np.ndarray, np.ndarray, np.ndarray]
+                ] = {}
 
                 def map_year_cached(raw_year: int) -> int:
                     y = year_map_cache.get(raw_year)
@@ -1843,7 +1871,9 @@ class Trails:
                         if start_eff == end_eff:
                             continue
 
-                        row_vals_eff = data_sorted_eff[start_eff:end_eff].astype(np.float64, copy=False)
+                        row_vals_eff = data_sorted_eff[start_eff:end_eff].astype(
+                            np.float64, copy=False
+                        )
 
                         # Map flows -> position in this row (cached)
                         row_index_map = self._get_B_row_index_map_for_t_act(t_eff_i, a)
@@ -1868,7 +1898,9 @@ class Trails:
                             vals_eff = row_vals_eff[pos[valid]]
                             cf_use = cf_sorted[valid]
 
-                        score_per_supply = float(np.dot(vals_eff, cf_use)) * float(weight)
+                        score_per_supply = float(np.dot(vals_eff, cf_use)) * float(
+                            weight
+                        )
 
                         if score_per_supply == 0.0:
                             continue
@@ -1881,7 +1913,9 @@ class Trails:
                         if np.any(m):
                             r_idx = np.where(m)[0]
                             out_act.append(np.full(r_idx.size, int(a), dtype=np.int64))
-                            out_year.append(np.full(r_idx.size, int(yidx), dtype=np.int64))
+                            out_year.append(
+                                np.full(r_idx.size, int(yidx), dtype=np.int64)
+                            )
                             out_root.append(roots[r_idx])
                             out_val.append(vals[r_idx])
 
@@ -1893,8 +1927,6 @@ class Trails:
             val = np.concatenate(out_val).astype(np.float64, copy=False)
 
             self._append_scores_bulk(act, yr, val, root_activity=root)
-
-
 
     def accumulate_temporalized_biosphere_score(
         self,
@@ -2081,7 +2113,6 @@ class Trails:
 
             # min_amount filtering (applied to *characterized* contribution in the end,
             # but we keep a flow-level filter here to avoid useless work for huge rows)
-
 
             # ---- NO TD fast path: score = supply_amt * sum_f B[a,f]*cf[f] ----
             if not bio_td:

@@ -653,7 +653,6 @@ def load_matrices_from_package(
         csv_path = _resource_abspath(package, res)
         df = _read_matrix_csv_faster(csv_path, kind="A")
 
-
         n = int(len(df))
         if n:
             act = df["index of activity"].to_numpy(dtype=np.int64, copy=False)
@@ -689,8 +688,12 @@ def load_matrices_from_package(
                 mask_td = td != 0
 
             if mask_td.any():
-                act_td = df.loc[mask_td, "index of activity"].to_numpy(np.int64, copy=False)
-                prod_td = df.loc[mask_td, "index of product"].to_numpy(np.int64, copy=False)
+                act_td = df.loc[mask_td, "index of activity"].to_numpy(
+                    np.int64, copy=False
+                )
+                prod_td = df.loc[mask_td, "index of product"].to_numpy(
+                    np.int64, copy=False
+                )
                 dist_td = df.loc[mask_td, "temporal_distribution"].to_numpy(copy=False)
 
                 loc_td = (
@@ -729,7 +732,9 @@ def load_matrices_from_package(
                         None if src_td is None else src_td[irow],
                     )
                     if tex is not None:
-                        temporal_exchanges[(scenario_label, int(act_td[irow]), int(prod_td[irow]))] = tex
+                        temporal_exchanges[
+                            (scenario_label, int(act_td[irow]), int(prod_td[irow]))
+                        ] = tex
 
     # ---------- Load all B_matrix.csv ----------
     for scenario_label, res in _iter_inventory_resources(package, "B_matrix.csv"):
@@ -761,8 +766,12 @@ def load_matrices_from_package(
                 mask_td = td != 0
 
             if mask_td.any():
-                act_td = df.loc[mask_td, "index of activity"].to_numpy(np.int64, copy=False)
-                flow_td = df.loc[mask_td, "index of biosphere flow"].to_numpy(np.int64, copy=False)
+                act_td = df.loc[mask_td, "index of activity"].to_numpy(
+                    np.int64, copy=False
+                )
+                flow_td = df.loc[mask_td, "index of biosphere flow"].to_numpy(
+                    np.int64, copy=False
+                )
                 dist_td = df.loc[mask_td, "temporal_distribution"].to_numpy(copy=False)
 
                 loc_td = (
@@ -801,7 +810,9 @@ def load_matrices_from_package(
                         None if src_td is None else src_td[irow],
                     )
                     if tex is not None:
-                        temporal_biosphere_exchanges[(scenario_label, int(act_td[irow]), int(flow_td[irow]))] = tex
+                        temporal_biosphere_exchanges[
+                            (scenario_label, int(act_td[irow]), int(flow_td[irow]))
+                        ] = tex
 
     # ---------- Deduce shapes ----------
     n_scenarios = len(scenario_labels)
@@ -890,14 +901,18 @@ def _read_matrix_csv_faster(csv_path: str, kind="A") -> pd.DataFrame:
         "maximum": "float64",
         "temporal_loc": "float64",
         "temporal_scale": "float64",
-        "temporal_min": "float64",   # if these are really integers, keep float64 then cast later
+        "temporal_min": "float64",  # if these are really integers, keep float64 then cast later
         "temporal_max": "float64",
         "temporal_distribution": "float64",  # blanks -> NaN
         # temporal_amount_source left as object
     }
 
     # only include dtype entries for existing columns
-    dtype_map = {k: v for k, v in dtype_map.items() if k in cols_to_read and k != "temporal_amount_source"}
+    dtype_map = {
+        k: v
+        for k, v in dtype_map.items()
+        if k in cols_to_read and k != "temporal_amount_source"
+    }
 
     df = pd.read_csv(
         csv_path,
@@ -958,12 +973,21 @@ def _parse_temporal_exchange_fields(
 
     return TemporalExchange(
         distribution=dist_code,
-        loc=None if (loc is None or (isinstance(loc, float) and np.isnan(loc))) else float(loc),
-        scale=None if (scale is None or (isinstance(scale, float) and np.isnan(scale))) else float(scale),
+        loc=(
+            None
+            if (loc is None or (isinstance(loc, float) and np.isnan(loc)))
+            else float(loc)
+        ),
+        scale=(
+            None
+            if (scale is None or (isinstance(scale, float) and np.isnan(scale)))
+            else float(scale)
+        ),
         offset_min=_to_int(off_min, 0),
         offset_max=_to_int(off_max, 0),
         amount_source=src,
     )
+
 
 def interpolate_to_annual(
     A: sparse.COO,
@@ -1006,8 +1030,12 @@ def interpolate_to_annual(
 
         for y in range(y0 + 1, y1 + 1):
             w = float(y - y0) / float(dt)
-            new_As.append(_interp_slice_union_vectorized(A0, A1, w, idx_dtype, value_dtype))
-            new_Bs.append(_interp_slice_union_vectorized(B0, B1, w, idx_dtype, value_dtype))
+            new_As.append(
+                _interp_slice_union_vectorized(A0, A1, w, idx_dtype, value_dtype)
+            )
+            new_Bs.append(
+                _interp_slice_union_vectorized(B0, B1, w, idx_dtype, value_dtype)
+            )
             new_labels.append(str(y))
 
     A_interp = sparse.stack(new_As, axis=0).astype(value_dtype)
@@ -1015,10 +1043,12 @@ def interpolate_to_annual(
     new_index = {label: i for i, label in enumerate(new_labels)}
     return A_interp, B_interp, new_labels, new_index
 
+
 def _concat_or_empty(arrs: list[np.ndarray], dtype: np.dtype) -> np.ndarray:
     if not arrs:
         return np.array([], dtype=dtype)
     return np.concatenate(arrs).astype(dtype, copy=False)
+
 
 def _interpolate_annual_slices(
     years_sorted: np.ndarray,
@@ -1062,6 +1092,7 @@ def _interpolate_annual_slices(
             new_labels.append(str(y))
 
     return new_As, new_Bs, new_labels
+
 
 def _interp_slice_union_vectorized(
     M0: sparse.COO,
