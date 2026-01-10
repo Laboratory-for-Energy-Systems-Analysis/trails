@@ -7,7 +7,7 @@ configure_trails_logging(file_level=logging.DEBUG)
 
 # dp = Package("datapackage.json")
 # dp = Package("/Users/romain/GitHub/premise/dev/trails_2026-01-07.zip")
-dp = Package("/Users/romain/GitHub/premise/dev/trails_2025-12-31 3.zip")
+dp = Package("/Users/romain/GitHub/premise/dev/trails_2025-12-31.zip")
 trails = Trails(dp)
 
 methods = [
@@ -25,5 +25,7 @@ trails.lca(
     show_progress=True,
     min_amount=1e-22,
     attribute_to_roots=True,
+    compute_score=True,
+    store_inventory=False,
     debug=False,
 )

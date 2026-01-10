@@ -805,6 +805,110 @@ def _wrap_hover_label(text: str, max_chars: int = 45) -> str:
     joined = joined.replace(" | ", " |<br>")
     return joined
 
+def _scores_to_results(
+    scores: xr.DataArray,
+    *,
+    by_flow: bool = False,
+) -> Dict[int, Dict[str, Any]]:
+    """
+    Convert a score DataArray into impact-year results.
+
+    Supported dims (examples):
+      - ("year",) totals only
+      - ("activity","year") or ("year","activity")
+      - ("root activity","year") or ("year","root activity")
+      - ("activity","year","root activity") or permutations -> will sum over "activity"
+      - ("flow","year") or ("year","flow") if by_flow=True
+
+    Returns:
+      impact_year -> {"scores": float, score_key: {idx: float}}
+    """
+    if "year" not in scores.dims:
+        raise ValueError("scores must include a 'year' dimension.")
+
+    years = [int(y) for y in scores.coords["year"].values.tolist()]
+
+    # Pick what we attribute to
+    if by_flow:
+        if "flow" in scores.dims:
+            attrib_dim = "flow"
+        else:
+            # If user asked by_flow but there is no flow dim, fall back to totals
+            attrib_dim = None
+        score_key = "scores_by_flow"
+    else:
+        attrib_dim = "root activity" if "root activity" in scores.dims else "activity"
+        score_key = "scores_by_first_level_child"
+
+    # Start from input
+    data = scores
+
+    # Collapse to (attrib_dim, year) if possible
+    if attrib_dim is None:
+        # totals only: sum everything except year
+        extra_dims = [d for d in data.dims if d != "year"]
+        if extra_dims:
+            data = data.sum(dim=extra_dims)
+        # ensure ("year",) ordering
+        if data.dims != ("year",):
+            data = data.transpose("year")
+        # build results
+        results: Dict[int, Dict[str, Any]] = {}
+        arr = data.data
+        if hasattr(arr, "todense"):
+            v = np.asarray(arr.todense(), dtype=float).ravel()
+        else:
+            v = np.asarray(data.values, dtype=float).ravel()
+        for yi, year in enumerate(years):
+            results[int(year)] = {"scores": float(v[yi]), score_key: {}}
+        return results
+
+    # If we have exchange-attributed tensor activity x year x root activity,
+    # and we're plotting by root activity, reduce over activity.
+    if attrib_dim == "root activity" and "activity" in data.dims:
+        data = data.sum(dim="activity")
+
+    # If we are plotting by activity but root activity exists, reduce it away.
+    if attrib_dim == "activity" and "root activity" in data.dims:
+        data = data.sum(dim="root activity")
+
+    # If any leftover dims exist, collapse them too (e.g. "method", "scenario")
+    extra_dims = [d for d in data.dims if d not in (attrib_dim, "year")]
+    if extra_dims:
+        data = data.sum(dim=extra_dims)
+
+    # Ensure (attrib_dim, year) order
+    if data.dims != (attrib_dim, "year"):
+        data = data.transpose(attrib_dim, "year")
+
+    # Safely densify (compatible with sparse.AUTO_DENSIFY=False)
+    arr = data.data
+    if hasattr(arr, "todense"):
+        vals = np.asarray(arr.todense(), dtype=float)
+    else:
+        vals = np.asarray(data.values, dtype=float)
+
+    attrib_ids = data.coords[attrib_dim].values
+
+    results: Dict[int, Dict[str, Any]] = {int(y): {"scores": 0.0, score_key: {}} for y in years}
+
+    # vals shape: (attrib, year)
+    for yi, year in enumerate(years):
+        col = vals[:, yi]
+        per: Dict[int, float] = {}
+        year_total = 0.0
+        for ai, v in enumerate(col):
+            if v == 0.0:
+                continue
+            idx = int(attrib_ids[ai])
+            fv = float(v)
+            per[idx] = fv
+            year_total += fv
+        results[int(year)][score_key] = per
+        results[int(year)]["scores"] = year_total
+
+    return results
+
 
 def plot_temporal_scores(
     results_by_year: Union[
@@ -903,25 +1007,35 @@ def plot_temporal_scores(
     :rtype: plotly.graph_objects.Figure
     """
     if results_by_year is None:
-        if trails.characterized_inventory is None:
-            raise ValueError("No characterized inventory available for plotting.")
-        results_by_year = trails.characterized_inventory
+        # Prefer characterized inventory if present; otherwise fall back to scores
+        if trails.characterized_inventory is not None:
+            results_by_year = trails.characterized_inventory
+        elif getattr(trails, "scores", None) is not None:
+            results_by_year = trails.scores
+        else:
+            raise ValueError("No characterized inventory or scores available for plotting.")
 
     if isinstance(results_by_year, xr.DataArray):
-        if "root activity" in results_by_year.dims:
-            if show_flow_contributions:
-                results_by_year = results_by_year.sum(dim="root activity")
-                results_by_year = _characterized_inventory_to_results(
-                    results_by_year, by_flow=True
-                )
+        # Inventory-style arrays have a "flow" dim; score arrays generally do not.
+        if "flow" in results_by_year.dims:
+            # Existing behavior: interpret as characterized inventory
+            if "root activity" in results_by_year.dims:
+                if show_flow_contributions:
+                    tmp = results_by_year.sum(dim="root activity")
+                    results_by_year = _characterized_inventory_to_results(tmp, by_flow=True)
+                else:
+                    results_by_year = _characterized_inventory_to_root_results(results_by_year)
             else:
-                results_by_year = _characterized_inventory_to_root_results(
-                    results_by_year
+                results_by_year = _characterized_inventory_to_results(
+                    results_by_year, by_flow=show_flow_contributions
                 )
         else:
-            results_by_year = _characterized_inventory_to_results(
-                results_by_year, by_flow=show_flow_contributions
-            )
+            # New behavior: interpret as score array (e.g., trails.scores)
+            if show_flow_contributions:
+                # Only works if scores actually has a "flow" dim; otherwise will become totals-only.
+                results_by_year = _scores_to_results(results_by_year, by_flow=True)
+            else:
+                results_by_year = _scores_to_results(results_by_year, by_flow=False)
     else:
         results_by_year = to_impact_year_results(results_by_year)
 

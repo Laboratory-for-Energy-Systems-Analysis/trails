@@ -142,3 +142,21 @@ def build_characterized_inventory(
         coords=coords,
     )
     return trails.characterized_inventory
+
+def get_cf_vector(
+    trails: Trails,
+    methods: List[str],
+    char_cache: dict[tuple, np.ndarray],
+    *,
+    debug: bool = False,
+    ei_version: str = "3.11",
+) -> np.ndarray:
+    """Return a dense CF vector aligned to trails.B flow dimension."""
+    return _build_cf_vector_flowid_space(
+        trails=trails,
+        methods=methods,
+        ei_version=ei_version,
+        char_cache=char_cache,
+        debug=debug,
+    )
+

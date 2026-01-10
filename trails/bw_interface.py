@@ -44,10 +44,7 @@ def _resolve_matrix_label(trails: Trails, year: int) -> tuple[str, int]:
         years = np.array([int(lbl) for lbl in trails.scenario_labels])
         idx = int(np.argmin(np.abs(years - year)))
         label_for_matrix = trails.scenario_labels[idx]
-        print(
-            f"⚠️ Matrix slice for year {year} not found in A/B; "
-            f"using nearest available matrix year {label_for_matrix}."
-        )
+
 
     t = trails.scenario_index[label_for_matrix]
     return label_for_matrix, t
