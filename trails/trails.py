@@ -228,7 +228,31 @@ class Trails:
         attribute_to_roots: bool = False,
         reset_scores: bool = True,  # NEW
     ) -> None:
-        ...
+        min_offset, max_offset = self._inventory_offset_bounds()
+        years = np.arange(
+            int(self.min_year + min_offset),
+            int(self.max_year + max_offset) + 1,
+            dtype=int,
+        )
+
+        self._inventory_years = years
+        self._inventory_year_index = {int(y): int(i) for i, y in enumerate(years)}
+        self._inventory_has_root = bool(attribute_to_roots)
+
+        # Initialize inventory chunk builders (block-based appends)
+        self._inv_chunk_act = []
+        self._inv_chunk_year = []
+        self._inv_chunk_root = []
+        self._inv_chunk_flows = []
+        self._inv_chunk_values = []
+        self._inv_chunk_len = []
+
+        # Initialize inventory bulk builders (vectorized appends)
+        self._inv_bulk_act = []
+        self._inv_bulk_year = []
+        self._inv_bulk_flow = []
+        self._inv_bulk_value = []
+        self._inv_bulk_root = []
         # Reset outputs
         self.inventory = None
         self.characterized_inventory = None
