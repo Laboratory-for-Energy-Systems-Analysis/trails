@@ -3452,6 +3452,23 @@ class Trails:
                 for child_act, child_amt in mapping.items():
                     child_amt = float(child_amt)
                     if abs(child_amt) < min_amount:
+                        # Do not expand negligible children, but keep their contribution
+                        # as a frontier node so increasing max_depth doesn't drop totals.
+                        child_year = int(child_year)
+                        child_act = int(child_act)
+                        if depth == 0:
+                            child_root = child_act
+                        else:
+                            child_root = root_act
+                        self._record_frontier(
+                            frontier_total,
+                            provenance_roots,
+                            child_year,
+                            child_act,
+                            child_amt,
+                            child_root,
+                            return_provenance,
+                        )
                         continue
 
                     child_year = int(child_year)
