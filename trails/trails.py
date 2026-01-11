@@ -25,6 +25,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+
 def _log_every(n: int, i: int) -> bool:
     return n > 0 and (i % n == 0)
 
@@ -1114,8 +1115,14 @@ class Trails:
         scenario_year, scenario_label, t = context
 
         if debug:
-            logger.info("expand_tech: base_year=%d scen_year=%d t=%d act=%d amount=%g",
-                        int(year), int(scenario_year), int(t), int(act_idx), float(amount))
+            logger.info(
+                "expand_tech: base_year=%d scen_year=%d t=%d act=%d amount=%g",
+                int(year),
+                int(scenario_year),
+                int(t),
+                int(act_idx),
+                float(amount),
+            )
 
         A_row = self.A[t, act_idx, :]
         if A_row.nnz == 0:
@@ -1213,7 +1220,6 @@ class Trails:
                 out_years,
                 out_edges,
             )
-
 
         return demand
 
@@ -3325,7 +3331,6 @@ class Trails:
                     float(time.perf_counter() - t0),
                 )
 
-
             # Map to scenario year for "has direct biosphere" test (fast cutoff logic)
             scenario_year = self._map_year_to_scenario_year(year)
             has_direct_bio = self._has_direct_biosphere(scenario_year, act, bio_cache)
@@ -3342,7 +3347,6 @@ class Trails:
                     return_provenance,
                 )
                 continue
-
 
             # Expand this node (only if not cut)
             child_demands = self.expand_temporal_exchanges(
@@ -3390,8 +3394,6 @@ class Trails:
                     est = int(max(est, pbar.n + 1) * EMPIRICAL_SAFETY_FACTOR)
                     pbar.total = est
                     pbar.refresh()
-
-
 
             # Enqueue children
             for child_year, mapping in child_demands.items():
@@ -3450,7 +3452,6 @@ class Trails:
                 int(len(direct_bio_total)),
                 float(time.perf_counter() - t0),
             )
-
 
         # Normalize provenance to plain dicts
         if return_provenance:
