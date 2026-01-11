@@ -38,30 +38,43 @@ def _build_activity_label_map(trails: Trails) -> dict[int, str]:
 
 
 def _build_flow_label_map(trails: Trails) -> dict[int, str]:
-    """Build a mapping of biosphere flow indices to display labels.
+    labels: dict[int, str] = {}
 
-    :param trails: Trails instance with biosphere metadata.
-    :type trails: Trails
-    :returns: Mapping from flow index to label.
-    :rtype: dict[int, str]
-    """
-    labels = {}
+    # Determine which flow keys are actually used in plotted arrays
+    flow_coord = None
+    if getattr(trails, "characterized_inventory", None) is not None and "flow" in trails.characterized_inventory.coords:
+        flow_coord = trails.characterized_inventory.coords["flow"].values
+    elif getattr(trails, "inventory", None) is not None and "flow" in trails.inventory.coords:
+        flow_coord = trails.inventory.coords["flow"].values
+
+    coord_value_set = set(int(v) for v in flow_coord) if flow_coord is not None else None
+
     for scen_label, mapping in trails.biosphere_indices.items():
         for idx, meta in mapping.items():
-            if idx not in labels:
-                name = meta.get("name") or f"Flow {idx}"
-                compartment = meta.get("compartment") or ""
-                subcompartment = meta.get("subcompartment") or ""
-                unit = meta.get("unit") or ""
+            k = int(idx)
 
-                label = name
-                if compartment or subcompartment:
-                    parts = [p for p in (compartment, subcompartment) if p]
-                    label += " | " + "/".join(parts)
-                if unit:
-                    label += f" ({unit})"
-                labels[idx] = label
+            # If we know the plotted flow coordinate values, only keep matching keys
+            if coord_value_set is not None and k not in coord_value_set:
+                continue
+
+            if k in labels:
+                continue
+
+            name = meta.get("name") or f"Flow {k}"
+            compartment = meta.get("compartment") or ""
+            subcompartment = meta.get("subcompartment") or ""
+            unit = meta.get("unit") or ""
+
+            label = name
+            if compartment or subcompartment:
+                parts = [p for p in (compartment, subcompartment) if p]
+                label += " | " + "/".join(parts)
+            if unit:
+                label += f" ({unit})"
+            labels[k] = label
+
     return labels
+
 
 
 def _select_years_from_results(

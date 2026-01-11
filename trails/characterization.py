@@ -11,6 +11,59 @@ from .lcia import get_lcia_methods
 if TYPE_CHECKING:
     from .trails import Trails
 
+def _build_flowkey_to_flowindex(trails: Trails) -> dict[tuple, int]:
+    """
+    Build (name, compartment, subcompartment) -> flow_index mapping,
+    where flow_index is the position along the Trails/B/inventory flow dimension.
+    """
+    # Prefer explicit flow coordinate if available
+    flow_coord = None
+    if getattr(trails, "inventory", None) is not None and "flow" in trails.inventory.coords:
+        flow_coord = trails.inventory.coords["flow"].values
+    elif getattr(trails, "B", None) is not None:
+        # If Trails has a flow coordinate elsewhere, use it; otherwise fall back to range
+        flow_coord = np.arange(int(trails.B.shape[2]), dtype=int)
+
+    # Build mapping from whatever the coordinate values are -> position
+    coord_value_to_pos = {int(v): i for i, v in enumerate(flow_coord)}
+
+    out: dict[tuple, int] = {}
+    for _label, meta in getattr(trails, "biosphere_indices", {}).items():
+        if not meta:
+            continue
+
+        k0 = next(iter(meta.keys()))
+        if not isinstance(k0, (int, np.integer)):
+            raise TypeError(
+                f"Unexpected biosphere_indices structure for label {_label}: "
+                f"expected int keys, got {type(k0)}"
+            )
+
+        for key_int, md in meta.items():
+            if not isinstance(md, dict):
+                continue
+            name = md.get("name")
+            comp = md.get("compartment")
+            sub = md.get("subcompartment")
+            if name is None or comp is None or sub is None:
+                continue
+
+            # key_int might be a coordinate value (often it is), not necessarily a positional index
+            # Convert coordinate value -> positional index where possible; otherwise assume it is already positional
+            k_int = int(key_int)
+            flow_index = coord_value_to_pos.get(k_int, None)
+
+            if flow_index is None:
+                # Fallback: if key_int looks like a position and is in-range, accept it
+                if 0 <= k_int < len(flow_coord):
+                    flow_index = k_int
+                else:
+                    continue  # cannot align this entry safely
+
+            out.setdefault((name, comp, sub), int(flow_index))
+
+    return out
+
 
 def _build_flowkey_to_flowid(trails: Trails) -> dict[tuple, int]:
     """Build a flow-key to flow-id mapping across labels.
@@ -78,7 +131,7 @@ def _build_cf_vector_flowid_space(
     if cache_key in char_cache:
         return char_cache[cache_key]
 
-    flowkey_to_flowid = _build_flowkey_to_flowid(trails)
+    flowkey_to_flowid = _build_flowkey_to_flowindex(trails)
 
     methods_dict = get_lcia_methods(methods=methods, ei_version=ei_version)
 
@@ -116,6 +169,13 @@ def build_characterized_inventory(
     )
 
     inventory = trails.inventory
+
+    # Enforce canonical dim order for safe broadcasting
+    if "root activity" in inventory.dims:
+        inventory = inventory.transpose("activity", "flow", "year", "root activity")
+    else:
+        inventory = inventory.transpose("activity", "flow", "year")
+
     inv_data = inventory.data
     if not isinstance(inv_data, sparse.COO):
         inv_data = sparse.COO.from_numpy(np.asarray(inv_data))

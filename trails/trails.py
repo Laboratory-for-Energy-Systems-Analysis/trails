@@ -202,6 +202,28 @@ class Trails:
 
         self.scores = None
 
+    def _clamp_year_to_inventory(self, year: int) -> int:
+        years = self._inventory_years
+        if years is None or years.size == 0:
+            raise RuntimeError("Inventory years not initialized; call reset_inventory() first.")
+        y = int(year)
+        if y < int(years[0]):
+            return int(years[0])
+        if y > int(years[-1]):
+            return int(years[-1])
+        return y
+
+    def _clamp_year_to_scores(self, year: int) -> int:
+        years = self._score_years
+        if years is None or years.size == 0:
+            raise RuntimeError("Score years not initialized; call reset_scores() or reset_inventory() first.")
+        y = int(year)
+        if y < int(years[0]):
+            return int(years[0])
+        if y > int(years[-1]):
+            return int(years[-1])
+        return y
+
     def _append_scores_from_yearidx_map(
         self,
         act_idx: int,
@@ -297,7 +319,8 @@ class Trails:
                 "Score builders not initialized. Call reset_scores() or reset_inventory() first."
             )
 
-        year_idx = self._score_year_index.get(int(year))
+        y = self._clamp_year_to_scores(int(year))
+        year_idx = self._score_year_index.get(y)
         if year_idx is None:
             return
 
@@ -466,10 +489,10 @@ class Trails:
                 "Inventory chunk builders not initialized. Call reset_inventory() first."
             )
 
-        year_idx = self._inventory_year_index.get(int(year))
+        y = self._clamp_year_to_inventory(int(year))
+        year_idx = self._inventory_year_index.get(y)
         if year_idx is None:
-            # out of configured inventory year range
-            return
+            return  # should not happen unless year index map is inconsistent
 
         # Fast-path: accept ndarray-like without forcing copies
         flows_arr = np.asarray(flows)
@@ -606,17 +629,25 @@ class Trails:
                 raise ValueError(
                     "year array must match act/flow/value length for bulk append."
                 )
-            year_idx = np.array(
-                [self._inventory_year_index.get(int(y), -1) for y in years_arr],
+            years_arr = np.asarray(year)
+            y0 = int(self._inventory_years[0])
+            y1 = int(self._inventory_years[-1])
+            years_clamped = np.clip(years_arr.astype(np.int64, copy=False), y0, y1)
+
+            year_idx = np.fromiter(
+                (self._inventory_year_index[int(y)] for y in years_clamped),
                 dtype=np.int64,
+                count=years_clamped.size,
             )
         else:
-            year_idx_val = self._inventory_year_index.get(int(year))
+            y = self._clamp_year_to_inventory(int(year))
+            year_idx_val = self._inventory_year_index.get(y)
             if year_idx_val is None:
                 return
+
             year_idx = np.full(flows_arr.shape[0], int(year_idx_val), dtype=np.int64)
 
-        mask = (vals_arr != 0.0) & (year_idx >= 0)
+        mask = (vals_arr != 0.0)
         if not np.any(mask):
             return
 
@@ -1500,7 +1531,7 @@ class Trails:
         if supply_matrix.size == 0:
             return
 
-        min_amount = 0.0
+
         base_year = int(base_year)
 
         # Ensure score builders exist
@@ -1538,7 +1569,6 @@ class Trails:
         if X.shape[0] != n_acts:
             raise ValueError(f"supply_matrix has {X.shape[0]} acts; expected {n_acts}")
 
-        min_amt = 0.0
 
         # ---------- No-TD fast path (avoid dense S = v[:, None] * X) ----------
         # ---------- No-TD fast path (chunked; avoids full S allocation) ----------
@@ -1755,9 +1785,10 @@ class Trails:
                 for offset, weight in pulses:
                     if weight == 0.0:
                         continue
-                    yidx = year_to_idx.get(int(base_year + offset))
-                    if yidx is None:
-                        continue
+                    raw = int(base_year + offset)
+                    y_clamped = self._clamp_year_to_scores(raw)
+                    yidx = year_to_idx[int(y_clamped)]
+
                     vals = vals_anchor * float(weight)
                     m = vals != 0.0
                     if np.any(m):
@@ -1807,12 +1838,11 @@ class Trails:
                         if weight == 0.0:
                             continue
 
-                        raw_year = int(base_year + offset)
-                        yidx = year_to_idx.get(raw_year)
-                        if yidx is None:
-                            continue
+                        raw = int(base_year + offset)
+                        y_clamped = self._clamp_year_to_scores(raw)
+                        yidx = year_to_idx[int(y_clamped)]
 
-                        y_eff = map_year_cached(raw_year)
+                        y_eff = map_year_cached(raw)
                         t_eff = t_eff_cache.get(y_eff)
                         if t_eff is None and y_eff not in t_eff_cache:
                             t_eff = scenario_index_get(str(y_eff))
@@ -1924,7 +1954,7 @@ class Trails:
         if self.B is None:
             return
 
-        min_amount = 0.0
+
         base_year = int(base_year)
 
         biosphere_slice = self._get_biosphere_slice(base_year, debug)
@@ -2072,12 +2102,7 @@ class Trails:
 
             # ---- NO TD fast path: score = supply_amt * sum_f B[a,f]*cf[f] ----
             if not bio_td:
-                if keep_full is None:
-                    score = supply_amt * float(np.dot(vals_full, cf[flows_full]))
-                else:
-                    score = supply_amt * float(
-                        np.dot(vals_full[keep_full], cf[flows_full[keep_full]])
-                    )
+                score = supply_amt * float(np.dot(vals_full, cf[flows_full]))
 
                 if score != 0.0:
                     self._append_scores_from_yearidx_map(
@@ -2173,10 +2198,10 @@ class Trails:
                     for offset, weight in pulses:
                         if weight == 0.0:
                             continue
-                        raw_year = base_year + int(offset)
-                        yidx = year_to_idx.get(int(raw_year))
-                        if yidx is None:
-                            continue
+                        raw = int(base_year + offset)
+                        y_clamped = self._clamp_year_to_scores(raw)
+                        yidx = year_to_idx[int(y_clamped)]
+
                         acc_yearidx[yidx] = acc_yearidx.get(
                             yidx, 0.0
                         ) + score_anchor * float(weight)
@@ -2213,12 +2238,11 @@ class Trails:
                         if weight == 0.0:
                             continue
 
-                        raw_year = base_year + int(offset)
-                        yidx = year_to_idx.get(int(raw_year))
-                        if yidx is None:
-                            continue
+                        raw = int(base_year + offset)
+                        y_clamped = self._clamp_year_to_scores(raw)
+                        yidx = year_to_idx[int(y_clamped)]
 
-                        y_eff = map_year_cached(raw_year)
+                        y_eff = map_year_cached(raw)
                         t_eff = t_eff_cache.get(y_eff)
                         if t_eff is None and y_eff not in t_eff_cache:
                             t_eff = scenario_index_get(str(y_eff))
@@ -2244,6 +2268,11 @@ class Trails:
                         row_vals_eff = data_sorted_eff[start_eff:end_eff].astype(
                             np.float64, copy=False
                         )
+
+                        if row_flows_eff.size > 1 and np.any(row_flows_eff[1:] < row_flows_eff[:-1]):
+                            order = np.argsort(row_flows_eff, kind="mergesort")
+                            row_flows_eff = row_flows_eff[order]
+                            row_vals_eff = row_vals_eff[order]
 
                         vals_sorted = self._row_values_for_flows_sorted(
                             row_flows_eff, row_vals_eff, f_sorted
@@ -2280,7 +2309,6 @@ class Trails:
         flow_sorted = ctx.flow_sorted
         data_sorted = ctx.data_sorted
 
-        min_amount = 0.0
         base_year = int(ctx.base_year)
 
         bio_td_get = ctx.bio_td_get
@@ -2774,7 +2802,6 @@ class Trails:
         if any(store_activity is None for _, store_activity in supplies):
             return False
 
-        min_amount = 0.0
         base_year = int(ctx.base_year)
 
         root_ids = np.array([int(store) for _, store in supplies], dtype=np.int64)
@@ -3112,7 +3139,6 @@ class Trails:
                 use_temporal_distributions,
             )
 
-        min_amount = 0.0
         # ------------------------------------------------------------------
         # Progress bar setup
         # ------------------------------------------------------------------
@@ -3358,15 +3384,13 @@ class Trails:
             for child_year, mapping in child_demands.items():
                 for child_act, child_amt in mapping.items():
                     child_amt = float(child_amt)
-                    if child_amt == 0.0:
-                        # Do not expand negligible children, but keep their contribution
-                        # as a frontier node so increasing max_depth doesn't drop totals.
+
+                    # Preserve remainder monotonically: do not expand tiny contributions,
+                    # keep them at the frontier so depth increases cannot reduce totals.
+                    if abs(child_amt) < float(min_amount):
                         child_year = int(child_year)
                         child_act = int(child_act)
-                        if depth == 0:
-                            child_root = child_act
-                        else:
-                            child_root = root_act
+                        child_root = child_act if depth == 0 else root_act
                         self._record_frontier(
                             frontier_total,
                             provenance_roots,
@@ -3444,6 +3468,12 @@ class Trails:
 
             year, act_idx = key
             y = int(year)
+            if self._inventory_years is not None and self._inventory_years.size:
+                y = max(int(self._inventory_years[0]), min(int(self._inventory_years[-1]), y))
+            else:
+                # fallback: clamp to scenario range
+                y = max(int(self.min_year), min(int(self.max_year), y))
+
             a = int(act_idx)
 
             if y not in f_by_year:
@@ -3476,7 +3506,7 @@ class Trails:
         :returns: Mapping of depth to edge amounts.
         :rtype: dict[int, dict[tuple[tuple[int, int], tuple[int, int]], float]]
         """
-        min_amount = 0.0
+
         queue = deque()
         queue.append((int(start_year), int(start_act_idx), float(amount), 0))
 
