@@ -46,8 +46,6 @@ def _get_mapping_arrays(mapping) -> tuple[np.ndarray, np.ndarray] | tuple[None, 
 def _map_activity_demands_to_products(
     lca_obj,
     activity_demands: dict[int, float],
-    *,
-    min_amount: float,
 ) -> dict[int, float]:
     """Map activity-indexed demands to product ids using LCA metadata."""
     if not activity_demands:
@@ -61,12 +59,8 @@ def _map_activity_demands_to_products(
     mapped: dict[int, float] = {}
     prod_map_keys = prod_map.keys()
     cache: dict[int, int] = {}
-    min_amount = float(min_amount)
-
     for act_id, amount in activity_demands.items():
         amt = float(amount)
-        if abs(amt) <= min_amount:
-            continue
         act_id = int(act_id)
         prod_id = cache.get(act_id)
         if prod_id is None:
@@ -366,7 +360,7 @@ def lca(
 
         solve_year = int(solve_year)
         arr = np.asarray(f_by_year[solve_year])
-        nz_idx = np.where(np.abs(arr) > float(min_amount))[0]
+        nz_idx = np.where(arr != 0.0)[0]
         if nz_idx.size == 0:
             if pbar is not None:
                 pbar.update(1)
@@ -396,7 +390,6 @@ def lca(
         fu_demand = _map_activity_demands_to_products(
             lca_obj,
             activity_demand,
-            min_amount=float(min_amount),
         )
         if not fu_demand:
             if pbar is not None:
@@ -418,7 +411,6 @@ def lca(
                 mapped = _map_activity_demands_to_products(
                     lca_obj,
                     demand,
-                    min_amount=float(min_amount),
                 )
                 if mapped:
                     per_root_demands[int(root_act)] = mapped
