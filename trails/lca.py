@@ -9,6 +9,9 @@ import numpy as np
 from scikits.umfpack import UmfpackWarning
 from tqdm import tqdm
 
+from scikits.umfpack import UmfpackContext, UMFPACK_A
+from scipy import sparse as sp
+
 from .bw_interface import (
     _extract_supply_fast,
     _extract_supply_fast_cached,
@@ -26,6 +29,101 @@ warnings.filterwarnings("ignore", category=UmfpackWarning)
 warnings.filterwarnings("ignore", module="scikits")
 
 _CHAR_CACHE: dict = {}
+
+
+def _get_mapping_arrays(mapping) -> tuple[np.ndarray, np.ndarray] | tuple[None, None]:
+    """Return (ids, positions) arrays for a bw2calc dict mapping-like object."""
+    if mapping:
+        try:
+            ids = np.fromiter(mapping.keys(), dtype=np.int64, count=len(mapping))
+            pos = np.fromiter(mapping.values(), dtype=np.int64, count=len(mapping))
+            return ids, pos
+        except Exception:
+            return None, None
+    return None, None
+
+
+def _build_rhs_matrix_from_root_demands(
+    *,
+    per_root_demands: dict[int, dict[int, float]],
+    product_dict: dict,
+    n: int,
+    min_amount: float,
+) -> tuple[list[int], np.ndarray]:
+    """
+    Build dense RHS matrix B (n, k) for all roots in `per_root_demands`.
+    Columns correspond to roots in returned `roots` list.
+    """
+    roots = [int(r) for r in per_root_demands.keys()]
+    k = len(roots)
+    if k == 0:
+        return [], np.zeros((n, 0), dtype=np.float64)
+
+    B = np.zeros((n, k), dtype=np.float64)
+
+    # Fill columns by mapping product IDs -> row indices (product_dict maps id -> row index)
+    for j, root in enumerate(roots):
+        demand = per_root_demands[root]
+        for prod_id, v in demand.items():
+            v = float(v)
+            if abs(v) <= float(min_amount):
+                continue
+            # Assume prod_id keys are valid; skip check_demand to avoid overhead
+            try:
+                i = product_dict[int(prod_id)]
+            except KeyError:
+                # Keep behavior strict if desired; otherwise `continue`
+                raise
+            B[int(i), j] += v
+
+    return roots, B
+
+
+def solve_many_rhs_umfpack_factorized(
+    A_csc: sp.csc_matrix, B: np.ndarray
+) -> np.ndarray:
+    """
+    Solve A X = B using a single UMFPACK factorization.
+
+    Notes on scikits.umfpack behavior:
+      - UmfpackContext.symbolic() and numeric() often return None on success.
+      - ctx.solve(...) may return None and write into `x`, depending on version.
+      - Therefore, rely on exceptions instead of status codes.
+    """
+    if not sp.isspmatrix_csc(A_csc):
+        A_csc = A_csc.tocsc()
+
+    # UMFPACK is float64-centric; keep this strict to avoid silent slow paths or failures.
+    if A_csc.dtype != np.float64:
+        A_csc = A_csc.astype(np.float64)
+
+    # UMFPACK can be sensitive to unsorted indices; enforce canonical CSC.
+    A_csc.sort_indices()
+
+    B = np.asarray(B)
+    if B.ndim != 2:
+        raise ValueError("B must be 2D (n, k)")
+    if B.dtype != np.float64:
+        B = B.astype(np.float64, copy=False)
+
+    n, k = B.shape
+    if A_csc.shape != (n, n):
+        raise ValueError(f"Shape mismatch: A {A_csc.shape}, B {B.shape}")
+
+    ctx = UmfpackContext()
+
+    # These calls frequently return None on success; failures raise exceptions.
+    ctx.symbolic(A_csc)
+    ctx.numeric(A_csc)
+
+    X = np.empty((n, k), dtype=np.float64)
+
+    # Reuse a preallocated x to reduce allocations
+    for j in range(k):
+        # In this scikits.umfpack version: solve(system, A, b, autoTranspose=True)
+        X[:, j] = ctx.solve(UMFPACK_A, A_csc, B[:, j])
+
+    return X
 
 
 def lca_static_simple(
@@ -230,6 +328,9 @@ def lca(
         )
 
     for solve_year in candidate_years:
+        roots_arr = None
+        X_roots = None
+
         solve_year = int(solve_year)
         arr = np.asarray(f_by_year[solve_year])
         nz_idx = np.where(np.abs(arr) > float(min_amount))[0]
@@ -249,33 +350,76 @@ def lca(
         )
 
         lca_obj = bc.LCA(demand=fu_demand, data_objs=[dp])
-        lca_obj.lci(factorize=True)
+        lca_obj.load_lci_data()  # build matrices + dicts
 
+        # Cache mappings once per year
         act_map = getattr(lca_obj.dicts, "activity", None)
-        if act_map:
-            act_ids = np.fromiter(act_map.keys(), dtype=np.int64, count=len(act_map))
-            positions = np.fromiter(
-                act_map.values(), dtype=np.int64, count=len(act_map)
-            )
-        else:
-            act_ids = None
-            positions = None
+        prod_map = getattr(lca_obj.dicts, "product", None)
+
+        act_ids, positions = _get_mapping_arrays(act_map)
+        # For RHS building we need the product id -> row index dict
+        product_dict = prod_map  # mapping-like
+
+        # Prepare A (CSC) once per year; UMFPACK expects CSC
+        A_csc = lca_obj.technosphere_matrix
+        if not sp.isspmatrix_csc(A_csc):
+            A_csc = A_csc.tocsc()
+
+        supplies: list[tuple[Dict[int, float], int | None]] = []
 
         if attribute_to_roots:
-            supplies: list[tuple[Dict[int, float], int | None]] = []
+            # Build one dense RHS matrix for all roots in this year
             per_root_demands = root_demands_by_year.get(solve_year, {})
-            for root_act, root_demand in per_root_demands.items():
-                lca_obj.redo_lci(demand=root_demand)
-                if act_ids is None or positions is None:
-                    supply_total = _extract_supply_fast(lca_obj, min_amount)
+            roots, B = _build_rhs_matrix_from_root_demands(
+                per_root_demands=per_root_demands,
+                product_dict=product_dict,
+                n=A_csc.shape[0],
+                min_amount=float(min_amount),
+            )
+
+            if roots:
+                if bc.PYPARDISO:
+                    # Keep old path for PARDISO; your Mac path is UMFPACK so this usually won't run
+                    for root_act in roots:
+                        root_demand = per_root_demands[root_act]
+                        lca_obj.build_demand_array(root_demand)
+                        lca_obj.supply_array = lca_obj.solve_linear_system()
+                        if act_ids is None or positions is None:
+                            supply_total = _extract_supply_fast(lca_obj, min_amount)
+                        else:
+                            supply_total = _extract_supply_fast_cached(
+                                lca_obj.supply_array, act_ids, positions, min_amount
+                            )
+                        if supply_total:
+                            supplies.append((supply_total, int(root_act)))
                 else:
-                    supply_total = _extract_supply_fast_cached(
-                        lca_obj.supply_array, act_ids, positions, min_amount
-                    )
-                if supply_total:
-                    supplies.append((supply_total, int(root_act)))
+                    # UMFPACK: factorize once and solve all RHS vectors
+                    X = solve_many_rhs_umfpack_factorized(A_csc, B)
+                    roots_arr = np.asarray(
+                        roots, dtype=np.int64
+                    )  # column order of B and X
+                    X_roots = X
+
+                    for j, root_act in enumerate(roots):
+                        supply_vec = X[:, j]
+                        if act_ids is None or positions is None:
+                            # Fallback: emulate lca_obj.supply_array for extractor
+                            lca_obj.supply_array = supply_vec
+                            supply_total = _extract_supply_fast(lca_obj, min_amount)
+                        else:
+                            supply_total = _extract_supply_fast_cached(
+                                supply_vec, act_ids, positions, min_amount
+                            )
+                        if supply_total:
+                            supplies.append((supply_total, int(root_act)))
+
         else:
-            supplies = []
+            # Original single-demand path (no per-root attribution)
+            lca_obj.build_demand_array(fu_demand)
+            if not bc.PYPARDISO:
+                lca_obj.decompose_technosphere()
+            lca_obj.supply_array = lca_obj.solve_linear_system()
+
             if act_ids is None or positions is None:
                 supply_total = _extract_supply_fast(lca_obj, min_amount)
             else:
@@ -305,24 +449,60 @@ def lca(
             if injected_supply:
                 supplies.append((injected_supply, None))
 
-        if supplies:
+        # ---- Inventory (keep your existing path for now) ----
+        if supplies and store_inventory:
             for supply_dict, root_act in supplies:
-                if store_inventory:
-                    trails.accumulate_temporalized_biosphere_inventory(
+                trails.accumulate_temporalized_biosphere_inventory(
+                    base_year=solve_year,
+                    supply_by_activity=supply_dict,
+                    min_amount=float(min_amount),
+                    store_activity=root_act,
+                    debug=debug,
+                )
+
+        # ---- Scores: NEW dense multi-root path ----
+        if compute_score:
+            # Build dense supply matrix (n_acts, n_roots_this_year)
+            # We only include "root demands" supplies here. Injected supplies are already dicts;
+            # keep them as-is (small) or merge them into the dense matrix if you want.
+            if attribute_to_roots:
+                # Only call the matrix scorer if we actually solved a multi-RHS system this year
+                # AND the roots ordering matches X columns.
+                if roots_arr is not None and X_roots is not None:
+                    trails.accumulate_temporalized_biosphere_score_matrix(
                         base_year=solve_year,
-                        supply_by_activity=supply_dict,
+                        supply_matrix=X_roots,
+                        root_activities=roots_arr,
+                        cf=cf,
                         min_amount=float(min_amount),
-                        store_activity=root_act,
+                        use_temporal_distributions=True,
                         debug=debug,
                     )
 
-                if compute_score:
+                # Injected supplies: keep cheap dict scoring (usually small)
+                per_root_injected = root_injected_by_year.get(solve_year, {})
+                for root_act, injected_supply in per_root_injected.items():
+                    if not injected_supply:
+                        continue
                     trails.accumulate_temporalized_biosphere_score(
                         base_year=solve_year,
-                        supply_by_activity=supply_dict,
+                        supply_by_activity=injected_supply,
                         cf=cf,
                         min_amount=float(min_amount),
-                        store_activity=root_act,
+                        store_activity=int(root_act),
+                        debug=debug,
+                    )
+            else:
+                # Non-root mode: single column supply array already exists
+                # You can keep the dict path or extend matrix scorer for no-root.
+                supply_total = supplies[0][0] if supplies else {}
+                if supply_total:
+                    trails.accumulate_temporalized_biosphere_score(
+                        base_year=solve_year,
+                        supply_by_activity=supply_total,
+                        cf=cf,
+                        min_amount=float(min_amount),
+                        store_activity=None,
                         debug=debug,
                     )
 

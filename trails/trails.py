@@ -194,6 +194,12 @@ class Trails:
         self._score_chunk_root = []
         self._score_chunk_value = []
 
+        # Bulk score builder (vectorized appends)
+        self._score_bulk_act = []
+        self._score_bulk_year = []
+        self._score_bulk_root = []
+        self._score_bulk_value = []
+
         self.scores = None
 
     def _append_scores_from_yearidx_map(
@@ -228,7 +234,31 @@ class Trails:
         attribute_to_roots: bool = False,
         reset_scores: bool = True,  # NEW
     ) -> None:
-        ...
+        min_offset, max_offset = self._inventory_offset_bounds()
+        years = np.arange(
+            int(self.min_year + min_offset),
+            int(self.max_year + max_offset) + 1,
+            dtype=int,
+        )
+
+        self._inventory_years = years
+        self._inventory_year_index = {int(y): int(i) for i, y in enumerate(years)}
+        self._inventory_has_root = bool(attribute_to_roots)
+
+        # Initialize inventory chunk builders (block-based appends)
+        self._inv_chunk_act = []
+        self._inv_chunk_year = []
+        self._inv_chunk_root = []
+        self._inv_chunk_flows = []
+        self._inv_chunk_values = []
+        self._inv_chunk_len = []
+
+        # Initialize inventory bulk builders (vectorized appends)
+        self._inv_bulk_act = []
+        self._inv_bulk_year = []
+        self._inv_bulk_flow = []
+        self._inv_bulk_value = []
+        self._inv_bulk_root = []
         # Reset outputs
         self.inventory = None
         self.characterized_inventory = None
@@ -245,6 +275,12 @@ class Trails:
             self._score_chunk_year = []
             self._score_chunk_root = []
             self._score_chunk_value = []
+
+            self._score_bulk_act = []
+            self._score_bulk_year = []
+            self._score_bulk_root = []
+            self._score_bulk_value = []
+
             self.scores = None
 
     def _append_score_entry(
@@ -289,7 +325,10 @@ class Trails:
         n_activities = int(self.A.shape[1])
         has_root = bool(self._scores_has_root)
 
-        if not self._score_chunk_act:
+        has_any = bool(self._score_chunk_act) or bool(
+            getattr(self, "_score_bulk_act", [])
+        )
+        if not has_any:
             if has_root:
                 arr = sparse.COO.zeros(
                     (n_activities, len(years), n_activities), dtype=self.value_dtype
@@ -317,16 +356,48 @@ class Trails:
                 )
             return self.scores
 
-        act = np.asarray(self._score_chunk_act, dtype=np.int64)
-        yr = np.asarray(self._score_chunk_year, dtype=np.int64)
-        data = np.asarray(self._score_chunk_value, dtype=self.value_dtype)
+        coords_parts = []
+        data_parts = []
+        root_parts = []
+
+        # Chunk parts
+        if self._score_chunk_act:
+            act_c = np.asarray(self._score_chunk_act, dtype=np.int64)
+            yr_c = np.asarray(self._score_chunk_year, dtype=np.int64)
+            data_c = np.asarray(self._score_chunk_value, dtype=self.value_dtype)
+            coords_parts.append((act_c, yr_c))
+            data_parts.append(data_c)
+            if has_root:
+                root_c = np.asarray(self._score_chunk_root, dtype=np.int64)
+                root_parts.append(root_c)
+
+        # Bulk parts
+        if getattr(self, "_score_bulk_act", []):
+            act_b = np.concatenate(self._score_bulk_act).astype(np.int64, copy=False)
+            yr_b = np.concatenate(self._score_bulk_year).astype(np.int64, copy=False)
+            data_b = np.concatenate(self._score_bulk_value).astype(
+                self.value_dtype, copy=False
+            )
+
+            coords_parts.append((act_b, yr_b))
+            data_parts.append(data_b)
+            if has_root:
+                root_b = np.concatenate(self._score_bulk_root).astype(
+                    np.int64, copy=False
+                )
+                root_parts.append(root_b)
+
+        act = np.concatenate([p[0] for p in coords_parts])
+        yr = np.concatenate([p[1] for p in coords_parts])
+        data = np.concatenate(data_parts).astype(self.value_dtype, copy=False)
 
         if has_root:
-            root = np.asarray(self._score_chunk_root, dtype=np.int64)
+            root = np.concatenate(root_parts).astype(np.int64, copy=False)
             coords = np.vstack([act, yr, root])
             arr = sparse.COO(
                 coords, data, shape=(n_activities, len(years), n_activities)
             )
+
             self.scores = xr.DataArray(
                 arr,
                 dims=("activity", "year", "root activity"),
@@ -449,6 +520,56 @@ class Trails:
         self._inv_chunk_flows.append(flows_i64)
         self._inv_chunk_values.append(vals_out)
         self._inv_chunk_len.append(n)
+
+    def _append_scores_bulk(
+        self,
+        act_idx: np.ndarray,
+        year_idx: np.ndarray,
+        values: np.ndarray,
+        *,
+        root_activity: np.ndarray | None = None,
+    ) -> None:
+        """Append aligned arrays of (act, year_idx, value[, root]) into score bulk builder."""
+        if not hasattr(self, "_score_bulk_value"):
+            raise RuntimeError(
+                "Score bulk builders not initialized. Call reset_scores() or reset_inventory() first."
+            )
+
+        a = np.asarray(act_idx)
+        y = np.asarray(year_idx)
+        v = np.asarray(values)
+
+        if a.size == 0 or y.size == 0 or v.size == 0:
+            return
+        if not (a.size == y.size == v.size):
+            raise ValueError("act_idx, year_idx, values must have same length")
+
+        # Filter exact zeros early
+        m = v != 0.0
+        if not np.any(m):
+            return
+
+        a = a[m].astype(np.int64, copy=False)
+        y = y[m].astype(np.int64, copy=False)
+
+        if v.dtype != self.value_dtype:
+            v = v[m].astype(self.value_dtype, copy=False)
+        else:
+            v = v[m]
+
+        self._score_bulk_act.append(a)
+        self._score_bulk_year.append(y)
+        self._score_bulk_value.append(v)
+
+        if getattr(self, "_scores_has_root", False):
+            if root_activity is None:
+                raise ValueError(
+                    "root_activity must be provided when scores have root dimension"
+                )
+            r = np.asarray(root_activity)
+            if r.shape != a.shape:
+                raise ValueError("root_activity must match act_idx shape")
+            self._score_bulk_root.append(r[m].astype(np.int64, copy=False))
 
     def _append_inventory_entries_bulk(
         self,
@@ -1246,9 +1367,9 @@ class Trails:
         pulse_cache = self._td_pulse_cache  # type: ignore[attr-defined]
 
         # Fast row-structure cache (per t)
-        if not hasattr(self, "_B_row_cache"):
-            self._B_row_cache = {}  # type: ignore[attr-defined]
-        row_cache = self._B_row_cache  # type: ignore[attr-defined]
+        if not hasattr(self, "_B_row_cache_actsorted"):
+            self._B_row_cache_actsorted = {}  # type: ignore[attr-defined]
+        row_cache = self._B_row_cache_actsorted  # type: ignore[attr-defined]
 
         act_coords = B_t.coords[0].astype(np.int32, copy=False)
         flow_coords = B_t.coords[1].astype(np.int32, copy=False)
@@ -1357,6 +1478,455 @@ class Trails:
         v = np.asarray(v, dtype=np.float64)
         self._B_cf_actvec_cache[key] = v  # type: ignore[attr-defined]
         return v
+
+    def accumulate_temporalized_biosphere_score_matrix(
+        self,
+        base_year: int,
+        supply_matrix: np.ndarray,  # shape (n_acts, n_roots)
+        root_activities: np.ndarray,  # shape (n_roots,)
+        cf: np.ndarray,  # shape (n_flows,)
+        *,
+        min_amount: float = 0.0,
+        use_temporal_distributions: bool = True,
+        debug: bool = False,
+    ) -> None:
+        """
+        Score many roots for one base_year in one pass, using dense supply_matrix.
+
+        This keeps TD semantics and supports future cf(year) by letting caller pass cf per year.
+        """
+        if self.B is None:
+            return
+        if supply_matrix.size == 0:
+            return
+
+        base_year = int(base_year)
+
+        # Ensure score builders exist
+        if not hasattr(self, "_score_year_index") or not hasattr(
+            self, "_score_bulk_value"
+        ):
+            self.reset_scores(attribute_to_roots=True)
+
+        # Resolve B slice
+        biosphere_slice = self._get_biosphere_slice(base_year, debug)
+        if biosphere_slice is None:
+            return
+        _scenario_year, t, _B_t, _ = biosphere_slice
+
+        # Map calendar year -> year_idx
+        year_to_idx = self._score_year_index
+        base_year_idx = year_to_idx.get(base_year)
+        if base_year_idx is None:
+            return
+
+        # Validate CF
+        cf = np.asarray(cf, dtype=np.float64)
+        if cf.ndim != 1 or cf.size != int(self.B.shape[2]):
+            raise ValueError("cf must be 1D and aligned to B flow dimension")
+
+        # Validate shapes
+        X = np.asarray(supply_matrix, dtype=np.float64)
+        if X.ndim != 2:
+            raise ValueError("supply_matrix must be 2D (n_acts, n_roots)")
+        roots = np.asarray(root_activities, dtype=np.int64)
+        if roots.ndim != 1 or roots.size != X.shape[1]:
+            raise ValueError("root_activities must be 1D length n_roots")
+
+        n_acts = int(self.B.shape[1])
+        if X.shape[0] != n_acts:
+            raise ValueError(f"supply_matrix has {X.shape[0]} acts; expected {n_acts}")
+
+        min_amt = float(min_amount) if min_amount else 0.0
+
+        # ---------- No-TD fast path (avoid dense S = v[:, None] * X) ----------
+        # ---------- No-TD fast path (chunked; avoids full S allocation) ----------
+        if not use_temporal_distributions or not self.temporal_biosphere_exchanges:
+            # v[a] = sum_f B[a,f] * cf[f]  (cached per t/cf)
+            v = self._get_B_cf_activity_vector(int(t), cf)  # float64 (n_acts,)
+
+            # We will append sparse triplets (act, year_idx, root) in blocks
+            year_idx_scalar = int(base_year_idx)
+
+            # Optional: if min_amount is set, rows with v==0 or rows with X all zero are skipped quickly
+            # Also: for min_amount, a sufficient skip test is: abs(v[a]) * max(abs(X[a,:])) < min_amt
+            # which avoids building the per-row products in most cases.
+            use_min = bool(min_amt)
+            min_amt_f = float(min_amt) if min_amt else 0.0
+
+            # Choose a block size that fits cache; tune if needed
+            block = 2048
+
+            n_acts, n_roots = X.shape
+
+            # If X is float64 already, keep it; otherwise convert once
+            # (UMFPACK returns float64; so this usually does nothing)
+            if X.dtype != np.float64:
+                X = X.astype(np.float64, copy=False)
+
+            out_act_parts: list[np.ndarray] = []
+            out_year_parts: list[np.ndarray] = []
+            out_root_parts: list[np.ndarray] = []
+            out_val_parts: list[np.ndarray] = []
+
+            for a0 in range(0, n_acts, block):
+                a1 = min(a0 + block, n_acts)
+
+                v_blk = v[a0:a1]  # (blk,)
+                if not np.any(v_blk):  # all zeros
+                    continue
+
+                X_blk = X[a0:a1, :]  # (blk, n_roots)
+
+                # Quick reject: if X block has no nonzeros, skip
+                # (works even if dense; cheap check)
+                if not np.any(X_blk):
+                    continue
+
+                if use_min:
+                    # Row-wise max magnitude in X (cheap, vectorized)
+                    # If a row is all zeros, max is 0.
+                    row_max = np.max(np.abs(X_blk), axis=1)  # (blk,)
+                    # Rows that can possibly exceed threshold anywhere
+                    possible = (np.abs(v_blk) * row_max) >= min_amt_f
+                    if not np.any(possible):
+                        continue
+
+                    # Restrict to candidate rows only (reduces compute)
+                    cand_rows = np.where(possible)[0]
+                    v_c = v_blk[cand_rows]  # (m,)
+                    X_c = X_blk[cand_rows, :]  # (m, n_roots)
+
+                    # Compute only candidate sub-block
+                    S_c = v_c[:, None] * X_c  # (m, n_roots)
+                    M = np.abs(S_c) >= min_amt_f
+                    if not np.any(M):
+                        continue
+
+                    rr, cc = np.nonzero(M)
+                    vals = S_c[rr, cc]
+
+                    acts = (a0 + cand_rows[rr]).astype(np.int64, copy=False)
+                    years = np.full(acts.size, year_idx_scalar, dtype=np.int64)
+                    roots_out = roots[cc].astype(np.int64, copy=False)
+
+                else:
+                    # No threshold: only skip exact zeros
+                    S_blk = v_blk[:, None] * X_blk
+                    M = S_blk != 0.0
+                    if not np.any(M):
+                        continue
+
+                    rr, cc = np.nonzero(M)
+                    vals = S_blk[rr, cc]
+
+                    acts = (a0 + rr).astype(np.int64, copy=False)
+                    years = np.full(acts.size, year_idx_scalar, dtype=np.int64)
+                    roots_out = roots[cc].astype(np.int64, copy=False)
+
+                out_act_parts.append(acts)
+                out_year_parts.append(years)
+                out_root_parts.append(roots_out)
+                out_val_parts.append(np.asarray(vals, dtype=np.float64))
+
+            if not out_val_parts:
+                return
+
+            act_all = np.concatenate(out_act_parts)
+            year_all = np.concatenate(out_year_parts)
+            root_all = np.concatenate(out_root_parts)
+            val_all = np.concatenate(out_val_parts)
+
+            self._append_scores_bulk(
+                act_idx=act_all,
+                year_idx=year_all,
+                values=val_all,
+                root_activity=root_all,
+            )
+            return
+
+        # ---------- TD enabled (keep semantics) ----------
+        # For TD, we reuse your existing per-activity row-char cache logic,
+        # but multiply scalars by X[a, :] across roots instead of by one supply_amt.
+
+        # Pull row cache for anchor-year
+        row_ptr, flow_sorted, data_sorted = self._get_B_row_cache_for_t(int(t))
+
+        tpl_label = str(self._map_year_to_template_year(base_year))
+        bio_td_get = self.temporal_biosphere_exchanges.get
+
+        # Caches (reuse the same ones as scalar method)
+        if not hasattr(self, "_td_pulse_cache"):
+            self._td_pulse_cache = {}
+        pulse_cache = self._td_pulse_cache
+
+        if not hasattr(self, "_bio_score_row_char_cache"):
+            self._bio_score_row_char_cache = {}
+        row_char_cache = self._bio_score_row_char_cache
+
+        def td_key(tex: TemporalExchange) -> tuple:
+            return (
+                tex.distribution,
+                tex.loc,
+                tex.scale,
+                tex.offset_min,
+                tex.offset_max,
+                getattr(tex, "amount_source", "port"),
+            )
+
+        def pulses_from_key(k: tuple) -> list[tuple[int, float]]:
+            dist, loc, scale, off_min, off_max, amt_src = k
+            tex = TemporalExchange(
+                distribution=dist,
+                loc=loc,
+                scale=scale,
+                offset_min=off_min,
+                offset_max=off_max,
+                amount_source=amt_src,
+            )
+            return [
+                (int(o), float(w))
+                for o, w in TemporalDistribution(tex).iter_offsets_and_weights(
+                    debug=False
+                )
+            ]
+
+        # We will append contributions for (act, year_idx, root) in bulk by accumulating
+        # sparse triplets in local python lists then flush via _append_scores_bulk per group.
+        out_act = []
+        out_year = []
+        out_root = []
+        out_val = []
+
+        # Iterate only activities that actually contribute to any root
+        active_acts = np.where(np.any(X != 0.0, axis=1))[0]
+        for a in active_acts:
+            start = int(row_ptr[a])
+            end = int(row_ptr[a + 1])
+            if start == end:
+                continue
+
+            flows_full = flow_sorted[start:end].astype(np.intp, copy=False)
+            vals_full = data_sorted[start:end].astype(np.float64, copy=False)
+
+            cf_key = int(id(cf))
+            cache_key = (tpl_label, int(t), int(a), cf_key)
+            cached = row_char_cache.get(cache_key)
+
+            if cached is None:
+                no_td_pos = []
+                port_groups_pos: dict[tuple, list[int]] = {}
+                matrix_entries_pos: list[tuple[int, TemporalExchange]] = []
+
+                for p, f in enumerate(flows_full):
+                    tex = bio_td_get((tpl_label, int(a), int(f)))
+                    if tex is None:
+                        no_td_pos.append(p)
+                        continue
+                    if getattr(tex, "amount_source", "port") == "matrix":
+                        matrix_entries_pos.append((p, tex))
+                    else:
+                        k = td_key(tex)
+                        port_groups_pos.setdefault(k, []).append(p)
+
+                # Pre-characterize anchor-year coefficients
+                no_td_coeff = (
+                    float(np.dot(vals_full[no_td_pos], cf[flows_full[no_td_pos]]))
+                    if no_td_pos
+                    else 0.0
+                )
+
+                ported_coeffs = {}
+                for k, plist in port_groups_pos.items():
+                    pos = np.asarray(plist, dtype=np.intp)
+                    ported_coeffs[k] = (
+                        float(np.dot(vals_full[pos], cf[flows_full[pos]]))
+                        if pos.size
+                        else 0.0
+                    )
+
+                grouped: dict[tuple, list[int]] = {}
+                for p, tex in matrix_entries_pos:
+                    grouped.setdefault(td_key(tex), []).append(int(p))
+                matrix_groups = {
+                    k: np.asarray(v, dtype=np.intp) for k, v in grouped.items()
+                }
+
+                cached = (no_td_coeff, ported_coeffs, matrix_groups)
+                row_char_cache[cache_key] = cached
+
+            no_td_coeff, ported_coeffs, matrix_groups = cached
+
+            # X row across roots
+            x_row = X[a, :]  # (n_roots,)
+
+            # 1) No TD at base year
+            if no_td_coeff != 0.0:
+                vals = no_td_coeff * x_row
+                if min_amt:
+                    m = np.abs(vals) >= min_amt
+                else:
+                    m = vals != 0.0
+                if np.any(m):
+                    r_idx = np.where(m)[0]
+                    out_act.append(np.full(r_idx.size, int(a), dtype=np.int64))
+                    out_year.append(
+                        np.full(r_idx.size, int(base_year_idx), dtype=np.int64)
+                    )
+                    out_root.append(roots[r_idx])
+                    out_val.append(vals[r_idx])
+
+            # 2) Ported TD groups
+            for k, coeff_k in ported_coeffs.items():
+                if coeff_k == 0.0:
+                    continue
+                pulses = pulse_cache.get(k)
+                if pulses is None:
+                    pulses = pulses_from_key(k)
+                    pulse_cache[k] = pulses
+                if not pulses:
+                    continue
+
+                vals_anchor = coeff_k * x_row  # per-root
+                for offset, weight in pulses:
+                    if weight == 0.0:
+                        continue
+                    yidx = year_to_idx.get(int(base_year + offset))
+                    if yidx is None:
+                        continue
+                    vals = vals_anchor * float(weight)
+                    if min_amt:
+                        m = np.abs(vals) >= min_amt
+                    else:
+                        m = vals != 0.0
+                    if np.any(m):
+                        r_idx = np.where(m)[0]
+                        out_act.append(np.full(r_idx.size, int(a), dtype=np.int64))
+                        out_year.append(np.full(r_idx.size, int(yidx), dtype=np.int64))
+                        out_root.append(roots[r_idx])
+                        out_val.append(vals[r_idx])
+
+            # 3) Matrix-sourced groups
+            # (kept exactly correct; still not cheap, but now shared across roots)
+            if matrix_groups:
+                # minimal implementation: compute score_per_supply for each pulse year as you do,
+                # then multiply by x_row.
+                scenario_index_get = self.scenario_index.get
+                year_map_cache: dict[int, int] = {}
+                t_eff_cache: dict[int, int | None] = {}
+                B_row_cache_local: dict[
+                    int, tuple[np.ndarray, np.ndarray, np.ndarray]
+                ] = {}
+
+                def map_year_cached(raw_year: int) -> int:
+                    y = year_map_cache.get(raw_year)
+                    if y is None:
+                        y = int(self._map_year_to_scenario_year(raw_year))
+                        year_map_cache[raw_year] = y
+                    return y
+
+                for k, idx_full in matrix_groups.items():
+                    if idx_full.size == 0:
+                        continue
+                    f_arr = flows_full[idx_full]
+                    if f_arr.size == 0:
+                        continue
+                    ord_f = np.argsort(f_arr, kind="mergesort")
+                    f_sorted = f_arr[ord_f].astype(np.intp, copy=False)
+                    cf_sorted = cf[f_sorted]
+
+                    pulses = pulse_cache.get(k)
+                    if pulses is None:
+                        pulses = pulses_from_key(k)
+                        pulse_cache[k] = pulses
+                    if not pulses:
+                        continue
+
+                    for offset, weight in pulses:
+                        if weight == 0.0:
+                            continue
+
+                        raw_year = int(base_year + offset)
+                        yidx = year_to_idx.get(raw_year)
+                        if yidx is None:
+                            continue
+
+                        y_eff = map_year_cached(raw_year)
+                        t_eff = t_eff_cache.get(y_eff)
+                        if t_eff is None and y_eff not in t_eff_cache:
+                            t_eff = scenario_index_get(str(y_eff))
+                            t_eff_cache[y_eff] = t_eff
+                        if t_eff is None:
+                            continue
+
+                        t_eff_i = int(t_eff)
+                        cached_eff = B_row_cache_local.get(t_eff_i)
+                        if cached_eff is None:
+                            cached_eff = self._get_B_row_cache_for_t(t_eff_i)
+                            B_row_cache_local[t_eff_i] = cached_eff
+                        row_ptr_eff, flow_sorted_eff, data_sorted_eff = cached_eff
+
+                        start_eff = int(row_ptr_eff[a])
+                        end_eff = int(row_ptr_eff[a + 1])
+                        if start_eff == end_eff:
+                            continue
+
+                        row_vals_eff = data_sorted_eff[start_eff:end_eff].astype(
+                            np.float64, copy=False
+                        )
+
+                        # Map flows -> position in this row (cached)
+                        row_index_map = self._get_B_row_index_map_for_t_act(t_eff_i, a)
+
+                        # Extract the B-values aligned to f_sorted (safe even if row flows are unsorted)
+                        matrix_kernel = self._get_numba_matrix_kernel()
+                        if matrix_kernel is not None:
+                            vals_eff, valid = matrix_kernel(
+                                f_sorted.astype(np.int64, copy=False),
+                                row_index_map,
+                                row_vals_eff,
+                            )
+                            if not np.any(valid):
+                                continue
+                            vals_eff = vals_eff[valid]
+                            cf_use = cf_sorted[valid]
+                        else:
+                            pos = row_index_map[f_sorted]
+                            valid = pos >= 0
+                            if not np.any(valid):
+                                continue
+                            vals_eff = row_vals_eff[pos[valid]]
+                            cf_use = cf_sorted[valid]
+
+                        score_per_supply = float(np.dot(vals_eff, cf_use)) * float(
+                            weight
+                        )
+
+                        if score_per_supply == 0.0:
+                            continue
+
+                        vals = score_per_supply * x_row
+                        if min_amt:
+                            m = np.abs(vals) >= min_amt
+                        else:
+                            m = vals != 0.0
+                        if np.any(m):
+                            r_idx = np.where(m)[0]
+                            out_act.append(np.full(r_idx.size, int(a), dtype=np.int64))
+                            out_year.append(
+                                np.full(r_idx.size, int(yidx), dtype=np.int64)
+                            )
+                            out_root.append(roots[r_idx])
+                            out_val.append(vals[r_idx])
+
+        # Flush
+        if out_val:
+            act = np.concatenate(out_act)
+            yr = np.concatenate(out_year)
+            root = np.concatenate(out_root)
+            val = np.concatenate(out_val).astype(np.float64, copy=False)
+
+            self._append_scores_bulk(act, yr, val, root_activity=root)
 
     def accumulate_temporalized_biosphere_score(
         self,
@@ -1543,13 +2113,6 @@ class Trails:
 
             # min_amount filtering (applied to *characterized* contribution in the end,
             # but we keep a flow-level filter here to avoid useless work for huge rows)
-            scaled_full = supply_amt * vals_full
-            if min_amt:
-                keep_full = np.abs(scaled_full) >= min_amt
-                if not keep_full.any():
-                    continue
-            else:
-                keep_full = None
 
             # ---- NO TD fast path: score = supply_amt * sum_f B[a,f]*cf[f] ----
             if not bio_td:
@@ -1569,7 +2132,9 @@ class Trails:
                 continue
 
             # ---- TD enabled: use cached pre-characterized row structure ----
-            cache_key = (tpl_label, int(t), int(a))
+            cf_key = int(id(cf))
+            cache_key = (tpl_label, int(t), int(a), cf_key)
+
             cached = row_char_cache.get(cache_key)
 
             if cached is None:
@@ -1669,7 +2234,8 @@ class Trails:
                         continue
 
                     # Apply keep_full safely (never IndexError)
-                    idx = _safe_filter_positions(idx_full, keep_full, row_len)
+                    idx = _safe_filter_positions(idx_full, None, row_len)
+
                     if idx.size == 0:
                         continue
 
@@ -2778,7 +3344,6 @@ class Trails:
             scenario_year = self._map_year_to_scenario_year(year)
             has_direct_bio = self._has_direct_biosphere(scenario_year, act, bio_cache)
 
-            # Helper: record a node into frontier + provenance
             # Stop expanding at max_depth
             if depth >= max_depth:
                 self._record_frontier(
@@ -2792,7 +3357,20 @@ class Trails:
                 )
                 continue
 
-            # Expand this node
+            # CUT at direct biosphere nodes (except the FU at depth 0)
+            if has_direct_bio and depth > 0:
+                self._record_direct_bio(
+                    direct_bio_total,
+                    direct_bio_roots,
+                    year,
+                    act,
+                    amt,
+                    root_act,
+                    return_provenance,
+                )
+                continue
+
+            # Expand this node (only if not cut)
             child_demands = self.expand_temporal_exchanges(
                 year=year,
                 act_idx=act,
@@ -2800,6 +3378,19 @@ class Trails:
                 use_temporal_distributions=use_temporal_distributions,
                 debug=debug,
             )
+
+            # Leaf: record it
+            if not child_demands:
+                self._record_frontier(
+                    frontier_total,
+                    provenance_roots,
+                    year,
+                    act,
+                    amt,
+                    root_act,
+                    return_provenance,
+                )
+                continue
 
             # --------------------------------------------------------------
             # Warm-up: if tqdm started indeterminate (total=None),
@@ -2840,10 +3431,10 @@ class Trails:
                 )
                 continue
 
-            # IMPORTANT BEHAVIOR:
-            # If this node has direct biosphere flows, we record it as part of the frontier.
-            # This matches your existing “solve nodes with direct biosphere” design.
-            # (It is NOT a full “score technosphere exchange at its own year” algorithm.)
+            # CUT RULE:
+            # If this node has direct biosphere flows (and is not the FU), we *cut* the traversal here:
+            # - record it for later injection
+            # - DO NOT expand it (otherwise we double-count via downstream linear solves + injection)
             if has_direct_bio and depth > 0:
                 self._record_direct_bio(
                     direct_bio_total,
@@ -2854,6 +3445,7 @@ class Trails:
                     root_act,
                     return_provenance,
                 )
+                continue
 
             # Enqueue children
             for child_year, mapping in child_demands.items():
