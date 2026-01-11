@@ -333,7 +333,7 @@ def _extract_supply_fast_cached(
     supply = np.asarray(supply_array, dtype=np.float64)
 
     vals = supply[positions]
-    m = np.abs(vals) > float(min_amount)
+    m = vals != 0.0
     if not m.any():
         return {}
 
@@ -359,7 +359,7 @@ def _extract_supply_fast(lca_obj: Any, min_amount: float) -> Dict[int, float]:
     positions = np.fromiter(act_map.values(), dtype=np.int64, count=len(act_map))
 
     vals = supply[positions]
-    m = np.abs(vals) > float(min_amount)
+    m = vals != 0.0
     if not m.any():
         return {}
 

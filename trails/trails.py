@@ -1,6 +1,7 @@
 # trails.py
 
 from dataclasses import dataclass
+import time
 from typing import Any, Dict, List, Optional, Callable
 import importlib
 import importlib.util
@@ -23,6 +24,10 @@ from .temporal_distributions import TemporalDistribution, TemporalExchange
 import logging
 
 logger = logging.getLogger(__name__)
+
+
+def _log_every(n: int, i: int) -> bool:
+    return n > 0 and (i % n == 0)
 
 
 @dataclass
@@ -202,6 +207,32 @@ class Trails:
 
         self.scores = None
 
+    def _clamp_year_to_inventory(self, year: int) -> int:
+        years = self._inventory_years
+        if years is None or years.size == 0:
+            raise RuntimeError(
+                "Inventory years not initialized; call reset_inventory() first."
+            )
+        y = int(year)
+        if y < int(years[0]):
+            return int(years[0])
+        if y > int(years[-1]):
+            return int(years[-1])
+        return y
+
+    def _clamp_year_to_scores(self, year: int) -> int:
+        years = self._score_years
+        if years is None or years.size == 0:
+            raise RuntimeError(
+                "Score years not initialized; call reset_scores() or reset_inventory() first."
+            )
+        y = int(year)
+        if y < int(years[0]):
+            return int(years[0])
+        if y > int(years[-1]):
+            return int(years[-1])
+        return y
+
     def _append_scores_from_yearidx_map(
         self,
         act_idx: int,
@@ -297,7 +328,8 @@ class Trails:
                 "Score builders not initialized. Call reset_scores() or reset_inventory() first."
             )
 
-        year_idx = self._score_year_index.get(int(year))
+        y = self._clamp_year_to_scores(int(year))
+        year_idx = self._score_year_index.get(y)
         if year_idx is None:
             return
 
@@ -466,10 +498,10 @@ class Trails:
                 "Inventory chunk builders not initialized. Call reset_inventory() first."
             )
 
-        year_idx = self._inventory_year_index.get(int(year))
+        y = self._clamp_year_to_inventory(int(year))
+        year_idx = self._inventory_year_index.get(y)
         if year_idx is None:
-            # out of configured inventory year range
-            return
+            return  # should not happen unless year index map is inconsistent
 
         # Fast-path: accept ndarray-like without forcing copies
         flows_arr = np.asarray(flows)
@@ -484,7 +516,7 @@ class Trails:
             )
 
         # Filter exact zeros (cheap and avoids storing empty chunks)
-        # (If you want tolerance-based filtering, keep that at the caller level via min_amount.)
+        # (If you want tolerance-based filtering, keep that at the caller level.)
         mask = vals_arr != 0.0
         if not np.any(mask):
             return
@@ -606,17 +638,25 @@ class Trails:
                 raise ValueError(
                     "year array must match act/flow/value length for bulk append."
                 )
-            year_idx = np.array(
-                [self._inventory_year_index.get(int(y), -1) for y in years_arr],
+            years_arr = np.asarray(year)
+            y0 = int(self._inventory_years[0])
+            y1 = int(self._inventory_years[-1])
+            years_clamped = np.clip(years_arr.astype(np.int64, copy=False), y0, y1)
+
+            year_idx = np.fromiter(
+                (self._inventory_year_index[int(y)] for y in years_clamped),
                 dtype=np.int64,
+                count=years_clamped.size,
             )
         else:
-            year_idx_val = self._inventory_year_index.get(int(year))
+            y = self._clamp_year_to_inventory(int(year))
+            year_idx_val = self._inventory_year_index.get(y)
             if year_idx_val is None:
                 return
+
             year_idx = np.full(flows_arr.shape[0], int(year_idx_val), dtype=np.int64)
 
-        mask = (vals_arr != 0.0) & (year_idx >= 0)
+        mask = vals_arr != 0.0
         if not np.any(mask):
             return
 
@@ -962,13 +1002,6 @@ class Trails:
 
         for offset, weight in offsets_and_weights:
             raw_year = year + offset
-
-            if debug:
-                logger.debug(
-                    "expand_temporal_exchanges: ported pulse raw_year=%d weight=%g",
-                    int(raw_year),
-                    float(weight),
-                )
             self._add_demand_entry(
                 demand,
                 int(raw_year),
@@ -1067,6 +1100,14 @@ class Trails:
     ) -> dict[int, dict[int, float]]:
         """Expand activity-year demand into temporally distributed demands."""
         demand: dict[int, dict[int, float]] = {}
+        # --- summary counters for low-noise debugging ---
+        n_exchanges = 0
+        n_skipped_prod = 0
+        n_no_td = 0
+        n_td_ported = 0
+        n_td_matrix = 0
+        min_raw_year = None
+        max_raw_year = None
 
         context = self._get_scenario_context(year)
         if context is None:
@@ -1075,7 +1116,7 @@ class Trails:
 
         if debug:
             logger.info(
-                "expand_tech: year=%d scenario_year=%d t=%d act=%d amount=%g",
+                "expand_tech: base_year=%d scen_year=%d t=%d act=%d amount=%g",
                 int(year),
                 int(scenario_year),
                 int(t),
@@ -1091,6 +1132,7 @@ class Trails:
         values = A_row.data
 
         for product_index, exchange_value in zip(product_indices, values):
+            n_exchanges += 1
             product_index = int(product_index)
             exchange_value = float(exchange_value)
 
@@ -1099,6 +1141,7 @@ class Trails:
 
             # Skip canonical production exchange (A[act, act] = 1)
             if product_index == act_idx and abs(exchange_value) == 1.0:
+                n_skipped_prod += 1
                 continue
 
             # Fetch TD metadata (template-year lookup; stable across interpolation)
@@ -1108,6 +1151,7 @@ class Trails:
             # No temporal distribution (or disabled): status quo
             # ------------------------------------------------------------------
             if (tex is None) or (not use_temporal_distributions):
+                n_no_td += 1
                 child_amount = self._child_amount(amount, exchange_value)
                 if child_amount != 0.0:
                     self._add_demand_entry(
@@ -1121,6 +1165,7 @@ class Trails:
             # TD + matrix-sourced magnitude: read A at each pulse year
             # ------------------------------------------------------------------
             if amount_source == "matrix":
+                n_td_matrix += 1
                 self._apply_temporal_distribution_matrix_sourced_to_demand(
                     year=year,
                     act_idx=act_idx,
@@ -1135,6 +1180,7 @@ class Trails:
             # ------------------------------------------------------------------
             # TD + ported magnitude (default): distribute anchor-year child amount
             # ------------------------------------------------------------------
+            n_td_ported += 1
             child_amount = self._child_amount(amount, exchange_value)
             if child_amount == 0.0:
                 continue
@@ -1146,6 +1192,33 @@ class Trails:
                 tex=tex,
                 demand=demand,
                 debug=debug,
+            )
+
+        if demand:
+            years_out = list(demand.keys())
+            min_raw_year = int(min(years_out))
+            max_raw_year = int(max(years_out))
+
+        if debug:
+            out_years = int(len(demand))
+            out_edges = int(sum(len(v) for v in demand.values()))
+            logger.info(
+                "expand_tech_done: base_year=%d scen_year=%d act=%d amount=%g "
+                "exchanges=%d skipped_prod=%d no_td=%d td_ported=%d td_matrix=%d "
+                "years=[%s..%s] out_years=%d out_edges=%d",
+                int(year),
+                int(scenario_year),
+                int(act_idx),
+                float(amount),
+                int(n_exchanges),
+                int(n_skipped_prod),
+                int(n_no_td),
+                int(n_td_ported),
+                int(n_td_matrix),
+                str(min_raw_year) if min_raw_year is not None else "NA",
+                str(max_raw_year) if max_raw_year is not None else "NA",
+                out_years,
+                out_edges,
             )
 
         return demand
@@ -1537,8 +1610,6 @@ class Trails:
         if X.shape[0] != n_acts:
             raise ValueError(f"supply_matrix has {X.shape[0]} acts; expected {n_acts}")
 
-        min_amt = float(min_amount) if min_amount else 0.0
-
         # ---------- No-TD fast path (avoid dense S = v[:, None] * X) ----------
         # ---------- No-TD fast path (chunked; avoids full S allocation) ----------
         if not use_temporal_distributions or not self.temporal_biosphere_exchanges:
@@ -1547,12 +1618,6 @@ class Trails:
 
             # We will append sparse triplets (act, year_idx, root) in blocks
             year_idx_scalar = int(base_year_idx)
-
-            # Optional: if min_amount is set, rows with v==0 or rows with X all zero are skipped quickly
-            # Also: for min_amount, a sufficient skip test is: abs(v[a]) * max(abs(X[a,:])) < min_amt
-            # which avoids building the per-row products in most cases.
-            use_min = bool(min_amt)
-            min_amt_f = float(min_amt) if min_amt else 0.0
 
             # Choose a block size that fits cache; tune if needed
             block = 2048
@@ -1583,46 +1648,18 @@ class Trails:
                 if not np.any(X_blk):
                     continue
 
-                if use_min:
-                    # Row-wise max magnitude in X (cheap, vectorized)
-                    # If a row is all zeros, max is 0.
-                    row_max = np.max(np.abs(X_blk), axis=1)  # (blk,)
-                    # Rows that can possibly exceed threshold anywhere
-                    possible = (np.abs(v_blk) * row_max) >= min_amt_f
-                    if not np.any(possible):
-                        continue
+                # No threshold: only skip exact zeros
+                S_blk = v_blk[:, None] * X_blk
+                M = S_blk != 0.0
+                if not np.any(M):
+                    continue
 
-                    # Restrict to candidate rows only (reduces compute)
-                    cand_rows = np.where(possible)[0]
-                    v_c = v_blk[cand_rows]  # (m,)
-                    X_c = X_blk[cand_rows, :]  # (m, n_roots)
+                rr, cc = np.nonzero(M)
+                vals = S_blk[rr, cc]
 
-                    # Compute only candidate sub-block
-                    S_c = v_c[:, None] * X_c  # (m, n_roots)
-                    M = np.abs(S_c) >= min_amt_f
-                    if not np.any(M):
-                        continue
-
-                    rr, cc = np.nonzero(M)
-                    vals = S_c[rr, cc]
-
-                    acts = (a0 + cand_rows[rr]).astype(np.int64, copy=False)
-                    years = np.full(acts.size, year_idx_scalar, dtype=np.int64)
-                    roots_out = roots[cc].astype(np.int64, copy=False)
-
-                else:
-                    # No threshold: only skip exact zeros
-                    S_blk = v_blk[:, None] * X_blk
-                    M = S_blk != 0.0
-                    if not np.any(M):
-                        continue
-
-                    rr, cc = np.nonzero(M)
-                    vals = S_blk[rr, cc]
-
-                    acts = (a0 + rr).astype(np.int64, copy=False)
-                    years = np.full(acts.size, year_idx_scalar, dtype=np.int64)
-                    roots_out = roots[cc].astype(np.int64, copy=False)
+                acts = (a0 + rr).astype(np.int64, copy=False)
+                years = np.full(acts.size, year_idx_scalar, dtype=np.int64)
+                roots_out = roots[cc].astype(np.int64, copy=False)
 
                 out_act_parts.append(acts)
                 out_year_parts.append(years)
@@ -1763,10 +1800,7 @@ class Trails:
             # 1) No TD at base year
             if no_td_coeff != 0.0:
                 vals = no_td_coeff * x_row
-                if min_amt:
-                    m = np.abs(vals) >= min_amt
-                else:
-                    m = vals != 0.0
+                m = vals != 0.0
                 if np.any(m):
                     r_idx = np.where(m)[0]
                     out_act.append(np.full(r_idx.size, int(a), dtype=np.int64))
@@ -1791,14 +1825,12 @@ class Trails:
                 for offset, weight in pulses:
                     if weight == 0.0:
                         continue
-                    yidx = year_to_idx.get(int(base_year + offset))
-                    if yidx is None:
-                        continue
+                    raw = int(base_year + offset)
+                    y_clamped = self._clamp_year_to_scores(raw)
+                    yidx = year_to_idx[int(y_clamped)]
+
                     vals = vals_anchor * float(weight)
-                    if min_amt:
-                        m = np.abs(vals) >= min_amt
-                    else:
-                        m = vals != 0.0
+                    m = vals != 0.0
                     if np.any(m):
                         r_idx = np.where(m)[0]
                         out_act.append(np.full(r_idx.size, int(a), dtype=np.int64))
@@ -1846,12 +1878,11 @@ class Trails:
                         if weight == 0.0:
                             continue
 
-                        raw_year = int(base_year + offset)
-                        yidx = year_to_idx.get(raw_year)
-                        if yidx is None:
-                            continue
+                        raw = int(base_year + offset)
+                        y_clamped = self._clamp_year_to_scores(raw)
+                        yidx = year_to_idx[int(y_clamped)]
 
-                        y_eff = map_year_cached(raw_year)
+                        y_eff = map_year_cached(raw)
                         t_eff = t_eff_cache.get(y_eff)
                         if t_eff is None and y_eff not in t_eff_cache:
                             t_eff = scenario_index_get(str(y_eff))
@@ -1906,10 +1937,7 @@ class Trails:
                             continue
 
                         vals = score_per_supply * x_row
-                        if min_amt:
-                            m = np.abs(vals) >= min_amt
-                        else:
-                            m = vals != 0.0
+                        m = vals != 0.0
                         if np.any(m):
                             r_idx = np.where(m)[0]
                             out_act.append(np.full(r_idx.size, int(a), dtype=np.int64))
@@ -1989,8 +2017,6 @@ class Trails:
             raise ValueError(
                 f"cf length {cf.size} does not match B flows {int(self.B.shape[2])}"
             )
-
-        min_amt = float(min_amount) if min_amount else 0.0
 
         scenario_index_get = self.scenario_index.get
         map_year_to_scenario = self._map_year_to_scenario_year
@@ -2111,20 +2137,12 @@ class Trails:
             flows_full = flow_sorted[start:end].astype(np.intp, copy=False)
             vals_full = data_sorted[start:end].astype(np.float64, copy=False)
 
-            # min_amount filtering (applied to *characterized* contribution in the end,
-            # but we keep a flow-level filter here to avoid useless work for huge rows)
+            # Filter zeros at the contribution level to avoid useless work for huge rows.
 
             # ---- NO TD fast path: score = supply_amt * sum_f B[a,f]*cf[f] ----
             if not bio_td:
-                if keep_full is None:
-                    score = supply_amt * float(np.dot(vals_full, cf[flows_full]))
-                else:
-                    score = supply_amt * float(
-                        np.dot(vals_full[keep_full], cf[flows_full[keep_full]])
-                    )
+                score = supply_amt * float(np.dot(vals_full, cf[flows_full]))
 
-                if min_amt and abs(score) < min_amt:
-                    continue
                 if score != 0.0:
                     self._append_scores_from_yearidx_map(
                         score_act, {base_year_idx: score}, root_activity=root_activity
@@ -2219,10 +2237,10 @@ class Trails:
                     for offset, weight in pulses:
                         if weight == 0.0:
                             continue
-                        raw_year = base_year + int(offset)
-                        yidx = year_to_idx.get(int(raw_year))
-                        if yidx is None:
-                            continue
+                        raw = int(base_year + offset)
+                        y_clamped = self._clamp_year_to_scores(raw)
+                        yidx = year_to_idx[int(y_clamped)]
+
                         acc_yearidx[yidx] = acc_yearidx.get(
                             yidx, 0.0
                         ) + score_anchor * float(weight)
@@ -2259,12 +2277,11 @@ class Trails:
                         if weight == 0.0:
                             continue
 
-                        raw_year = base_year + int(offset)
-                        yidx = year_to_idx.get(int(raw_year))
-                        if yidx is None:
-                            continue
+                        raw = int(base_year + offset)
+                        y_clamped = self._clamp_year_to_scores(raw)
+                        yidx = year_to_idx[int(y_clamped)]
 
-                        y_eff = map_year_cached(raw_year)
+                        y_eff = map_year_cached(raw)
                         t_eff = t_eff_cache.get(y_eff)
                         if t_eff is None and y_eff not in t_eff_cache:
                             t_eff = scenario_index_get(str(y_eff))
@@ -2291,6 +2308,13 @@ class Trails:
                             np.float64, copy=False
                         )
 
+                        if row_flows_eff.size > 1 and np.any(
+                            row_flows_eff[1:] < row_flows_eff[:-1]
+                        ):
+                            order = np.argsort(row_flows_eff, kind="mergesort")
+                            row_flows_eff = row_flows_eff[order]
+                            row_vals_eff = row_vals_eff[order]
+
                         vals_sorted = self._row_values_for_flows_sorted(
                             row_flows_eff, row_vals_eff, f_sorted
                         )
@@ -2298,16 +2322,8 @@ class Trails:
                         score_per_supply = float(np.dot(vals_sorted, cf_sorted))
                         score = supply_amt * float(weight) * score_per_supply
 
-                        if min_amt and abs(score) < min_amt:
-                            continue
                         if score != 0.0:
                             acc_yearidx[yidx] = acc_yearidx.get(yidx, 0.0) + score
-
-            # Final min_amount guard at score level (cheap)
-            if min_amt:
-                acc_yearidx = {
-                    k2: v2 for k2, v2 in acc_yearidx.items() if abs(v2) >= min_amt
-                }
 
             if acc_yearidx:
                 self._append_scores_from_yearidx_map(
@@ -2335,7 +2351,6 @@ class Trails:
         data_sorted = ctx.data_sorted
 
         base_year = int(ctx.base_year)
-        min_amt = float(min_amount) if min_amount else 0.0
 
         bio_td_get = ctx.bio_td_get
         tpl_label = ctx.tpl_label
@@ -2376,16 +2391,8 @@ class Trails:
             scaled = (
                 ctx.data.astype(np.float64, copy=False) * supply_vec[ctx.act_coords]
             )
-            if min_amt:
-                mask = np.abs(scaled) >= min_amt
-                if not mask.any():
-                    return
-                scaled = scaled[mask]
-                act_coords = ctx.act_coords[mask]
-                flow_coords = ctx.flow_coords[mask]
-            else:
-                act_coords = ctx.act_coords
-                flow_coords = ctx.flow_coords
+            act_coords = ctx.act_coords
+            flow_coords = ctx.flow_coords
 
             has_root = bool(getattr(self, "_inventory_has_root", False))
             if has_root:
@@ -2437,12 +2444,7 @@ class Trails:
 
             scaled_full = supply_amt * vals_full.astype(np.float64, copy=False)
 
-            if min_amt:
-                keep_full = np.abs(scaled_full) >= min_amt
-                if not keep_full.any():
-                    continue
-            else:
-                keep_full = None
+            keep_full = None
 
             if not use_temporal_distributions:
                 if keep_full is None:
@@ -2614,15 +2616,6 @@ class Trails:
                         years_use = base_year + offsets_use
                         contrib = scaled_full[idx] * weights_use
 
-                    if min_amt:
-                        m = np.abs(contrib) >= min_amt
-                        if not m.any():
-                            idx = np.array([], dtype=np.intp)
-                        else:
-                            flows_use = flows_use[m]
-                            years_use = years_use[m]
-                            contrib = contrib[m]
-
                     if idx.size:
                         acts_use = np.full_like(
                             flows_use, inventory_act, dtype=np.int64
@@ -2750,14 +2743,6 @@ class Trails:
                             * np.tile(weights_vec, f_use.size)
                         )
 
-                        if min_amt:
-                            m = np.abs(contrib) >= min_amt
-                            if not m.any():
-                                continue
-                            flows_rep = flows_rep[m]
-                            years_rep = years_rep[m]
-                            contrib = contrib[m]
-
                         acts_use = np.full_like(
                             flows_rep, inventory_act, dtype=np.int64
                         )
@@ -2859,7 +2844,6 @@ class Trails:
             return False
 
         base_year = int(ctx.base_year)
-        min_amt = float(min_amount) if min_amount else 0.0
 
         root_ids = np.array([int(store) for _, store in supplies], dtype=np.int64)
         n_roots = int(root_ids.size)
@@ -2891,15 +2875,6 @@ class Trails:
             flows_rep = np.repeat(flow_chunk, n_roots)
             roots_rep = np.tile(root_ids, int(act_chunk.size))
             values_flat = values.ravel()
-
-            if min_amt:
-                mask = np.abs(values_flat) >= min_amt
-                if not mask.any():
-                    continue
-                acts_rep = acts_rep[mask]
-                flows_rep = flows_rep[mask]
-                roots_rep = roots_rep[mask]
-                values_flat = values_flat[mask]
 
             self._append_inventory_entries_bulk(
                 acts_rep,
@@ -3204,6 +3179,9 @@ class Trails:
                 min_amount,
                 use_temporal_distributions,
             )
+            run_tag = f"{int(start_year)}:{int(start_act_idx)}:{int(max_depth)}:{time.time_ns()}"
+            t0 = time.perf_counter()
+            LOG_EVERY = 5000  # adjust as you like
 
         # ------------------------------------------------------------------
         # Progress bar setup
@@ -3242,7 +3220,9 @@ class Trails:
         pbar = None
         total_est = self._estimate_total_from_depth(max_depth)
         try:
-            if total_est is None:
+            if not show_progress:
+                pbar = None
+            elif total_est is None:
                 # Indeterminate until warm-up can estimate
                 pbar = tqdm(
                     total=None,
@@ -3335,10 +3315,21 @@ class Trails:
                 else:
                     root_act = int(act)
 
-            if abs(amt) < min_amount:
+            if amt == 0.0:
                 continue
 
             _pbar_step()
+
+            if debug and _log_every(LOG_EVERY, nodes_processed):
+                logger.info(
+                    "traversal_progress run=%s nodes=%d queue=%d frontier=%d direct_bio=%d elapsed_s=%.1f",
+                    run_tag,
+                    int(nodes_processed),
+                    int(len(queue)),
+                    int(len(frontier_total)),
+                    int(len(direct_bio_total)),
+                    float(time.perf_counter() - t0),
+                )
 
             # Map to scenario year for "has direct biosphere" test (fast cutoff logic)
             scenario_year = self._map_year_to_scenario_year(year)
@@ -3349,19 +3340,6 @@ class Trails:
                 self._record_frontier(
                     frontier_total,
                     provenance_roots,
-                    year,
-                    act,
-                    amt,
-                    root_act,
-                    return_provenance,
-                )
-                continue
-
-            # CUT at direct biosphere nodes (except the FU at depth 0)
-            if has_direct_bio and depth > 0:
-                self._record_direct_bio(
-                    direct_bio_total,
-                    direct_bio_roots,
                     year,
                     act,
                     amt,
@@ -3399,15 +3377,14 @@ class Trails:
             # --------------------------------------------------------------
             if show_progress and pbar is not None and pbar.total is None:
                 # Branching sample = number of children edges we would enqueue
-                # for this node (after min_amount filtering, consistent with traversal).
+                # for this node (consistent with traversal).
                 if nodes_processed <= WARMUP_LIMIT:
                     # Count children that would actually be enqueued
                     cnt = 0
                     if child_demands:
                         for _cy, _mapping in child_demands.items():
                             for _ca, _camt in _mapping.items():
-                                if abs(float(_camt)) >= float(min_amount):
-                                    cnt += 1
+                                cnt += 1
                     branching_samples.append(cnt)
 
                 # Once warm-up complete, set a total estimate
@@ -3418,40 +3395,26 @@ class Trails:
                     pbar.total = est
                     pbar.refresh()
 
-            # Leaf: record it
-            if not child_demands:
-                self._record_frontier(
-                    frontier_total,
-                    provenance_roots,
-                    year,
-                    act,
-                    amt,
-                    root_act,
-                    return_provenance,
-                )
-                continue
-
-            # CUT RULE:
-            # If this node has direct biosphere flows (and is not the FU), we *cut* the traversal here:
-            # - record it for later injection
-            # - DO NOT expand it (otherwise we double-count via downstream linear solves + injection)
-            if has_direct_bio and depth > 0:
-                self._record_direct_bio(
-                    direct_bio_total,
-                    direct_bio_roots,
-                    year,
-                    act,
-                    amt,
-                    root_act,
-                    return_provenance,
-                )
-                continue
-
             # Enqueue children
             for child_year, mapping in child_demands.items():
                 for child_act, child_amt in mapping.items():
                     child_amt = float(child_amt)
-                    if abs(child_amt) < min_amount:
+
+                    # Preserve remainder monotonically: do not expand tiny contributions,
+                    # keep them at the frontier so depth increases cannot reduce totals.
+                    if abs(child_amt) < float(min_amount):
+                        child_year = int(child_year)
+                        child_act = int(child_act)
+                        child_root = child_act if depth == 0 else root_act
+                        self._record_frontier(
+                            frontier_total,
+                            provenance_roots,
+                            child_year,
+                            child_act,
+                            child_amt,
+                            child_root,
+                            return_provenance,
+                        )
                         continue
 
                     child_year = int(child_year)
@@ -3479,6 +3442,16 @@ class Trails:
                     )
 
         _pbar_finalize()
+
+        if debug:
+            logger.info(
+                "traversal_done run=%s nodes=%d frontier=%d direct_bio=%d elapsed_s=%.2f",
+                run_tag,
+                int(nodes_processed),
+                int(len(frontier_total)),
+                int(len(direct_bio_total)),
+                float(time.perf_counter() - t0),
+            )
 
         # Normalize provenance to plain dicts
         if return_provenance:
@@ -3520,6 +3493,15 @@ class Trails:
 
             year, act_idx = key
             y = int(year)
+            if self._inventory_years is not None and self._inventory_years.size:
+                y = max(
+                    int(self._inventory_years[0]),
+                    min(int(self._inventory_years[-1]), y),
+                )
+            else:
+                # fallback: clamp to scenario range
+                y = max(int(self.min_year), min(int(self.max_year), y))
+
             a = int(act_idx)
 
             if y not in f_by_year:
@@ -3547,11 +3529,12 @@ class Trails:
         :type amount: float
         :param max_depth: Maximum traversal depth.
         :type max_depth: int
-        :param min_amount: Minimum magnitude to include.
+        :param min_amount: Ignored (filtering disabled).
         :type min_amount: float
         :returns: Mapping of depth to edge amounts.
         :rtype: dict[int, dict[tuple[tuple[int, int], tuple[int, int]], float]]
         """
+
         queue = deque()
         queue.append((int(start_year), int(start_act_idx), float(amount), 0))
 
@@ -3562,7 +3545,7 @@ class Trails:
         while queue:
             year, act, amt, depth = queue.popleft()
 
-            if abs(amt) < min_amount:
+            if amt == 0.0:
                 continue
 
             if depth >= max_depth:
@@ -3579,7 +3562,7 @@ class Trails:
             for child_year, mapping in child_demands.items():
                 for child_act, child_amt in mapping.items():
                     child_amt = float(child_amt)
-                    if abs(child_amt) < min_amount:
+                    if child_amt == 0.0:
                         continue
 
                     child_node = (int(child_year), int(child_act))
