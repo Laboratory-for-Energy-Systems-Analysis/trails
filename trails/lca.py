@@ -97,7 +97,7 @@ def _build_rhs_matrix_from_root_demands(
         demand = per_root_demands[root]
         for prod_id, v in demand.items():
             v = float(v)
-            if abs(v) <= float(min_amount):
+            if v == 0.0:
                 continue
             # Assume prod_id keys are valid; skip check_demand to avoid overhead
             try:
@@ -235,6 +235,7 @@ def lca(
     the first-level root activities while stored in the Trails inventory arrays with
     an added "root activity" dimension.
     """
+    min_amount = 0.0
     if store_inventory:
         trails.reset_inventory(attribute_to_roots=attribute_to_roots)
     else:
@@ -486,8 +487,6 @@ def lca(
                 if int(y) != solve_year:
                     continue
                 v = float(v)
-                if abs(v) <= float(min_amount):
-                    continue
                 injected_supply[int(a)] = injected_supply.get(int(a), 0.0) + v
 
             if injected_supply:
