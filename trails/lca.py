@@ -1,6 +1,4 @@
 from __future__ import annotations
-import sys
-
 import warnings
 from typing import Any, Dict, List, TYPE_CHECKING
 
@@ -201,7 +199,7 @@ def lca_static_simple(
 
     trails.finalize_inventory()
 
-    # IMPORTANT: reuse cache instead of passing {}
+    # Reuse the shared characterization cache to avoid rebuilding CF vectors.
     characterized = build_characterized_inventory(
         trails=trails,
         methods=methods,
@@ -222,10 +220,9 @@ def lca(
     max_depth: int = 2,
     min_amount: float = 1e-18,
     show_progress: bool = True,
-    attribute_to_roots: bool = False,
-    debug: bool = False,
+    attribute_to_roots: bool = True,
     *,
-    store_inventory: bool = True,
+    store_inventory: bool = False,
     compute_score: bool = True,
     ei_version: str = "3.11",
 ) -> None:
@@ -235,11 +232,9 @@ def lca(
     the first-level root activities while stored in the Trails inventory arrays with
     an added "root activity" dimension.
     """
-    min_amount = 0.0
-    if store_inventory:
-        trails.reset_inventory(attribute_to_roots=attribute_to_roots)
-    else:
-        trails.reset_scores(attribute_to_roots=attribute_to_roots, methods=methods)
+    debug = bool(getattr(trails, "debug", False))
+
+    trails.reset_inventory(attribute_to_roots=attribute_to_roots)
 
     cf = None
     if compute_score:
@@ -251,9 +246,7 @@ def lca(
             ei_version=ei_version,
         )
 
-    # Fail fast with a precise message if inventory builders are not live
-    # Fail fast: chunk-based inventory builder must be initialized
-    # Only require inventory builders if we will store inventory
+    # Ensure inventory builders are ready when we intend to store inventory data.
     if store_inventory:
         required = (
             hasattr(trails, "_inventory_years")
@@ -268,9 +261,9 @@ def lca(
                 "chunk-based inventory builders."
             )
 
-    fu0 = int(start_act_idx)
-    y0 = int(start_year)
-    amt0 = float(amount)
+    start_activity = int(start_act_idx)
+    start_year_int = int(start_year)
+    start_amount = float(amount)
 
     # Traversal
     if attribute_to_roots:
@@ -280,9 +273,9 @@ def lca(
             injected_supply_by_year_act,
             injected_supply_prov_by_year_act,
         ) = trails.temporal_traversal(
-            start_year=y0,
-            start_act_idx=fu0,
-            amount=amt0,
+            start_year=start_year_int,
+            start_act_idx=start_activity,
+            amount=start_amount,
             max_depth=int(max_depth),
             min_amount=float(min_amount),
             return_provenance=True,
@@ -295,9 +288,9 @@ def lca(
             injected_supply_prov_by_year_act = {}
     else:
         frontier, injected_supply_by_year_act = trails.temporal_traversal(
-            start_year=y0,
-            start_act_idx=fu0,
-            amount=amt0,
+            start_year=start_year_int,
+            start_act_idx=start_activity,
+            amount=start_amount,
             max_depth=int(max_depth),
             min_amount=float(min_amount),
             return_provenance=False,
@@ -310,19 +303,27 @@ def lca(
         injected_supply_prov_by_year_act = {}
 
     # Always inject FU directly
-    injected_supply_by_year_act[(y0, fu0)] = (
-        float(injected_supply_by_year_act.get((y0, fu0), 0.0)) + amt0
+    injected_supply_by_year_act[(start_year_int, start_activity)] = (
+        float(injected_supply_by_year_act.get((start_year_int, start_activity), 0.0))
+        + start_amount
     )
-    injected_supply_prov_by_year_act.setdefault((y0, fu0), {})
-    injected_supply_prov_by_year_act[(y0, fu0)][fu0] = (
-        float(injected_supply_prov_by_year_act[(y0, fu0)].get(fu0, 0.0)) + amt0
+    injected_supply_prov_by_year_act.setdefault((start_year_int, start_activity), {})
+    injected_supply_prov_by_year_act[(start_year_int, start_activity)][
+        start_activity
+    ] = (
+        float(
+            injected_supply_prov_by_year_act[(start_year_int, start_activity)].get(
+                start_activity, 0.0
+            )
+        )
+        + start_amount
     )
 
     # Frontier -> demand vectors (calendar years preserved)
-    f_by_year = trails.frontier_to_demand_vectors(frontier)
-    candidate_years = sorted(f_by_year.keys())
+    frontier_by_year = trails.frontier_to_demand_vectors(frontier)
+    candidate_years = sorted(frontier_by_year.keys())
 
-    dp_cache: Dict[tuple, Any] = {}
+    datapackage_cache: Dict[tuple, Any] = {}
 
     root_demands_by_year: dict[int, dict[int, dict[int, float]]] = {}
     root_injected_by_year: dict[int, dict[int, dict[int, float]]] = {}
@@ -356,26 +357,26 @@ def lca(
         )
 
     for solve_year in candidate_years:
-        roots_arr = None
-        X_roots = None
+        root_ids = None
+        root_supply_matrix = None
 
         solve_year = int(solve_year)
-        arr = np.asarray(f_by_year[solve_year])
-        nz_idx = np.where(arr != 0.0)[0]
-        if nz_idx.size == 0:
+        demand_vector = np.asarray(frontier_by_year[solve_year])
+        nonzero_indices = np.where(demand_vector != 0.0)[0]
+        if nonzero_indices.size == 0:
             if pbar is not None:
                 pbar.update(1)
             continue
 
         dp, _, _, _ = _get_datapackage(
-            dp_cache=dp_cache,
+            dp_cache=datapackage_cache,
             trails=trails,
             year=solve_year,
             zero_bio=True,
             debug=debug,
         )
 
-        activity_demand = {int(i): float(arr[i]) for i in nz_idx}
+        activity_demand = {int(i): float(demand_vector[i]) for i in nonzero_indices}
 
         lca_obj = bc.LCA(demand=activity_demand, data_objs=[dp])
         lca_obj.load_lci_data()  # build matrices + dicts
@@ -385,19 +386,19 @@ def lca(
         prod_map = getattr(lca_obj.dicts, "product", None)
 
         act_ids, positions = _get_mapping_arrays(act_map)
-        # For RHS building we need the product id -> row index dict
+        # For RHS building we need the product-id -> row-index dict.
         product_dict = prod_map  # mapping-like
 
-        fu_demand = _map_activity_demands_to_products(
+        functional_unit_demand = _map_activity_demands_to_products(
             lca_obj,
             activity_demand,
         )
-        if not fu_demand:
+        if not functional_unit_demand:
             if pbar is not None:
                 pbar.update(1)
             continue
 
-        # Prepare A (CSC) once per year; UMFPACK expects CSC
+        # Prepare the technosphere matrix once per year (UMFPACK expects CSC).
         A_csc = lca_obj.technosphere_matrix
         if not sp.isspmatrix_csc(A_csc):
             A_csc = A_csc.tocsc()
@@ -415,7 +416,7 @@ def lca(
                 )
                 if mapped:
                     per_root_demands[int(root_act)] = mapped
-            roots, B = _build_rhs_matrix_from_root_demands(
+            roots, rhs_matrix = _build_rhs_matrix_from_root_demands(
                 per_root_demands=per_root_demands,
                 product_dict=product_dict,
                 n=A_csc.shape[0],
@@ -424,7 +425,7 @@ def lca(
 
             if roots:
                 if bc.PYPARDISO:
-                    # Keep old path for PARDISO; your Mac path is UMFPACK so this usually won't run
+                    # Keep the PARDISO path for environments that rely on it.
                     for root_act in roots:
                         root_demand = per_root_demands[root_act]
                         lca_obj.build_demand_array(root_demand)
@@ -438,15 +439,16 @@ def lca(
                         if supply_total:
                             supplies.append((supply_total, int(root_act)))
                 else:
-                    # UMFPACK: factorize once and solve all RHS vectors
-                    X = solve_many_rhs_umfpack_factorized(A_csc, B)
-                    roots_arr = np.asarray(
+                    # UMFPACK: factorize once and solve all RHS vectors.
+                    root_supply_matrix = solve_many_rhs_umfpack_factorized(
+                        A_csc, rhs_matrix
+                    )
+                    root_ids = np.asarray(
                         roots, dtype=np.int64
-                    )  # column order of B and X
-                    X_roots = X
+                    )  # Column order of RHS and solution.
 
                     for j, root_act in enumerate(roots):
-                        supply_vec = X[:, j]
+                        supply_vec = root_supply_matrix[:, j]
                         if act_ids is None or positions is None:
                             # Fallback: emulate lca_obj.supply_array for extractor
                             lca_obj.supply_array = supply_vec
@@ -460,7 +462,7 @@ def lca(
 
         else:
             # Original single-demand path (no per-root attribution)
-            lca_obj.build_demand_array(fu_demand)
+            lca_obj.build_demand_array(functional_unit_demand)
             if not bc.PYPARDISO:
                 lca_obj.decompose_technosphere()
             lca_obj.supply_array = lca_obj.solve_linear_system()
@@ -474,7 +476,7 @@ def lca(
             if supply_total:
                 supplies.append((supply_total, None))
 
-        # Injected supply
+        # Injected supply (direct additions outside the solved system).
         if attribute_to_roots:
             per_root_injected = root_injected_by_year.get(solve_year, {})
             for root_act, injected_supply in per_root_injected.items():
@@ -492,7 +494,7 @@ def lca(
             if injected_supply:
                 supplies.append((injected_supply, None))
 
-        # ---- Inventory (keep your existing path for now) ----
+        # ---- Inventory ----
         if supplies and store_inventory:
             for supply_dict, root_act in supplies:
                 trails.accumulate_temporalized_biosphere_inventory(
@@ -503,19 +505,18 @@ def lca(
                     debug=debug,
                 )
 
-        # ---- Scores: NEW dense multi-root path ----
+        # ---- Scores ----
         if compute_score:
-            # Build dense supply matrix (n_acts, n_roots_this_year)
-            # We only include "root demands" supplies here. Injected supplies are already dicts;
-            # keep them as-is (small) or merge them into the dense matrix if you want.
+            # Build dense supply matrix (n_acts, n_roots_this_year).
+            # Injected supplies remain dictionary-based because they are usually small.
             if attribute_to_roots:
-                # Only call the matrix scorer if we actually solved a multi-RHS system this year
-                # AND the roots ordering matches X columns.
-                if roots_arr is not None and X_roots is not None:
+                # Only call the matrix scorer when we solved a multi-RHS system
+                # and the root ordering matches the solution columns.
+                if root_ids is not None and root_supply_matrix is not None:
                     trails.accumulate_temporalized_biosphere_score_matrix(
                         base_year=solve_year,
-                        supply_matrix=X_roots,
-                        root_activities=roots_arr,
+                        supply_matrix=root_supply_matrix,
+                        root_activities=root_ids,
                         cf=cf,
                         min_amount=float(min_amount),
                         use_temporal_distributions=True,
@@ -537,7 +538,7 @@ def lca(
                     )
             else:
                 # Non-root mode: single column supply array already exists
-                # You can keep the dict path or extend matrix scorer for no-root.
+                # Use the dict path to keep the scorer simple.
                 supply_total = supplies[0][0] if supplies else {}
                 if supply_total:
                     trails.accumulate_temporalized_biosphere_score(
@@ -566,7 +567,7 @@ def lca(
                 "This indicates lca() did not finalize scores correctly."
             )
 
-    # Characterized inventory is optional now
+    # Characterized inventory is optional.
     if store_inventory and (not compute_score):
         build_characterized_inventory(
             trails=trails, methods=methods, char_cache=_CHAR_CACHE

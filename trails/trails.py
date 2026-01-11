@@ -180,7 +180,6 @@ class Trails:
         self,
         *,
         attribute_to_roots: bool = False,
-        methods: list[str] | None = None,
     ) -> None:
         # Always initialize score years, independent of inventory
         min_offset, max_offset = self._inventory_offset_bounds()
@@ -263,7 +262,7 @@ class Trails:
         self,
         *,
         attribute_to_roots: bool = False,
-        reset_scores: bool = True,  # NEW
+        reset_scores: bool = True,
     ) -> None:
         min_offset, max_offset = self._inventory_offset_bounds()
         years = np.arange(
@@ -1066,6 +1065,9 @@ class Trails:
 
     def lca(self, *args: Any, **kwargs: Any) -> None:
         from .lca import lca as lca_fn
+
+        if "debug" in kwargs:
+            self.debug = bool(kwargs.pop("debug"))
 
         return lca_fn(self, *args, **kwargs)
 
