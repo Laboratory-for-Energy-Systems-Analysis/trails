@@ -395,7 +395,9 @@ def lca(
                 else:
                     # UMFPACK: factorize once and solve all RHS vectors
                     X = solve_many_rhs_umfpack_factorized(A_csc, B)
-                    roots_arr = np.asarray(roots, dtype=np.int64)  # column order of B and X
+                    roots_arr = np.asarray(
+                        roots, dtype=np.int64
+                    )  # column order of B and X
                     X_roots = X
 
                     for j, root_act in enumerate(roots):
