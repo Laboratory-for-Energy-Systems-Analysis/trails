@@ -326,6 +326,9 @@ def lca(
         )
 
     for solve_year in candidate_years:
+        roots_arr = None
+        X_roots = None
+
         solve_year = int(solve_year)
         arr = np.asarray(f_by_year[solve_year])
         nz_idx = np.where(np.abs(arr) > float(min_amount))[0]
@@ -390,6 +393,9 @@ def lca(
                 else:
                     # UMFPACK: factorize once and solve all RHS vectors
                     X = solve_many_rhs_umfpack_factorized(A_csc, B)
+                    roots_arr = np.asarray(roots, dtype=np.int64)  # column order of B and X
+                    X_roots = X
+
                     for j, root_act in enumerate(roots):
                         supply_vec = X[:, j]
                         if act_ids is None or positions is None:
@@ -457,19 +463,13 @@ def lca(
             # We only include "root demands" supplies here. Injected supplies are already dicts;
             # keep them as-is (small) or merge them into the dense matrix if you want.
             if attribute_to_roots:
-                per_root_demands = root_demands_by_year.get(solve_year, {})
-                if per_root_demands:
-                    root_ids = np.array(sorted(per_root_demands.keys()), dtype=np.int64)
-
-                    # Build RHS and solve already done by your UMFPACK multi-RHS logic:
-                    # You should already have X = solve_many_rhs_umfpack_factorized(A_csc, B_rhs)
-                    # Ensure X is shaped (n_acts, n_roots) aligned with root_ids order.
-
-                    # HERE: call Trails dense scorer
+                # Only call the matrix scorer if we actually solved a multi-RHS system this year
+                # AND the roots ordering matches X columns.
+                if roots_arr is not None and X_roots is not None:
                     trails.accumulate_temporalized_biosphere_score_matrix(
                         base_year=solve_year,
-                        supply_matrix=X,  # (n_acts, n_roots)
-                        root_activities=root_ids,  # (n_roots,)
+                        supply_matrix=X_roots,
+                        root_activities=roots_arr,
                         cf=cf,
                         min_amount=float(min_amount),
                         use_temporal_distributions=True,

@@ -3313,7 +3313,6 @@ class Trails:
             scenario_year = self._map_year_to_scenario_year(year)
             has_direct_bio = self._has_direct_biosphere(scenario_year, act, bio_cache)
 
-            # Helper: record a node into frontier + provenance
             # Stop expanding at max_depth
             if depth >= max_depth:
                 self._record_frontier(
@@ -3327,7 +3326,20 @@ class Trails:
                 )
                 continue
 
-            # Expand this node
+            # CUT at direct biosphere nodes (except the FU at depth 0)
+            if has_direct_bio and depth > 0:
+                self._record_direct_bio(
+                    direct_bio_total,
+                    direct_bio_roots,
+                    year,
+                    act,
+                    amt,
+                    root_act,
+                    return_provenance,
+                )
+                continue
+
+            # Expand this node (only if not cut)
             child_demands = self.expand_temporal_exchanges(
                 year=year,
                 act_idx=act,
@@ -3335,6 +3347,19 @@ class Trails:
                 use_temporal_distributions=use_temporal_distributions,
                 debug=debug,
             )
+
+            # Leaf: record it
+            if not child_demands:
+                self._record_frontier(
+                    frontier_total,
+                    provenance_roots,
+                    year,
+                    act,
+                    amt,
+                    root_act,
+                    return_provenance,
+                )
+                continue
 
             # --------------------------------------------------------------
             # Warm-up: if tqdm started indeterminate (total=None),
@@ -3375,10 +3400,10 @@ class Trails:
                 )
                 continue
 
-            # IMPORTANT BEHAVIOR:
-            # If this node has direct biosphere flows, we record it as part of the frontier.
-            # This matches your existing “solve nodes with direct biosphere” design.
-            # (It is NOT a full “score technosphere exchange at its own year” algorithm.)
+            # CUT RULE:
+            # If this node has direct biosphere flows (and is not the FU), we *cut* the traversal here:
+            # - record it for later injection
+            # - DO NOT expand it (otherwise we double-count via downstream linear solves + injection)
             if has_direct_bio and depth > 0:
                 self._record_direct_bio(
                     direct_bio_total,
@@ -3389,6 +3414,7 @@ class Trails:
                     root_act,
                     return_provenance,
                 )
+                continue
 
             # Enqueue children
             for child_year, mapping in child_demands.items():
