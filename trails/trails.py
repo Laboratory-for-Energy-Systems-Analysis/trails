@@ -1,6 +1,7 @@
 # trails.py
 
 from dataclasses import dataclass
+import time
 from typing import Any, Dict, List, Optional, Callable
 import importlib
 import importlib.util
@@ -23,6 +24,9 @@ from .temporal_distributions import TemporalDistribution, TemporalExchange
 import logging
 
 logger = logging.getLogger(__name__)
+
+def _log_every(n: int, i: int) -> bool:
+    return n > 0 and (i % n == 0)
 
 
 @dataclass
@@ -993,13 +997,6 @@ class Trails:
 
         for offset, weight in offsets_and_weights:
             raw_year = year + offset
-
-            if debug:
-                logger.debug(
-                    "expand_temporal_exchanges: ported pulse raw_year=%d weight=%g",
-                    int(raw_year),
-                    float(weight),
-                )
             self._add_demand_entry(
                 demand,
                 int(raw_year),
@@ -1098,6 +1095,14 @@ class Trails:
     ) -> dict[int, dict[int, float]]:
         """Expand activity-year demand into temporally distributed demands."""
         demand: dict[int, dict[int, float]] = {}
+        # --- summary counters for low-noise debugging ---
+        n_exchanges = 0
+        n_skipped_prod = 0
+        n_no_td = 0
+        n_td_ported = 0
+        n_td_matrix = 0
+        min_raw_year = None
+        max_raw_year = None
 
         context = self._get_scenario_context(year)
         if context is None:
@@ -1105,14 +1110,8 @@ class Trails:
         scenario_year, scenario_label, t = context
 
         if debug:
-            logger.info(
-                "expand_tech: year=%d scenario_year=%d t=%d act=%d amount=%g",
-                int(year),
-                int(scenario_year),
-                int(t),
-                int(act_idx),
-                float(amount),
-            )
+            logger.info("expand_tech: base_year=%d scen_year=%d t=%d act=%d amount=%g",
+                        int(year), int(scenario_year), int(t), int(act_idx), float(amount))
 
         A_row = self.A[t, act_idx, :]
         if A_row.nnz == 0:
@@ -1122,6 +1121,7 @@ class Trails:
         values = A_row.data
 
         for product_index, exchange_value in zip(product_indices, values):
+            n_exchanges += 1
             product_index = int(product_index)
             exchange_value = float(exchange_value)
 
@@ -1130,6 +1130,7 @@ class Trails:
 
             # Skip canonical production exchange (A[act, act] = 1)
             if product_index == act_idx and abs(exchange_value) == 1.0:
+                n_skipped_prod += 1
                 continue
 
             # Fetch TD metadata (template-year lookup; stable across interpolation)
@@ -1139,6 +1140,7 @@ class Trails:
             # No temporal distribution (or disabled): status quo
             # ------------------------------------------------------------------
             if (tex is None) or (not use_temporal_distributions):
+                n_no_td += 1
                 child_amount = self._child_amount(amount, exchange_value)
                 if child_amount != 0.0:
                     self._add_demand_entry(
@@ -1152,6 +1154,7 @@ class Trails:
             # TD + matrix-sourced magnitude: read A at each pulse year
             # ------------------------------------------------------------------
             if amount_source == "matrix":
+                n_td_matrix += 1
                 self._apply_temporal_distribution_matrix_sourced_to_demand(
                     year=year,
                     act_idx=act_idx,
@@ -1166,6 +1169,7 @@ class Trails:
             # ------------------------------------------------------------------
             # TD + ported magnitude (default): distribute anchor-year child amount
             # ------------------------------------------------------------------
+            n_td_ported += 1
             child_amount = self._child_amount(amount, exchange_value)
             if child_amount == 0.0:
                 continue
@@ -1178,6 +1182,34 @@ class Trails:
                 demand=demand,
                 debug=debug,
             )
+
+        if demand:
+            years_out = list(demand.keys())
+            min_raw_year = int(min(years_out))
+            max_raw_year = int(max(years_out))
+
+        if debug:
+            out_years = int(len(demand))
+            out_edges = int(sum(len(v) for v in demand.values()))
+            logger.info(
+                "expand_tech_done: base_year=%d scen_year=%d act=%d amount=%g "
+                "exchanges=%d skipped_prod=%d no_td=%d td_ported=%d td_matrix=%d "
+                "years=[%s..%s] out_years=%d out_edges=%d",
+                int(year),
+                int(scenario_year),
+                int(act_idx),
+                float(amount),
+                int(n_exchanges),
+                int(n_skipped_prod),
+                int(n_no_td),
+                int(n_td_ported),
+                int(n_td_matrix),
+                str(min_raw_year) if min_raw_year is not None else "NA",
+                str(max_raw_year) if max_raw_year is not None else "NA",
+                out_years,
+                out_edges,
+            )
+
 
         return demand
 
@@ -3138,6 +3170,9 @@ class Trails:
                 min_amount,
                 use_temporal_distributions,
             )
+            run_tag = f"{int(start_year)}:{int(start_act_idx)}:{int(max_depth)}:{time.time_ns()}"
+            t0 = time.perf_counter()
+            LOG_EVERY = 5000  # adjust as you like
 
         # ------------------------------------------------------------------
         # Progress bar setup
@@ -3176,7 +3211,9 @@ class Trails:
         pbar = None
         total_est = self._estimate_total_from_depth(max_depth)
         try:
-            if total_est is None:
+            if not show_progress:
+                pbar = None
+            elif total_est is None:
                 # Indeterminate until warm-up can estimate
                 pbar = tqdm(
                     total=None,
@@ -3274,6 +3311,18 @@ class Trails:
 
             _pbar_step()
 
+            if debug and _log_every(LOG_EVERY, nodes_processed):
+                logger.info(
+                    "traversal_progress run=%s nodes=%d queue=%d frontier=%d direct_bio=%d elapsed_s=%.1f",
+                    run_tag,
+                    int(nodes_processed),
+                    int(len(queue)),
+                    int(len(frontier_total)),
+                    int(len(direct_bio_total)),
+                    float(time.perf_counter() - t0),
+                )
+
+
             # Map to scenario year for "has direct biosphere" test (fast cutoff logic)
             scenario_year = self._map_year_to_scenario_year(year)
             has_direct_bio = self._has_direct_biosphere(scenario_year, act, bio_cache)
@@ -3291,18 +3340,6 @@ class Trails:
                 )
                 continue
 
-            # CUT at direct biosphere nodes (except the FU at depth 0)
-            if has_direct_bio and depth > 0:
-                self._record_direct_bio(
-                    direct_bio_total,
-                    direct_bio_roots,
-                    year,
-                    act,
-                    amt,
-                    root_act,
-                    return_provenance,
-                )
-                continue
 
             # Expand this node (only if not cut)
             child_demands = self.expand_temporal_exchanges(
@@ -3351,34 +3388,7 @@ class Trails:
                     pbar.total = est
                     pbar.refresh()
 
-            # Leaf: record it
-            if not child_demands:
-                self._record_frontier(
-                    frontier_total,
-                    provenance_roots,
-                    year,
-                    act,
-                    amt,
-                    root_act,
-                    return_provenance,
-                )
-                continue
 
-            # CUT RULE:
-            # If this node has direct biosphere flows (and is not the FU), we *cut* the traversal here:
-            # - record it for later injection
-            # - DO NOT expand it (otherwise we double-count via downstream linear solves + injection)
-            if has_direct_bio and depth > 0:
-                self._record_direct_bio(
-                    direct_bio_total,
-                    direct_bio_roots,
-                    year,
-                    act,
-                    amt,
-                    root_act,
-                    return_provenance,
-                )
-                continue
 
             # Enqueue children
             for child_year, mapping in child_demands.items():
@@ -3427,6 +3437,17 @@ class Trails:
                     )
 
         _pbar_finalize()
+
+        if debug:
+            logger.info(
+                "traversal_done run=%s nodes=%d frontier=%d direct_bio=%d elapsed_s=%.2f",
+                run_tag,
+                int(nodes_processed),
+                int(len(frontier_total)),
+                int(len(direct_bio_total)),
+                float(time.perf_counter() - t0),
+            )
+
 
         # Normalize provenance to plain dicts
         if return_provenance:
