@@ -42,12 +42,20 @@ def _build_flow_label_map(trails: Trails) -> dict[int, str]:
 
     # Determine which flow keys are actually used in plotted arrays
     flow_coord = None
-    if getattr(trails, "characterized_inventory", None) is not None and "flow" in trails.characterized_inventory.coords:
+    if (
+        getattr(trails, "characterized_inventory", None) is not None
+        and "flow" in trails.characterized_inventory.coords
+    ):
         flow_coord = trails.characterized_inventory.coords["flow"].values
-    elif getattr(trails, "inventory", None) is not None and "flow" in trails.inventory.coords:
+    elif (
+        getattr(trails, "inventory", None) is not None
+        and "flow" in trails.inventory.coords
+    ):
         flow_coord = trails.inventory.coords["flow"].values
 
-    coord_value_set = set(int(v) for v in flow_coord) if flow_coord is not None else None
+    coord_value_set = (
+        set(int(v) for v in flow_coord) if flow_coord is not None else None
+    )
 
     for scen_label, mapping in trails.biosphere_indices.items():
         for idx, meta in mapping.items():
@@ -74,7 +82,6 @@ def _build_flow_label_map(trails: Trails) -> dict[int, str]:
             labels[k] = label
 
     return labels
-
 
 
 def _select_years_from_results(

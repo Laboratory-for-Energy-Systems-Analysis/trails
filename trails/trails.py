@@ -205,7 +205,9 @@ class Trails:
     def _clamp_year_to_inventory(self, year: int) -> int:
         years = self._inventory_years
         if years is None or years.size == 0:
-            raise RuntimeError("Inventory years not initialized; call reset_inventory() first.")
+            raise RuntimeError(
+                "Inventory years not initialized; call reset_inventory() first."
+            )
         y = int(year)
         if y < int(years[0]):
             return int(years[0])
@@ -216,7 +218,9 @@ class Trails:
     def _clamp_year_to_scores(self, year: int) -> int:
         years = self._score_years
         if years is None or years.size == 0:
-            raise RuntimeError("Score years not initialized; call reset_scores() or reset_inventory() first.")
+            raise RuntimeError(
+                "Score years not initialized; call reset_scores() or reset_inventory() first."
+            )
         y = int(year)
         if y < int(years[0]):
             return int(years[0])
@@ -647,7 +651,7 @@ class Trails:
 
             year_idx = np.full(flows_arr.shape[0], int(year_idx_val), dtype=np.int64)
 
-        mask = (vals_arr != 0.0)
+        mask = vals_arr != 0.0
         if not np.any(mask):
             return
 
@@ -1531,7 +1535,6 @@ class Trails:
         if supply_matrix.size == 0:
             return
 
-
         base_year = int(base_year)
 
         # Ensure score builders exist
@@ -1568,7 +1571,6 @@ class Trails:
         n_acts = int(self.B.shape[1])
         if X.shape[0] != n_acts:
             raise ValueError(f"supply_matrix has {X.shape[0]} acts; expected {n_acts}")
-
 
         # ---------- No-TD fast path (avoid dense S = v[:, None] * X) ----------
         # ---------- No-TD fast path (chunked; avoids full S allocation) ----------
@@ -1954,7 +1956,6 @@ class Trails:
         if self.B is None:
             return
 
-
         base_year = int(base_year)
 
         biosphere_slice = self._get_biosphere_slice(base_year, debug)
@@ -2269,7 +2270,9 @@ class Trails:
                             np.float64, copy=False
                         )
 
-                        if row_flows_eff.size > 1 and np.any(row_flows_eff[1:] < row_flows_eff[:-1]):
+                        if row_flows_eff.size > 1 and np.any(
+                            row_flows_eff[1:] < row_flows_eff[:-1]
+                        ):
                             order = np.argsort(row_flows_eff, kind="mergesort")
                             row_flows_eff = row_flows_eff[order]
                             row_vals_eff = row_vals_eff[order]
@@ -3469,7 +3472,10 @@ class Trails:
             year, act_idx = key
             y = int(year)
             if self._inventory_years is not None and self._inventory_years.size:
-                y = max(int(self._inventory_years[0]), min(int(self._inventory_years[-1]), y))
+                y = max(
+                    int(self._inventory_years[0]),
+                    min(int(self._inventory_years[-1]), y),
+                )
             else:
                 # fallback: clamp to scenario range
                 y = max(int(self.min_year), min(int(self.max_year), y))

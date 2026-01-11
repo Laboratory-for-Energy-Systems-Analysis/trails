@@ -11,6 +11,7 @@ from .lcia import get_lcia_methods
 if TYPE_CHECKING:
     from .trails import Trails
 
+
 def _build_flowkey_to_flowindex(trails: Trails) -> dict[tuple, int]:
     """
     Build (name, compartment, subcompartment) -> flow_index mapping,
@@ -18,7 +19,10 @@ def _build_flowkey_to_flowindex(trails: Trails) -> dict[tuple, int]:
     """
     # Prefer explicit flow coordinate if available
     flow_coord = None
-    if getattr(trails, "inventory", None) is not None and "flow" in trails.inventory.coords:
+    if (
+        getattr(trails, "inventory", None) is not None
+        and "flow" in trails.inventory.coords
+    ):
         flow_coord = trails.inventory.coords["flow"].values
     elif getattr(trails, "B", None) is not None:
         # If Trails has a flow coordinate elsewhere, use it; otherwise fall back to range
