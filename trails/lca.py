@@ -43,6 +43,43 @@ def _get_mapping_arrays(mapping) -> tuple[np.ndarray, np.ndarray] | tuple[None, 
     return None, None
 
 
+def _map_activity_demands_to_products(
+    lca_obj,
+    activity_demands: dict[int, float],
+    *,
+    min_amount: float,
+) -> dict[int, float]:
+    """Map activity-indexed demands to product ids using LCA metadata."""
+    if not activity_demands:
+        return {}
+
+    act_map = getattr(lca_obj.dicts, "activity", None)
+    prod_map = getattr(lca_obj.dicts, "product", None)
+    if not act_map or not prod_map:
+        raise ValueError("LCA object missing dicts.activity or dicts.product")
+
+    mapped: dict[int, float] = {}
+    prod_map_keys = prod_map.keys()
+    cache: dict[int, int] = {}
+    min_amount = float(min_amount)
+
+    for act_id, amount in activity_demands.items():
+        amt = float(amount)
+        if abs(amt) <= min_amount:
+            continue
+        act_id = int(act_id)
+        prod_id = cache.get(act_id)
+        if prod_id is None:
+            if act_id in prod_map_keys:
+                prod_id = act_id
+            else:
+                prod_id = _reference_product_id_from_activity_id(lca_obj, act_id)
+            cache[act_id] = int(prod_id)
+        mapped[int(prod_id)] = mapped.get(int(prod_id), 0.0) + amt
+
+    return mapped
+
+
 def _build_rhs_matrix_from_root_demands(
     *,
     per_root_demands: dict[int, dict[int, float]],
@@ -339,8 +376,6 @@ def lca(
                 pbar.update(1)
             continue
 
-        fu_demand = {int(i): float(arr[i]) for i in nz_idx}
-
         dp, _, _, _ = _get_datapackage(
             dp_cache=dp_cache,
             trails=trails,
@@ -349,7 +384,9 @@ def lca(
             debug=debug,
         )
 
-        lca_obj = bc.LCA(demand=fu_demand, data_objs=[dp])
+        activity_demand = {int(i): float(arr[i]) for i in nz_idx}
+
+        lca_obj = bc.LCA(demand=activity_demand, data_objs=[dp])
         lca_obj.load_lci_data()  # build matrices + dicts
 
         # Cache mappings once per year
@@ -360,6 +397,16 @@ def lca(
         # For RHS building we need the product id -> row index dict
         product_dict = prod_map  # mapping-like
 
+        fu_demand = _map_activity_demands_to_products(
+            lca_obj,
+            activity_demand,
+            min_amount=float(min_amount),
+        )
+        if not fu_demand:
+            if pbar is not None:
+                pbar.update(1)
+            continue
+
         # Prepare A (CSC) once per year; UMFPACK expects CSC
         A_csc = lca_obj.technosphere_matrix
         if not sp.isspmatrix_csc(A_csc):
@@ -369,7 +416,16 @@ def lca(
 
         if attribute_to_roots:
             # Build one dense RHS matrix for all roots in this year
-            per_root_demands = root_demands_by_year.get(solve_year, {})
+            per_root_demands_raw = root_demands_by_year.get(solve_year, {})
+            per_root_demands: dict[int, dict[int, float]] = {}
+            for root_act, demand in per_root_demands_raw.items():
+                mapped = _map_activity_demands_to_products(
+                    lca_obj,
+                    demand,
+                    min_amount=float(min_amount),
+                )
+                if mapped:
+                    per_root_demands[int(root_act)] = mapped
             roots, B = _build_rhs_matrix_from_root_demands(
                 per_root_demands=per_root_demands,
                 product_dict=product_dict,
