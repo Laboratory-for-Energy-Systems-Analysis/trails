@@ -339,8 +339,6 @@ def lca(
                 root_map = {int(a): float(total_amt)}
             year_bucket = root_demands_by_year.setdefault(int(y), {})
             for root, amt in root_map.items():
-                if abs(float(amt)) <= float(min_amount):
-                    continue
                 root_bucket = year_bucket.setdefault(int(root), {})
                 root_bucket[int(a)] = root_bucket.get(int(a), 0.0) + float(amt)
 
@@ -350,8 +348,6 @@ def lca(
                 root_map = {int(a): float(total_amt)}
             year_bucket = root_injected_by_year.setdefault(int(y), {})
             for root, amt in root_map.items():
-                if abs(float(amt)) <= float(min_amount):
-                    continue
                 root_bucket = year_bucket.setdefault(int(root), {})
                 root_bucket[int(a)] = root_bucket.get(int(a), 0.0) + float(amt)
 
