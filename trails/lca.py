@@ -304,9 +304,7 @@ def lca(
 
     # Always inject FU directly
     injected_supply_by_year_act[(start_year_int, start_activity)] = (
-        float(
-            injected_supply_by_year_act.get((start_year_int, start_activity), 0.0)
-        )
+        float(injected_supply_by_year_act.get((start_year_int, start_activity), 0.0))
         + start_amount
     )
     injected_supply_prov_by_year_act.setdefault((start_year_int, start_activity), {})
@@ -378,9 +376,7 @@ def lca(
             debug=debug,
         )
 
-        activity_demand = {
-            int(i): float(demand_vector[i]) for i in nonzero_indices
-        }
+        activity_demand = {int(i): float(demand_vector[i]) for i in nonzero_indices}
 
         lca_obj = bc.LCA(demand=activity_demand, data_objs=[dp])
         lca_obj.load_lci_data()  # build matrices + dicts
