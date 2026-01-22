@@ -2390,7 +2390,9 @@ class Trails:
                 if 0 <= a_idx < ctx.n_acts:
                     supply_vec[a_idx] = float(supply_amt)
 
-            scaled = ctx.data.astype(np.float64, copy=False) * supply_vec[ctx.act_coords]
+            scaled = (
+                ctx.data.astype(np.float64, copy=False) * supply_vec[ctx.act_coords]
+            )
 
             act_coords = ctx.act_coords
             flow_coords = ctx.flow_coords
@@ -2451,7 +2453,6 @@ class Trails:
             else:
                 temporalize = None
 
-
             # TD metadata is keyed by (tpl_label, act, flow) and does not depend on scenario slice t.
             cache_key = (tpl_label, int(a))
 
@@ -2493,7 +2494,6 @@ class Trails:
 
             no_td_idx, ported_groups, matrix_entries = td_struct
 
-
             if no_td_idx is not None:
                 idx = no_td_idx
                 if idx.size:
@@ -2517,7 +2517,10 @@ class Trails:
                         continue
 
                     # Defensive: ensure indices are within current row bounds (stale cache protection)
-                    if idx_full.max(initial=-1) >= row_len or idx_full.min(initial=0) < 0:
+                    if (
+                        idx_full.max(initial=-1) >= row_len
+                        or idx_full.min(initial=0) < 0
+                    ):
                         # Cache is stale -> drop it and rebuild next time
                         td_expanded_cache.pop(cache_key, None)
                         idx_full = idx_full[(idx_full >= 0) & (idx_full < row_len)]
@@ -2561,7 +2564,9 @@ class Trails:
                         )
                         pulses = [
                             (int(o), float(w))
-                            for o, w in TemporalDistribution(tex0).iter_offsets_and_weights(debug=False)
+                            for o, w in TemporalDistribution(
+                                tex0
+                            ).iter_offsets_and_weights(debug=False)
                         ]
                         pulse_cache[k] = pulses
 
@@ -2578,8 +2583,12 @@ class Trails:
 
                     # Expand pulses in a vectorized way:
                     idx_rep = np.repeat(idx_td, len(pulses))
-                    offsets_arr = np.fromiter((o for o, _ in pulses), dtype=np.int64, count=len(pulses))
-                    weights_arr = np.fromiter((w for _, w in pulses), dtype=np.float64, count=len(pulses))
+                    offsets_arr = np.fromiter(
+                        (o for o, _ in pulses), dtype=np.int64, count=len(pulses)
+                    )
+                    weights_arr = np.fromiter(
+                        (w for _, w in pulses), dtype=np.float64, count=len(pulses)
+                    )
 
                     offsets_rep = np.tile(offsets_arr, idx_td.size)
                     weights_rep = np.tile(weights_arr, idx_td.size)

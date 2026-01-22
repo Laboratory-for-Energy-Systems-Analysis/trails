@@ -1605,8 +1605,8 @@ def _build_link_arrays(
         src_idx = node_index_agg[src_agg]
         tgt_idx = node_index_agg[tgt_agg]
 
-        (src_depth, src_year) = src_agg
-        (tgt_depth, tgt_year) = tgt_agg
+        src_depth, src_year = src_agg
+        tgt_depth, tgt_year = tgt_agg
 
         color = year_to_color.get(tgt_year, "rgba(150,150,150,0.7)")
 
@@ -1808,8 +1808,8 @@ def _collect_activities(
         all_activities = set()
         for d in depths_list:
             for (parent, child), amt in edges_by_depth.get(d, {}).items():
-                (y_cons, a_cons) = parent
-                (y_sup, a_sup) = child
+                y_cons, a_cons = parent
+                y_sup, a_sup = child
                 all_activities.add(int(a_cons))
                 all_activities.add(int(a_sup))
 
@@ -1835,8 +1835,8 @@ def _collect_global_years(
     years_global_set = set()
     for d in depths_list:
         for (parent, child), amt in edges_by_depth.get(d, {}).items():
-            (y_cons, a_cons) = parent
-            (y_sup, a_sup) = child
+            y_cons, a_cons = parent
+            y_sup, a_sup = child
             years_global_set.add(int(y_cons))
             years_global_set.add(int(y_sup))
 
@@ -1982,8 +1982,8 @@ def _add_flow_panel_traces(
     supplier_nodes = set()
 
     for (parent, child), amt in edges.items():
-        (y_cons, a_cons) = parent
-        (y_sup, a_sup) = child
+        y_cons, a_cons = parent
+        y_sup, a_sup = child
 
         consumer_nodes.add((int(y_cons), int(a_cons)))
         supplier_nodes.add((int(y_sup), int(a_sup)))
@@ -2045,8 +2045,8 @@ def _add_flow_panel_traces(
     head_y = []
 
     for (parent, child), amt in edges.items():
-        (y_cons, a_cons) = parent
-        (y_sup, a_sup) = child
+        y_cons, a_cons = parent
+        y_sup, a_sup = child
 
         x0 = int(y_sup)
         y0 = act_to_row.get(int(a_sup), -1)

@@ -7,5 +7,4 @@ from pathlib import Path
 import platformdirs
 import yaml
 
-
 DATA_DIR = Path(__file__).resolve().parent / "data"
