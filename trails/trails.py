@@ -1142,7 +1142,7 @@ class Trails:
                 continue
 
             # Skip canonical production exchange (A[act, act] = 1)
-            if product_index == act_idx and abs(exchange_value) == 1.0:
+            if product_index == act_idx:
                 n_skipped_prod += 1
                 continue
 
@@ -2390,9 +2390,8 @@ class Trails:
                 if 0 <= a_idx < ctx.n_acts:
                     supply_vec[a_idx] = float(supply_amt)
 
-            scaled = (
-                ctx.data.astype(np.float64, copy=False) * supply_vec[ctx.act_coords]
-            )
+            scaled = ctx.data.astype(np.float64, copy=False) * supply_vec[ctx.act_coords]
+
             act_coords = ctx.act_coords
             flow_coords = ctx.flow_coords
 
@@ -2446,26 +2445,12 @@ class Trails:
 
             scaled_full = supply_amt * vals_full.astype(np.float64, copy=False)
 
-            keep_full = None
+            thr = float(min_amount)
+            if thr > 0.0:
+                temporalize = np.abs(scaled_full) >= thr
+            else:
+                temporalize = None
 
-            if not use_temporal_distributions:
-                if keep_full is None:
-                    self._append_inventory_entries(
-                        inventory_act,
-                        base_year,
-                        flows_full,
-                        scaled_full,
-                        root_activity=root_activity,
-                    )
-                else:
-                    self._append_inventory_entries(
-                        inventory_act,
-                        base_year,
-                        flows_full[keep_full],
-                        scaled_full[keep_full],
-                        root_activity=root_activity,
-                    )
-                continue
 
             # TD metadata is keyed by (tpl_label, act, flow) and does not depend on scenario slice t.
             cache_key = (tpl_label, int(a))
@@ -2491,17 +2476,80 @@ class Trails:
                         port_groups_pos.setdefault(k, []).append(p)
 
                 no_td_idx = np.array(no_td_pos, dtype=np.intp) if no_td_pos else None
-                ported_flow_idx = []
-                ported_offsets = []
-                ported_weights = []
-                for k, v in port_groups_pos.items():
-                    idx_full = np.array(v, dtype=np.intp)
-                    if idx_full.size == 0:
+
+                # Cache base-row positions by TD key (no pulse expansion here)
+                ported_groups = {
+                    k: np.asarray(v, dtype=np.intp)
+                    for k, v in port_groups_pos.items()
+                    if v
+                }
+
+                td_struct = (
+                    no_td_idx,
+                    ported_groups,  # <-- dict[k, np.ndarray[pos]]
+                    matrix_entries,
+                )
+                td_expanded_cache[cache_key] = td_struct
+
+            no_td_idx, ported_groups, matrix_entries = td_struct
+
+
+            if no_td_idx is not None:
+                idx = no_td_idx
+                if idx.size:
+                    self._append_inventory_entries(
+                        inventory_act,
+                        base_year,
+                        flows_full[idx],
+                        scaled_full[idx],
+                        root_activity=root_activity,
+                    )
+
+            # -------------------------
+            # PORTED TD groups (min_amount controls temporalization only)
+            # -------------------------
+            if ported_groups:
+                row_len = int(end - start)
+                thr = float(min_amount)
+
+                for k, idx_full in ported_groups.items():
+                    if idx_full is None or idx_full.size == 0:
+                        continue
+
+                    # Defensive: ensure indices are within current row bounds (stale cache protection)
+                    if idx_full.max(initial=-1) >= row_len or idx_full.min(initial=0) < 0:
+                        # Cache is stale -> drop it and rebuild next time
+                        td_expanded_cache.pop(cache_key, None)
+                        idx_full = idx_full[(idx_full >= 0) & (idx_full < row_len)]
+                        if idx_full.size == 0:
+                            continue
+
+                    if temporalize is None:
+                        # No thresholding requested: everything temporalized
+                        idx_td = idx_full
+                        idx_anchor = None
+                    else:
+                        # Below threshold -> anchor to base_year (NOT omitted)
+                        idx_anchor = idx_full[~temporalize[idx_full]]
+                        idx_td = idx_full[temporalize[idx_full]]
+
+                    # 1) Anchor below-threshold contributions at base_year
+                    if idx_anchor is not None and idx_anchor.size:
+                        self._append_inventory_entries(
+                            inventory_act,
+                            base_year,
+                            flows_full[idx_anchor],
+                            scaled_full[idx_anchor],
+                            root_activity=root_activity,
+                        )
+
+                    # 2) Temporalize above-threshold contributions
+                    if idx_td.size == 0:
                         continue
 
                     pulses = pulse_cache.get(k)
                     if pulses is None:
-                        # Reconstruct a TemporalExchange from the td_key tuple
+                        # Reconstruct a TemporalExchange from td_key tuple (your existing convention)
                         dist, loc, scale, off_min, off_max, amt_src = k
                         tex0 = TemporalExchange(
                             distribution=dist,
@@ -2513,122 +2561,42 @@ class Trails:
                         )
                         pulses = [
                             (int(o), float(w))
-                            for o, w in TemporalDistribution(
-                                tex0
-                            ).iter_offsets_and_weights(debug=False)
+                            for o, w in TemporalDistribution(tex0).iter_offsets_and_weights(debug=False)
                         ]
                         pulse_cache[k] = pulses
 
                     if not pulses:
-                        continue
-
-                    offsets_arr = np.array([o for o, _ in pulses], dtype=np.int64)
-                    weights_arr = np.array([w for _, w in pulses], dtype=np.float64)
-
-                    idx_rep = np.repeat(idx_full, offsets_arr.size)
-                    offsets_rep = np.tile(offsets_arr, idx_full.size)
-                    weights_rep = np.tile(weights_arr, idx_full.size)
-
-                    ported_flow_idx.append(idx_rep)
-                    ported_offsets.append(offsets_rep)
-                    ported_weights.append(weights_rep)
-
-                if ported_flow_idx:
-                    ported_flow_idx_arr = np.concatenate(ported_flow_idx)
-                    ported_offsets_arr = np.concatenate(ported_offsets)
-                    ported_weights_arr = np.concatenate(ported_weights)
-                else:
-                    ported_flow_idx_arr = None
-                    ported_offsets_arr = None
-                    ported_weights_arr = None
-
-                td_struct = (
-                    no_td_idx,
-                    ported_flow_idx_arr,
-                    ported_offsets_arr,
-                    ported_weights_arr,
-                    matrix_entries,
-                )
-                td_expanded_cache[cache_key] = td_struct
-
-            (
-                no_td_idx,
-                ported_flow_idx,
-                ported_offsets,
-                ported_weights,
-                matrix_entries,
-            ) = td_struct
-
-            if no_td_idx is not None:
-                if keep_full is None:
-                    idx = no_td_idx
-                else:
-                    idx = no_td_idx[keep_full[no_td_idx]]
-                if idx.size:
-                    self._append_inventory_entries(
-                        inventory_act,
-                        base_year,
-                        flows_full[idx],
-                        scaled_full[idx],
-                        root_activity=root_activity,
-                    )
-
-            if ported_flow_idx is not None and ported_offsets is not None:
-                # Defensive: cached position arrays can be stale; enforce bounds to current row length
-                row_len = int(end - start)
-
-                # Filter any out-of-range indices first (prevents IndexError)
-                if ported_flow_idx.size:
-                    in_bounds = (ported_flow_idx >= 0) & (ported_flow_idx < row_len)
-                    if not np.all(in_bounds):
-                        td_expanded_cache.pop(cache_key, None)
-                        ported_flow_idx = ported_flow_idx[in_bounds]
-                        ported_offsets = ported_offsets[in_bounds]
-                        ported_weights = ported_weights[in_bounds]
-
-                if ported_flow_idx.size == 0:
-                    idx = np.array([], dtype=np.intp)
-                elif keep_full is None:
-                    idx = ported_flow_idx
-                    offsets_use = ported_offsets
-                    weights_use = ported_weights
-                else:
-                    # keep_full has length row_len, so this is now safe
-                    port_mask = keep_full[ported_flow_idx]
-                    if not np.any(port_mask):
-                        idx = np.array([], dtype=np.intp)
-                    else:
-                        idx = ported_flow_idx[port_mask]
-                        offsets_use = ported_offsets[port_mask]
-                        weights_use = ported_weights[port_mask]
-
-                if idx.size:
-                    kernel = self._get_numba_ported_kernel()
-                    if kernel is not None:
-                        flows_use, years_use, contrib = kernel(
-                            flows_full.astype(np.int64, copy=False),
-                            scaled_full,
-                            idx.astype(np.int64, copy=False),
-                            offsets_use.astype(np.int64, copy=False),
-                            weights_use.astype(np.float64, copy=False),
+                        # If TD produces nothing, treat as anchor (still not omitted)
+                        self._append_inventory_entries(
+                            inventory_act,
                             base_year,
-                        )
-                    else:
-                        flows_use = flows_full[idx]
-                        years_use = base_year + offsets_use
-                        contrib = scaled_full[idx] * weights_use
-
-                    if idx.size:
-                        acts_use = np.full_like(
-                            flows_use, inventory_act, dtype=np.int64
-                        )
-                        self._append_inventory_entries_bulk(
-                            acts_use,
-                            years_use,
-                            flows_use,
-                            contrib,
+                            flows_full[idx_td],
+                            scaled_full[idx_td],
                             root_activity=root_activity,
                         )
+                        continue
+
+                    # Expand pulses in a vectorized way:
+                    idx_rep = np.repeat(idx_td, len(pulses))
+                    offsets_arr = np.fromiter((o for o, _ in pulses), dtype=np.int64, count=len(pulses))
+                    weights_arr = np.fromiter((w for _, w in pulses), dtype=np.float64, count=len(pulses))
+
+                    offsets_rep = np.tile(offsets_arr, idx_td.size)
+                    weights_rep = np.tile(weights_arr, idx_td.size)
+
+                    # Build contributions
+                    flows_use = flows_full[idx_rep]
+                    years_use = base_year + offsets_rep
+                    contrib = scaled_full[idx_rep] * weights_rep
+
+                    acts_use = np.full_like(flows_use, inventory_act, dtype=np.int64)
+                    self._append_inventory_entries_bulk(
+                        acts_use,
+                        years_use,
+                        flows_use,
+                        contrib,
+                        root_activity=root_activity,
+                    )
 
             if matrix_entries:
                 if isinstance(matrix_entries, list):
@@ -2654,21 +2622,30 @@ class Trails:
                         offsets_arr = np.array([o for o, _ in pulses], dtype=np.int64)
                         weights_arr = np.array([w for _, w in pulses], dtype=np.float64)
                         matrix_groups[k] = (idx_full, offsets_arr, weights_arr)
+
                     td_struct = (
                         no_td_idx,
-                        ported_flow_idx,
-                        ported_offsets,
-                        ported_weights,
+                        ported_groups,
                         matrix_groups,
                     )
                     td_expanded_cache[cache_key] = td_struct
-                    matrix_entries = matrix_groups  # type: ignore[assignment]
+                    matrix_entries = matrix_groups
 
                 for k, (idx_full, offsets_arr, weights_arr) in matrix_entries.items():  # type: ignore[union-attr]
-                    if keep_full is None:
-                        idx = idx_full
-                    else:
-                        idx = idx_full[keep_full[idx_full]]
+                    idx = idx_full
+                    if temporalize is not None:
+                        # anchor below-threshold
+                        idx_anchor = idx[~temporalize[idx]]
+                        if idx_anchor.size:
+                            self._append_inventory_entries(
+                                inventory_act,
+                                base_year,
+                                flows_full[idx_anchor],
+                                scaled_full[idx_anchor],
+                                root_activity=root_activity,
+                            )
+                        # TD only for above-threshold
+                        idx = idx[temporalize[idx]]
                         if idx.size == 0:
                             continue
 
