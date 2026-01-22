@@ -1,4 +1,4 @@
-# `TRAILS`: Temporal Routing And Aggregation of Impacts across Life-cycle Systems
+# `TRAILS`: Temporal Routing and Aggregation of Impacts across Life-cycle Systems
 
 <p align="center">
   <img src="https://github.com/Laboratory-for-Energy-Systems-Analysis/trails/blob/main/assets/permanent/trails_logo_light_gray_bg_dark_frame.png" height="110"/>
@@ -6,14 +6,22 @@
 
 [![PyPI version](https://badge.fury.io/py/trails.svg)](https://badge.fury.io/py/trails)
 
-`TRAILS` is a Python library for **temporal and prospective Life Cycle Assessment (LCA)**, 
-designed to analyze how environmental impacts propagate through **exchanges with temporal distributions**.
+`TRAILS` is a Python library for **temporal Life Cycle Assessment (LCA)**. It
+models **time-resolved supply chains** where technosphere and biosphere exchanges can occur at
+different points in time and across **scenario years**. This makes it possible to compute
+how impacts evolve over time, attribute them to responsible activities, and compare scenarios.
 
-It provides a formal framework for **temporal graph traversal** of supply chains, enabling 
-the routing, aggregation, and attribution of impacts across **multiple time horizons, scenarios, 
-and technological transitions**.
+At a high level, `TRAILS`:
 
-`TRAILS` integrates data packages produced by `premise`.
+* Loads **3D technosphere/biosphere matrices** (time, activity, products) from a
+  Frictionless data package.
+* Optionally **interpolates** scenario matrices to annual resolution.
+* Runs a **temporal traversal** of the supply chain from a functional unit to build
+  time-indexed demands.
+* Solves year-specific systems and **routes impacts** through temporal distributions.
+* Aggregates impacts by year, activity, and optional root attribution for analysis and plotting.
+
+`TRAILS` is compatible with Frictionless data packages produced by `premise`.
 
 ---
 
@@ -40,8 +48,8 @@ start_act_idx = next(iter(activity_indices.keys()))
 # Choose an LCIA method bundled with TRAILS
 method = get_lcia_method_names(ei_version="3.11")[0]
 
-# Run a temporal LCA
-results = lca(
+# Run a temporal LCA (by default, computes scores and stores them on trails.scores)
+lca(
     trails=trails,
     start_year=2030,
     start_act_idx=start_act_idx,
@@ -49,12 +57,31 @@ results = lca(
     max_depth=2,
 )
 
+# If you set compute_score=False, use store_inventory=True and call
+# plot_temporal_scores(trails.characterized_inventory, ...)
+
 # Plot temporal impact scores
-fig = plot_temporal_scores(results, trails, method_label=method)
+fig = plot_temporal_scores(trails.scores, trails, method_label=method)
 fig.show()
 ```
 
 ---
+
+## Method Overview
+
+`TRAILS` extends classic LCA by making time an explicit dimension. Temporal exchanges are
+encoded using distributions (e.g., discrete, normal, lognormal, uniform, triangular)
+and expanded into year offsets during traversal. For each calendar year that becomes active
+in the traversal frontier, the system matrix is solved, and biosphere flows are accumulated
+at their respective years. Impacts are then characterized using LCIA methods bundled with
+the library, producing time series of impact scores.
+
+The key modeling steps are:
+
+1. **Load package data**: technosphere/biosphere matrices and metadata.
+2. **Temporal traversal**: propagate demands across time using exchange distributions.
+3. **Per-year solving**: build year-specific systems and compute supply vectors.
+4. **Impact attribution**: accumulate impacts by year and (optionally) by root activity.
 
 ## Motivation
 
@@ -70,7 +97,7 @@ are considered.
 
 Instead of asking *“What is the impact of this system?”*, `TRAILS` allows you to ask:
 
-> *When, where, and through which pathways do impacts occur across the life cycle?*
+> *When do impacts occur across the life cycle?*
 
 ---
 
@@ -98,7 +125,54 @@ Impacts can be aggregated or compared across:
 
 * Temporal LCA engine with explicit time handling  
 * Deep supply-chain traversal  
-* Scenario-aware computation
+* Scenario-aware computation and aggregation across years
+
+---
+
+## Data Package Expectations
+
+`TRAILS` consumes Frictionless data packages with:
+
+* **Matrices**: technosphere (A) and biosphere (B) CSVs with required columns such as
+  `index of activity`, `index of product` / `index of biosphere flow`, `value`, and
+  uncertainty fields (`loc`, `scale`, `shape`, `minimum`, `maximum`, `negative`, `flip`).
+* **Temporal columns** (optional): `temporal_distribution`, `temporal_loc`,
+  `temporal_scale`, `temporal_min`, `temporal_max`, `temporal_amount_source`.
+* **Metadata**: activity and biosphere indices per scenario label (year).
+
+Packages exported by the `premise.TrailsDataPackage` class follow this structure out of the box.
+
+## Architecture Overview
+
+Core modules and responsibilities:
+
+* `trails/datapackage.py`: load matrices, indices, and temporal metadata.
+* `trails/trails.py`: main wrapper, temporal traversal, inventory/score accumulation.
+* `trails/lca.py`: orchestration of traversal + per-year solves using `bw2calc`.
+* `trails/lcia.py`: bundled LCIA methods and characterization factor matrices.
+* `trails/plotting.py`: time-series visualization helpers.
+
+## FAQ
+
+**What is a temporal exchange?**  
+An exchange with a distribution over year offsets (e.g., lognormal), expanded into
+discrete year pulses during traversal.
+
+**How are years handled?**  
+Scenario labels are treated as calendar years. When a year is requested that does not
+exist in the package, the nearest available scenario year is used.
+
+**Do I need both scores and inventory?**  
+By default `lca()` computes scores and stores them on `trails.scores`. If you set
+`compute_score=False`, pass `store_inventory=True` and then use
+`trails.characterized_inventory` for plotting.
+
+## Limitations & Assumptions
+
+* Input data must follow the expected Frictionless schema; missing columns will fail fast.
+* Years are treated as discrete calendar years (no sub-annual resolution).
+* If a requested year is not available, the nearest scenario year is used.
+* Some tests or workflows may require external LCA data (e.g., ecoinvent) not shipped here.
 
 ---
 
