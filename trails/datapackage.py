@@ -584,7 +584,12 @@ def load_matrices_from_package(
         # amount_source optional
         src = "port"
         if amount_source is not None:
-            ssrc = str(amount_source).strip().lower()
+            try:
+                if np.isnan(amount_source):  # type: ignore[arg-type]
+                    amount_source = None
+            except Exception:
+                pass
+            ssrc = str(amount_source).strip().lower() if amount_source is not None else ""
             if ssrc:
                 if ssrc not in {"port", "matrix"}:
                     raise ValueError(f"Unknown temporal_amount_source: {ssrc}")

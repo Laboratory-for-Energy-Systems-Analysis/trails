@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 import time
+import os
 from typing import Any, Dict, List, Optional, Callable
 import importlib
 import importlib.util
@@ -175,19 +176,16 @@ class Trails:
         )
         self._score_years: Optional[np.ndarray] = None
         self._score_year_index: dict[int, int] = {}
+        self.graph = None
+        self._routing_attribute_to_roots: Optional[bool] = None
+        self._routing_params: Optional[dict[str, object]] = None
 
     def reset_scores(
         self,
         *,
         attribute_to_roots: bool = False,
     ) -> None:
-        # Always initialize score years, independent of inventory
-        min_offset, max_offset = self._inventory_offset_bounds()
-        years = np.arange(
-            int(self.min_year + min_offset),
-            int(self.max_year + max_offset) + 1,
-            dtype=int,
-        )
+        years = np.arange(int(self.min_year), int(self.max_year) + 1, dtype=int)
 
         self._score_years = years
         self._score_year_index = {int(y): int(i) for i, y in enumerate(years)}
@@ -232,6 +230,45 @@ class Trails:
             return int(years[-1])
         return y
 
+    def _get_debug_flow_filters(self, *, debug: bool) -> dict | None:
+        """Lazily parse debug filters from env vars for flow-level logging."""
+        if not (debug or self.debug):
+            return None
+        if getattr(self, "_debug_flow_filters", None) is not None:
+            return self._debug_flow_filters
+        if not hasattr(self, "_debug_flow_filters_logged"):
+            self._debug_flow_filters_logged = False
+
+        flow_id = os.getenv("TRAILS_DEBUG_FLOW_ID")
+        year = os.getenv("TRAILS_DEBUG_YEAR")
+        act = os.getenv("TRAILS_DEBUG_ACTIVITY")
+        max_pulses = os.getenv("TRAILS_DEBUG_MAX_PULSES")
+        max_matches = os.getenv("TRAILS_DEBUG_MAX_MATCHES")
+
+        self._debug_flow_filters = {
+            "flow_id": int(flow_id) if flow_id not in (None, "") else None,
+            "year": int(year) if year not in (None, "") else None,
+            "act": int(act) if act not in (None, "") else None,
+            "max_pulses": int(max_pulses) if max_pulses not in (None, "") else 12,
+            "max_matches": int(max_matches) if max_matches not in (None, "") else 50,
+            "matches": 0,
+        }
+
+        if not self._debug_flow_filters_logged:
+            logger.debug(
+                "debug_flow_filters: %s",
+                {
+                    "flow_id": self._debug_flow_filters["flow_id"],
+                    "year": self._debug_flow_filters["year"],
+                    "act": self._debug_flow_filters["act"],
+                    "max_pulses": self._debug_flow_filters["max_pulses"],
+                    "max_matches": self._debug_flow_filters["max_matches"],
+                },
+            )
+            self._debug_flow_filters_logged = True
+
+        return self._debug_flow_filters
+
     def _append_scores_from_yearidx_map(
         self,
         act_idx: int,
@@ -264,12 +301,19 @@ class Trails:
         attribute_to_roots: bool = False,
         reset_scores: bool = True,
     ) -> None:
-        min_offset, max_offset = self._inventory_offset_bounds()
-        years = np.arange(
-            int(self.min_year + min_offset),
-            int(self.max_year + max_offset) + 1,
-            dtype=int,
-        )
+        if self.min_year is None or self.max_year is None:
+            if not getattr(self, "scenario_labels", None):
+                raise RuntimeError(
+                    "Trails scenario years not initialized; cannot reset inventory."
+                )
+            years_int = np.array([int(lbl) for lbl in self.scenario_labels], dtype=int)
+            if years_int.size == 0:
+                raise RuntimeError(
+                    "Trails scenario years not initialized; cannot reset inventory."
+                )
+            self.min_year = int(years_int.min())
+            self.max_year = int(years_int.max())
+        years = np.arange(int(self.min_year), int(self.max_year) + 1, dtype=int)
 
         self._inventory_years = years
         self._inventory_year_index = {int(y): int(i) for i, y in enumerate(years)}
@@ -1071,6 +1115,227 @@ class Trails:
 
         return lca_fn(self, *args, **kwargs)
 
+    def temporal_routing(
+        self,
+        *,
+        start_year: int,
+        start_act_idx: int,
+        amount: float = 1.0,
+        max_depth: int = 2,
+        min_amount: float = 1e-18,
+        show_progress: bool = True,
+        attribute_to_roots: bool = True,
+        debug: bool = False,
+    ) -> None:
+        """Run only the temporal routing/traversal step and store results on self."""
+        try:
+            import networkx as nx
+        except Exception as exc:  # pragma: no cover - dependency guard
+            raise RuntimeError(
+                "networkx is required for temporal_routing(). "
+                "Install it with `pip install networkx`."
+            ) from exc
+
+        if debug:
+            self.debug = True
+
+        start_activity = int(start_act_idx)
+        start_year_int = int(start_year)
+        start_amount = float(amount)
+
+        def _get_activity_meta(label: str, idx: int) -> dict:
+            mapping = self.activity_indices.get(label)
+            if mapping and idx in mapping:
+                return mapping.get(idx, {})
+            for _label, _mapping in self.activity_indices.items():
+                if idx in _mapping:
+                    return _mapping.get(idx, {})
+            return {}
+
+        def _node_key(year: int, depth: int, act_idx: int) -> tuple:
+            scenario_year = self._map_year_to_scenario_year(year)
+            label = str(scenario_year)
+            meta = _get_activity_meta(label, int(act_idx))
+            name = meta.get("name") or ""
+            ref_prod = meta.get("reference product") or ""
+            location = meta.get("location") or ""
+            return (int(year), int(depth), name, ref_prod, location, int(act_idx))
+
+        def _ensure_node(key: tuple, year: int, depth: int, act_idx: int) -> None:
+            if key in G:
+                return
+            scenario_year = self._map_year_to_scenario_year(year)
+            label = str(scenario_year)
+            meta = _get_activity_meta(label, int(act_idx))
+            G.add_node(
+                key,
+                year=int(year),
+                depth=int(depth),
+                act_idx=int(act_idx),
+                name=meta.get("name") or "",
+                reference_product=meta.get("reference product") or "",
+                location=meta.get("location") or "",
+                amount=0.0,
+                frontier_amount=0.0,
+                direct_bio_amount=0.0,
+                frontier_roots={},
+                direct_bio_roots={},
+            )
+
+        def _add_root_amount(
+            data: dict[int, float], root_act: int | None, amt: float, fallback: int
+        ) -> None:
+            root = int(root_act) if root_act is not None else int(fallback)
+            data[root] = float(data.get(root, 0.0)) + float(amt)
+
+        G = nx.DiGraph()
+
+        queue = deque()
+        start_year_int = int(self._map_year_to_scenario_year(start_year_int))
+        queue.append((start_year_int, start_activity, start_amount, 0, (), None))
+
+        if show_progress:
+            pbar = tqdm(
+                total=None,
+                desc="Temporal routing",
+                unit="node",
+                dynamic_ncols=True,
+            )
+        else:
+            pbar = None
+
+        bio_cache: dict[tuple[int, int], bool] = {}
+        nodes_processed = 0
+
+        while queue:
+            year, act, amt, depth, path, root_act = queue.popleft()
+            year = int(self._map_year_to_scenario_year(year))
+
+            if amt == 0.0:
+                continue
+
+            nodes_processed += 1
+            if pbar is not None:
+                pbar.update(1)
+
+            if root_act is None and depth > 0:
+                if path:
+                    first = path[0]
+                    if isinstance(first, (tuple, list)) and len(first) >= 2:
+                        root_act = int(first[1])
+                    else:
+                        root_act = int(act)
+                else:
+                    root_act = int(act)
+
+            node_key = _node_key(year, depth, act)
+            _ensure_node(node_key, year, depth, act)
+            G.nodes[node_key]["amount"] = float(G.nodes[node_key]["amount"]) + float(amt)
+
+            scenario_year = self._map_year_to_scenario_year(year)
+            has_direct_bio = self._has_direct_biosphere(scenario_year, act, bio_cache)
+
+            if depth >= max_depth:
+                G.nodes[node_key]["frontier_amount"] = float(
+                    G.nodes[node_key]["frontier_amount"]
+                ) + float(amt)
+                if attribute_to_roots:
+                    _add_root_amount(
+                        G.nodes[node_key]["frontier_roots"], root_act, amt, act
+                    )
+                continue
+
+            child_demands = self.expand_temporal_exchanges(
+                year=year,
+                act_idx=act,
+                amount=amt,
+                use_temporal_distributions=True,
+                debug=bool(self.debug),
+            )
+
+            if not child_demands:
+                G.nodes[node_key]["frontier_amount"] = float(
+                    G.nodes[node_key]["frontier_amount"]
+                ) + float(amt)
+                if attribute_to_roots:
+                    _add_root_amount(
+                        G.nodes[node_key]["frontier_roots"], root_act, amt, act
+                    )
+                continue
+
+            if has_direct_bio and depth > 0:
+                G.nodes[node_key]["direct_bio_amount"] = float(
+                    G.nodes[node_key]["direct_bio_amount"]
+                ) + float(amt)
+                if attribute_to_roots:
+                    _add_root_amount(
+                        G.nodes[node_key]["direct_bio_roots"], root_act, amt, act
+                    )
+
+            for child_year, mapping in child_demands.items():
+                for child_act, child_amt in mapping.items():
+                    child_amt = float(child_amt)
+                    if child_amt == 0.0:
+                        continue
+
+                    child_year = int(self._map_year_to_scenario_year(child_year))
+                    child_act = int(child_act)
+                    child_depth = int(depth) + 1
+                    child_node = _node_key(child_year, child_depth, child_act)
+                    _ensure_node(child_node, child_year, child_depth, child_act)
+
+                    if G.has_edge(node_key, child_node):
+                        G.edges[node_key, child_node]["amount"] = float(
+                            G.edges[node_key, child_node]["amount"]
+                        ) + child_amt
+                    else:
+                        G.add_edge(node_key, child_node, amount=child_amt)
+
+                    if abs(child_amt) < float(min_amount):
+                        G.nodes[child_node]["frontier_amount"] = float(
+                            G.nodes[child_node]["frontier_amount"]
+                        ) + float(child_amt)
+                        if attribute_to_roots:
+                            child_root = child_act if depth == 0 else root_act
+                            _add_root_amount(
+                                G.nodes[child_node]["frontier_roots"],
+                                child_root,
+                                child_amt,
+                                child_act,
+                            )
+                        continue
+
+                    if depth == 0:
+                        child_root = child_act
+                        child_path = ((child_year, child_act),)
+                    else:
+                        child_root = root_act
+                        child_path = path + ((child_year, child_act),)
+
+                    queue.append(
+                        (child_year, child_act, child_amt, child_depth, child_path, child_root)
+                    )
+
+        if pbar is not None:
+            pbar.close()
+
+        self.graph = G
+        self._routing_attribute_to_roots = bool(attribute_to_roots)
+        self._routing_params = {
+            "start_year": start_year_int,
+            "start_act_idx": start_activity,
+            "amount": start_amount,
+            "max_depth": int(max_depth),
+            "min_amount": float(min_amount),
+        }
+
+        if debug:
+            logger.info(
+                "temporal_routing done: nodes=%d edges=%d",
+                int(G.number_of_nodes()),
+                int(G.number_of_edges()),
+            )
+
     def static_lca(
         self,
         year: int,
@@ -1257,6 +1522,193 @@ class Trails:
         return self.temporal_biosphere_exchanges.get(
             (str(y_tpl), int(act_idx), int(flow_idx))
         )
+
+    def print_exchange_table(
+        self,
+        *,
+        year: int,
+        act_idx: int,
+        max_rows: int | None = None,
+        sort_by_amount: bool = True,
+    ) -> None:
+        """Print a table of technosphere, production, and biosphere exchanges.
+
+        :param year: Calendar year for the scenario slice.
+        :type year: int
+        :param act_idx: Activity index to inspect.
+        :type act_idx: int
+        :param max_rows: Optional maximum number of rows to display.
+        :type max_rows: int | None
+        :param sort_by_amount: Sort rows by absolute amount (descending).
+        :type sort_by_amount: bool
+        """
+        context = self._get_scenario_context(int(year))
+        if context is None:
+            print(f"No scenario data available for year={year}")
+            return
+        scenario_year, scenario_label, t = context
+        scenario_label = str(scenario_label)
+
+        def _format_amount(value: float) -> str:
+            if value == 0.0:
+                return "0.00"
+            abs_v = abs(value)
+            if abs_v >= 1e4 or abs_v < 1e-3:
+                return f"{value:.2e}"
+            return f"{value:.2f}"
+
+        def _get_activity_meta(label: str, idx: int) -> dict:
+            mapping = self.activity_indices.get(label)
+            if mapping and idx in mapping:
+                return mapping.get(idx, {})
+            # fallback to any available scenario mapping
+            for _label, _mapping in self.activity_indices.items():
+                if idx in _mapping:
+                    return _mapping.get(idx, {})
+            return {}
+
+        def _get_bio_meta(label: str, idx: int) -> dict:
+            mapping = self.biosphere_indices.get(label)
+            if mapping and idx in mapping:
+                return mapping.get(idx, {})
+            for _label, _mapping in self.biosphere_indices.items():
+                if idx in _mapping:
+                    return _mapping.get(idx, {})
+            return {}
+
+        rows: list[dict[str, object]] = []
+
+        # ---- Technosphere + production exchanges (A matrix row) ----
+        if self.A is not None:
+            A_row = self.A[t, int(act_idx), :]
+            if A_row.nnz:
+                prod_indices = A_row.coords[0]
+                values = A_row.data
+                for prod_idx, value in zip(prod_indices, values):
+                    prod_idx = int(prod_idx)
+                    amount = float(value)
+                    if amount == 0.0:
+                        continue
+                    flow_type = "prod" if prod_idx == int(act_idx) else "tech"
+                    meta = _get_activity_meta(scenario_label, prod_idx)
+                    tex = self._get_tech_temporal_exchange(int(year), int(act_idx), prod_idx)
+                    rows.append(
+                        {
+                            "direction": "out" if amount > 0.0 else "in",
+                            "flow type": flow_type,
+                            "id": prod_idx,
+                            "name": meta.get("name") or "",
+                            "reference product": meta.get("reference product") or "",
+                            "amount": _format_amount(amount),
+                            "td type": getattr(tex, "distribution", None),
+                            "loc": getattr(tex, "loc", None),
+                            "scale": getattr(tex, "scale", None),
+                            "min": getattr(tex, "offset_min", None),
+                            "max": getattr(tex, "offset_max", None),
+                        }
+                    )
+
+        # ---- Biosphere exchanges (B matrix row) ----
+        if self.B is not None:
+            B_row = self.B[t, int(act_idx), :]
+            if B_row.nnz:
+                flow_indices = B_row.coords[0]
+                values = B_row.data
+                for flow_idx, value in zip(flow_indices, values):
+                    flow_idx = int(flow_idx)
+                    amount = float(value)
+                    if amount == 0.0:
+                        continue
+                    meta = _get_bio_meta(scenario_label, flow_idx)
+                    tex = self._get_bio_temporal_exchange(int(year), int(act_idx), flow_idx)
+                    rows.append(
+                        {
+                            "direction": "emission" if amount > 0.0 else "uptake",
+                            "flow type": "bio",
+                            "id": flow_idx,
+                            "name": meta.get("name") or "",
+                            "reference product": "",
+                            "amount": _format_amount(amount),
+                            "td type": getattr(tex, "distribution", None),
+                            "loc": getattr(tex, "loc", None),
+                            "scale": getattr(tex, "scale", None),
+                            "min": getattr(tex, "offset_min", None),
+                            "max": getattr(tex, "offset_max", None),
+                        }
+                    )
+
+        if not rows:
+            print(f"No exchanges found for act={act_idx} in year={scenario_year}")
+            return
+
+        if sort_by_amount:
+            def _sort_key(row: dict[str, object]) -> float:
+                raw = row.get("amount", "0")
+                try:
+                    return abs(float(raw))
+                except ValueError:
+                    try:
+                        return abs(float(str(raw)))
+                    except ValueError:
+                        return 0.0
+            rows.sort(key=_sort_key, reverse=True)
+
+        if max_rows is not None:
+            rows = rows[: int(max_rows)]
+
+        def _truncate(value: object, limit: int) -> str:
+            text = "" if value is None else str(value)
+            if len(text) <= limit:
+                return text
+            return text[:limit]
+
+        col_limits = {
+            "name": 32,
+            "reference product": 32,
+            "td type": 5,
+            "loc": 5,
+            "scale": 5,
+            "min": 5,
+            "max": 5,
+        }
+
+        headers = [
+            "flow type",
+            "id",
+            "name",
+            "reference product",
+            "amount",
+            "td type",
+            "loc",
+            "scale",
+            "min",
+            "max",
+        ]
+
+        try:
+            from prettytable import PrettyTable
+
+            table = PrettyTable()
+            table.field_names = headers
+            for row in rows:
+                for col, limit in col_limits.items():
+                    row[col] = _truncate(row.get(col), limit)
+                table.add_row([row.get(h) for h in headers])
+            print(table)
+        except Exception:
+            # Fallback to a simple fixed-width printout
+            widths = {h: max(len(h), 12) for h in headers}
+            for row in rows:
+                for col, limit in col_limits.items():
+                    row[col] = _truncate(row.get(col), limit)
+                for h in headers:
+                    widths[h] = max(widths[h], len(str(row.get(h, ""))))
+            line = " | ".join(h.ljust(widths[h]) for h in headers)
+            sep = "-+-".join("-" * widths[h] for h in headers)
+            print(line)
+            print(sep)
+            for row in rows:
+                print(" | ".join(str(row.get(h, "")).ljust(widths[h]) for h in headers))
 
     def _get_biosphere_slice(
         self, base_year: int, debug: bool
@@ -2343,6 +2795,8 @@ class Trails:
         debug: bool,
     ) -> None:
         """Core accumulation routine reused across batch calls."""
+        dbg = self._get_debug_flow_filters(debug=debug)
+
         if not supply_by_activity:
             return
 
@@ -2447,6 +2901,28 @@ class Trails:
 
             scaled_full = supply_amt * vals_full.astype(np.float64, copy=False)
 
+            dbg_flow_id = None if dbg is None else dbg.get("flow_id")
+            dbg_year = None if dbg is None else dbg.get("year")
+            dbg_act = None if dbg is None else dbg.get("act")
+            dbg_max_pulses = 0 if dbg is None else int(dbg.get("max_pulses", 12))
+            dbg_max_matches = 0 if dbg is None else int(dbg.get("max_matches", 50))
+            if dbg is not None and dbg_flow_id is not None:
+                if dbg_act is None or int(dbg_act) == int(a):
+                    if dbg_year is None or int(dbg_year) == int(base_year):
+                        if dbg.get("matches", 0) < dbg_max_matches:
+                            pos = np.where(flows_full == int(dbg_flow_id))[0]
+                            if pos.size:
+                                logger.debug(
+                                    "bio_inv_row: base_year=%d act=%d flow=%d pos=%s raw_vals=%s scaled_vals=%s",
+                                    int(base_year),
+                                    int(a),
+                                    int(dbg_flow_id),
+                                    pos.tolist(),
+                                    [float(vals_full[p]) for p in pos[:5]],
+                                    [float(scaled_full[p]) for p in pos[:5]],
+                                )
+                                dbg["matches"] = int(dbg.get("matches", 0)) + 1
+
             thr = float(min_amount)
             if thr > 0.0:
                 temporalize = np.abs(scaled_full) >= thr
@@ -2457,6 +2933,49 @@ class Trails:
             cache_key = (tpl_label, int(a))
 
             td_struct = td_expanded_cache.get(cache_key)
+            if td_struct is not None:
+                row_len = int(end - start)
+                no_td_idx, ported_groups, matrix_entries = td_struct
+                stale = False
+
+                if no_td_idx is not None and no_td_idx.size:
+                    if (
+                        no_td_idx.max(initial=-1) >= row_len
+                        or no_td_idx.min(initial=0) < 0
+                    ):
+                        stale = True
+
+                if not stale and ported_groups:
+                    for idx_full in ported_groups.values():
+                        if idx_full is None or idx_full.size == 0:
+                            continue
+                        if (
+                            idx_full.max(initial=-1) >= row_len
+                            or idx_full.min(initial=0) < 0
+                        ):
+                            stale = True
+                            break
+
+                if not stale and matrix_entries:
+                    if isinstance(matrix_entries, list):
+                        for p, _tex in matrix_entries:
+                            if p < 0 or p >= row_len:
+                                stale = True
+                                break
+                    else:
+                        for idx_full, _offs, _w in matrix_entries.values():
+                            if idx_full is None or idx_full.size == 0:
+                                continue
+                            if (
+                                idx_full.max(initial=-1) >= row_len
+                                or idx_full.min(initial=0) < 0
+                            ):
+                                stale = True
+                                break
+
+                if stale:
+                    td_expanded_cache.pop(cache_key, None)
+                    td_struct = None
 
             if td_struct is None:
                 no_td_pos: list[int] = []
@@ -2504,6 +3023,17 @@ class Trails:
                         scaled_full[idx],
                         root_activity=root_activity,
                     )
+                    if dbg is not None and dbg_flow_id is not None:
+                        if dbg_act is None or int(dbg_act) == int(a):
+                            pos = idx[flows_full[idx] == int(dbg_flow_id)]
+                            if pos.size and (dbg_year is None or int(dbg_year) == int(base_year)):
+                                logger.debug(
+                                    "bio_inv_no_td: year=%d act=%d flow=%d contrib=%s",
+                                    int(base_year),
+                                    int(a),
+                                    int(dbg_flow_id),
+                                    float(np.sum(scaled_full[pos])),
+                                )
 
             # -------------------------
             # PORTED TD groups (min_amount controls temporalization only)
@@ -2581,6 +3111,25 @@ class Trails:
                         )
                         continue
 
+                    if dbg is not None and dbg_flow_id is not None:
+                        if dbg_act is None or int(dbg_act) == int(a):
+                            flow_mask = flows_full[idx_td] == int(dbg_flow_id)
+                            if np.any(flow_mask):
+                                flow_vals = scaled_full[idx_td][flow_mask]
+                                for offset, weight in pulses[:dbg_max_pulses]:
+                                    raw_year = int(base_year + int(offset))
+                                    if dbg_year is None or raw_year == int(dbg_year):
+                                        contrib = float(flow_vals.sum()) * float(weight)
+                                        logger.debug(
+                                            "bio_inv_ported: base_year=%d act=%d flow=%d raw_year=%d weight=%.6g contrib=%.6g",
+                                            int(base_year),
+                                            int(a),
+                                            int(dbg_flow_id),
+                                            int(raw_year),
+                                            float(weight),
+                                            float(contrib),
+                                        )
+
                     # Expand pulses in a vectorized way:
                     idx_rep = np.repeat(idx_td, len(pulses))
                     offsets_arr = np.fromiter(
@@ -2641,7 +3190,16 @@ class Trails:
                     matrix_entries = matrix_groups
 
                 for k, (idx_full, offsets_arr, weights_arr) in matrix_entries.items():  # type: ignore[union-attr]
+                    row_len = int(end - start)
                     idx = idx_full
+                    if idx.size and (
+                        idx.max(initial=-1) >= row_len or idx.min(initial=0) < 0
+                    ):
+                        # Stale cache protection
+                        idx = idx[(idx >= 0) & (idx < row_len)]
+                        if idx.size == 0:
+                            td_expanded_cache.pop(cache_key, None)
+                            continue
                     if temporalize is not None:
                         # anchor below-threshold
                         idx_anchor = idx[~temporalize[idx]]
@@ -2712,6 +3270,24 @@ class Trails:
                                 continue
                             vals_eff = row_vals_eff[pos[valid]]
                             f_use = f_arr[valid]
+
+                        if dbg is not None and dbg_flow_id is not None:
+                            if dbg_act is None or int(dbg_act) == int(a):
+                                flow_mask = f_use == int(dbg_flow_id)
+                                if np.any(flow_mask):
+                                    for (raw_year, weight), v in zip(year_weights, vals_eff[flow_mask]):
+                                        if dbg_year is None or int(raw_year) == int(dbg_year):
+                                            contrib = float(supply_amt) * float(v) * float(weight)
+                                            logger.debug(
+                                                "bio_inv_matrix: base_year=%d act=%d flow=%d raw_year=%d weight=%.6g Bval=%.6g contrib=%.6g",
+                                                int(base_year),
+                                                int(a),
+                                                int(dbg_flow_id),
+                                                int(raw_year),
+                                                float(weight),
+                                                float(v),
+                                                float(contrib),
+                                            )
 
                         years_vec = np.array(
                             [yw[0] for yw in year_weights], dtype=np.int64
@@ -3357,6 +3933,19 @@ class Trails:
                     return_provenance,
                 )
                 continue
+
+            # If we expand a node, we must still account for its direct biosphere flows.
+            if has_direct_bio and depth > 0:
+                direct_root = root_act if root_act is not None else int(act)
+                self._record_direct_bio(
+                    direct_bio_total,
+                    direct_bio_roots,
+                    year,
+                    act,
+                    amt,
+                    direct_root,
+                    return_provenance,
+                )
 
             # --------------------------------------------------------------
             # Warm-up: if tqdm started indeterminate (total=None),

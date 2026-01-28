@@ -1,4 +1,6 @@
 from typing import Any, Callable, Dict, List, Literal, Optional, Tuple, Union
+import json
+import os
 
 import math
 
@@ -247,6 +249,794 @@ def _add_root_traces(
         )
 
 
+def plot_temporal_graph(
+    trails: Trails,
+    *,
+    min_edge_amount: float = 0.0,
+    notebook: bool = False,
+    filename: str = "trails_graph.html",
+    height: str = "800px",
+    width: str = "100%",
+    physics: bool = False,
+    layout_by_year_depth: bool = True,
+    year_scale: float = 300.0,
+    depth_scale: float = 2000.0,
+    max_label_chars: int = 28,
+    level0_edge_color: str = "#e45756",
+    palette: Optional[list[str]] = None,
+    show_year_labels: bool = True,
+    year_label_offset: float = 1.2,
+    show_band_labels: bool = True,
+    band_label_chars: int = 80,
+    band_label_offset_px: float | None = None,
+    auto_depth_scale: bool = True,
+) -> str:
+    """Render the routing graph with pyvis.
+
+    :param trails: Trails instance with a populated graph.
+    :type trails: Trails
+    :param min_edge_amount: Minimum absolute edge amount to include.
+    :type min_edge_amount: float
+    :param notebook: Whether to render for Jupyter notebooks.
+    :type notebook: bool
+    :param filename: Output HTML file name.
+    :type filename: str
+    :param height: HTML canvas height.
+    :type height: str
+    :param width: HTML canvas width.
+    :type width: str
+    :param physics: Enable physics simulation.
+    :type physics: bool
+    :param layout_by_year_depth: Position nodes by year (x) and depth (y).
+    :type layout_by_year_depth: bool
+    :param year_scale: Scale factor for year spacing on x-axis.
+    :type year_scale: float
+    :param depth_scale: Scale factor for depth spacing on y-axis.
+    :type depth_scale: float
+    :param max_label_chars: Max characters per label line (name/ref).
+    :type max_label_chars: int
+    :param level0_edge_color: Color for edges from depth-0 nodes.
+    :type level0_edge_color: str
+    :param palette: Colors for first-level branches (depth=1).
+    :type palette: list[str] | None
+    :param show_year_labels: Add year labels below the graph.
+    :type show_year_labels: bool
+    :param year_label_offset: Vertical offset multiplier for year labels.
+    :type year_label_offset: float
+    :param show_band_labels: Add right-side labels for depth bands.
+    :type show_band_labels: bool
+    :param band_label_chars: Max characters for band labels.
+    :type band_label_chars: int
+    :param band_label_offset_px: Pixel offset for band labels (vertical). If None, auto-compute.
+    :type band_label_offset_px: float | None
+    :param auto_depth_scale: Increase depth spacing based on band count.
+    :type auto_depth_scale: bool
+    :returns: Output filename.
+    :rtype: str
+    """
+    G = getattr(trails, "graph", None)
+    if G is None:
+        raise RuntimeError("Trails graph is missing; run trails.temporal_routing(...) first.")
+
+    try:
+        import networkx as nx
+    except Exception as exc:  # pragma: no cover - dependency guard
+        raise RuntimeError(
+            "networkx is required for plot_temporal_graph(). "
+            "Install it with `pip install networkx`."
+        ) from exc
+
+    try:
+        from pyvis.network import Network
+        import pyvis
+    except Exception as exc:  # pragma: no cover - dependency guard
+        raise RuntimeError(
+            "pyvis is required for plot_temporal_graph(). "
+            "Install it with `pip install pyvis`."
+        ) from exc
+
+    H = G.copy()
+
+    # Filter edges by amount
+    if min_edge_amount > 0.0:
+        edges = [
+            (u, v)
+            for u, v, d in H.edges(data=True)
+            if abs(float(d.get("amount", 0.0))) >= float(min_edge_amount)
+        ]
+        H = H.edge_subgraph(edges).copy()
+
+    # Relabel tuple node ids to strings for pyvis compatibility
+    def _truncate(text: str, limit: int) -> str:
+        if len(text) <= limit:
+            return text
+        return text[:limit]
+
+    def _label_node(node: tuple, data: dict) -> str:
+        year = data.get("year", "")
+        depth = data.get("depth", "")
+        name = data.get("name", "") or ""
+        ref = data.get("reference_product", "") or ""
+        loc = data.get("location", "") or ""
+        act = data.get("act_idx", "")
+        name = _truncate(str(name), max_label_chars)
+        ref = _truncate(str(ref), max_label_chars)
+        label = f"{name}"
+        if ref:
+            label = f"{label}\n{ref}"
+        meta_parts = [str(year), f"d{depth}", str(act), loc]
+        return f"{label}\n" + " | ".join([p for p in meta_parts if p])
+
+    mapping = {}
+    for n, d in H.nodes(data=True):
+        mapping[n] = _label_node(n, d)
+
+    net = Network(height=height, width=width, directed=True, notebook=notebook)
+    try:
+        net.set_template_dir(os.path.join(os.path.dirname(pyvis.__file__), "templates"))
+    except Exception:
+        pass
+
+    if palette is None:
+        palette = [
+            "#4c78a8",
+            "#f58518",
+            "#54a24b",
+            "#e45756",
+            "#72b7b2",
+            "#b279a2",
+            "#ff9da6",
+            "#9d755d",
+            "#bab0ac",
+        ]
+
+    # Assign colors per depth-0 edge, then propagate to descendants of that child.
+    depth0_nodes = [n for n, d in H.nodes(data=True) if int(d.get("depth", 0)) == 0]
+    edge_colors: dict[tuple, str] = {}
+    node_branch_color: dict = {}
+    color_idx = 0
+
+    def _branch_key(node: object) -> tuple[str, str, str]:
+        data = H.nodes[node]
+        return (
+            str(data.get("name", "")),
+            str(data.get("reference_product", "")),
+            str(data.get("location", "")),
+        )
+
+    key_colors: dict[tuple[str, str], str] = {}
+    for n in depth0_nodes:
+        for _, child in H.out_edges(n):
+            key = _branch_key(child)
+            if key in key_colors:
+                color = key_colors[key]
+            else:
+                color = palette[color_idx % len(palette)]
+                color_idx += 1
+                key_colors[key] = color
+            edge_colors[(n, child)] = color
+            node_branch_color[child] = color
+            queue = [child]
+            while queue:
+                cur = queue.pop(0)
+                for _, nxt in H.out_edges(cur):
+                    if nxt not in node_branch_color:
+                        node_branch_color[nxt] = color
+                        queue.append(nxt)
+
+    def _edge_color(u: object, v: object) -> str:
+        src_depth = int(H.nodes[u].get("depth", 0))
+        if src_depth == 0:
+            return edge_colors.get((u, v), level0_edge_color)
+        return node_branch_color.get(u, palette[0])
+
+    def _node_color(n: object) -> Optional[str]:
+        depth = int(H.nodes[n].get("depth", 0))
+        if depth == 0:
+            return None
+        return node_branch_color.get(n)
+
+    initial_depth = 1
+    full_nodes: list[dict[str, object]] = []
+    full_edges: list[dict[str, object]] = []
+
+    if layout_by_year_depth:
+        net.toggle_physics(False)
+        years = [float(d.get("year", 0.0)) for _, d in H.nodes(data=True)]
+        depths = [float(d.get("depth", 0.0)) for _, d in H.nodes(data=True)]
+        min_year = min(years) if years else 0.0
+        max_year = max(years) if years else 0.0
+        min_depth = min(depths) if depths else 0.0
+        max_depth_val = max(depths) if depths else 0.0
+        year_mid = (min_year + max_year) / 2.0
+        depth_mid = 0.0
+        depth_buckets: dict[int, list[tuple[object, dict]]] = {}
+        for n, d in H.nodes(data=True):
+            depth_buckets.setdefault(int(d.get("depth", 0)), []).append((n, d))
+        depth_offsets: dict[object, float] = {}
+        band_labels: list[dict[str, object]] = []
+        max_bands_per_depth = 1
+        for depth, items in depth_buckets.items():
+            band_map: dict[tuple[str, str, str], list[tuple[object, dict]]] = {}
+            for n, d in items:
+                key = (
+                    str(d.get("name", "")),
+                    str(d.get("reference_product", "")),
+                    str(d.get("location", "")),
+                )
+                band_map.setdefault(key, []).append((n, d))
+            bands = sorted(band_map.items(), key=lambda it: it[0])
+            if not bands:
+                continue
+            max_bands_per_depth = max(max_bands_per_depth, len(bands))
+            band_step = 32.0
+            band_start = -band_step * (len(bands) - 1) / 2.0
+            for band_idx, (_key, band_items) in enumerate(bands):
+                band_offset = band_start + band_idx * band_step
+                max_offset = float(depth_scale) * 0.35
+                if band_offset > max_offset:
+                    band_offset = max_offset
+                if band_offset < -max_offset:
+                    band_offset = -max_offset
+                name = _truncate(_key[0], int(max_label_chars))
+                ref = _truncate(_key[1], int(max_label_chars)) if _key[1] else ""
+                loc = _key[2]
+                label = name
+                if ref:
+                    label = f"{label} | {ref}"
+                if loc:
+                    label = f"{label} | {loc}"
+                rep_node = band_items[0][0]
+                band_labels.append(
+                    {
+                        "node": mapping[rep_node],
+                        "label": label,
+                    }
+                )
+                for n, _ in band_items:
+                    depth_offsets[n] = band_offset
+        if auto_depth_scale:
+            # Ensure depth spacing dominates band offsets.
+            max_band_offset = (24.0 * (max_bands_per_depth - 1)) / 2.0
+            depth_scale = max(float(depth_scale), 2.0 * max_band_offset + 200.0)
+        for n, d in H.nodes(data=True):
+            label = mapping[n]
+            year = float(d.get("year", 0.0))
+            depth = float(d.get("depth", 0.0))
+            band_key = (
+                str(d.get("name", "")),
+                str(d.get("reference_product", "")),
+                str(d.get("location", "")),
+            )
+            x = (year - year_mid) * float(year_scale)
+            y = -(depth - depth_mid) * float(depth_scale) + float(depth_offsets.get(n, 0.0))
+            color = _node_color(n)
+            hidden = int(depth) > int(initial_depth)
+            if color:
+                node_payload = {
+                    "id": label,
+                    "label": "",
+                    "x": x,
+                    "y": y,
+                    "physics": False,
+                    "color": color,
+                    "depth": int(depth),
+                    "year": year,
+                    "band_key": f"{band_key[0]}|{band_key[1]}|{band_key[2]}",
+                    "band_offset": float(depth_offsets.get(n, 0.0)),
+                    "shape": "dot",
+                    "size": 12,
+                }
+            else:
+                node_payload = {
+                    "id": label,
+                    "label": "",
+                    "x": x,
+                    "y": y,
+                    "physics": False,
+                    "depth": int(depth),
+                    "year": year,
+                    "band_key": f"{band_key[0]}|{band_key[1]}|{band_key[2]}",
+                    "band_offset": float(depth_offsets.get(n, 0.0)),
+                    "shape": "dot",
+                    "size": 12,
+                }
+            full_nodes.append(node_payload)
+            if not hidden:
+                n_id = node_payload["id"]
+                node_payload_copy = dict(node_payload)
+                node_payload_copy.pop("id", None)
+                net.add_node(n_id, **node_payload_copy)
+
+        def _edge_title(src_label: str, dst_label: str, amount: float) -> str:
+            src = src_label.split("\n", 1)[0]
+            dst = dst_label.split("\n", 1)[0]
+            return f"{src} → {dst} | amount={amount:.3g}"
+
+        if show_year_labels:
+            unique_years = sorted({int(y) for y in years})
+            bottom_y = min(
+                (-(float(d.get("depth", 0.0)) - depth_mid) * float(depth_scale))
+                + float(depth_offsets.get(n, 0.0))
+                for n, d in H.nodes(data=True)
+            )
+            # Inject year labels as HTML overlay to avoid vis.js rendering quirks.
+            x_positions = {
+                year: (float(year) - year_mid) * float(year_scale)
+                for year in unique_years
+            }
+        for u, v, d in H.edges(data=True):
+            src = mapping[u]
+            dst = mapping[v]
+            src_depth = int(H.nodes[u].get("depth", 0))
+            dst_depth = int(H.nodes[v].get("depth", 0))
+            hidden_edge = (src_depth > initial_depth) or (dst_depth > initial_depth)
+            edge_payload = {
+                "from": src,
+                "to": dst,
+                "value": float(d.get("amount", 0.0)),
+                "color": _edge_color(u, v),
+                "title": _edge_title(src, dst, float(d.get("amount", 0.0))),
+                "depth_from": src_depth,
+                "depth_to": dst_depth,
+            }
+            full_edges.append(edge_payload)
+            if not hidden_edge:
+                src = edge_payload["from"]
+                dst = edge_payload["to"]
+                edge_payload_copy = dict(edge_payload)
+                edge_payload_copy.pop("from", None)
+                edge_payload_copy.pop("to", None)
+                net.add_edge(src, dst, **edge_payload_copy)
+    else:
+        color_by_label = {mapping[n]: _node_color(n) for n in H.nodes()}
+        H = nx.relabel_nodes(H, mapping, copy=True)
+        for n, d in H.nodes(data=True):
+            color = color_by_label.get(n)
+            depth = int(d.get("depth", 0))
+            year = float(d.get("year", 0.0))
+            band_key = (
+                str(d.get("name", "")),
+                str(d.get("reference_product", "")),
+                str(d.get("location", "")),
+            )
+            hidden = int(depth) > int(initial_depth)
+            if color:
+                node_payload = {
+                    "id": n,
+                    "label": "",
+                    "color": color,
+                    "depth": depth,
+                    "year": year,
+                    "band_key": f"{band_key[0]}|{band_key[1]}|{band_key[2]}",
+                    "shape": "dot",
+                    "size": 12,
+                }
+            else:
+                node_payload = {
+                    "id": n,
+                    "label": "",
+                    "depth": depth,
+                    "year": year,
+                    "band_key": f"{band_key[0]}|{band_key[1]}|{band_key[2]}",
+                    "shape": "dot",
+                    "size": 12,
+                }
+            full_nodes.append(node_payload)
+            if not hidden:
+                n_id = node_payload["id"]
+                node_payload_copy = dict(node_payload)
+                node_payload_copy.pop("id", None)
+                net.add_node(n_id, **node_payload_copy)
+        def _edge_title(src_label: str, dst_label: str, amount: float) -> str:
+            src = src_label.split("\n", 1)[0]
+            dst = dst_label.split("\n", 1)[0]
+            return f"{src} → {dst} | amount={amount:.3g}"
+        for u, v, d in H.edges(data=True):
+            src_depth = int(H.nodes[u].get("depth", 0))
+            dst_depth = int(H.nodes[v].get("depth", 0))
+            hidden_edge = (src_depth > initial_depth) or (dst_depth > initial_depth)
+            edge_payload = {
+                "from": u,
+                "to": v,
+                "value": float(d.get("amount", 0.0)),
+                "color": _edge_color(u, v),
+                "title": _edge_title(u, v, float(d.get("amount", 0.0))),
+                "depth_from": src_depth,
+                "depth_to": dst_depth,
+            }
+            full_edges.append(edge_payload)
+            if not hidden_edge:
+                src = edge_payload["from"]
+                dst = edge_payload["to"]
+                edge_payload_copy = dict(edge_payload)
+                edge_payload_copy.pop("from", None)
+                edge_payload_copy.pop("to", None)
+                net.add_edge(src, dst, **edge_payload_copy)
+        net.toggle_physics(physics)
+    if notebook:
+        net.show(filename)
+    else:
+        net.write_html(filename, open_browser=False)
+
+    if show_year_labels and layout_by_year_depth:
+        try:
+            with open(filename, "r", encoding="utf-8") as f:
+                html = f.read()
+            overlay_items = [
+                {"year": int(year), "x": float(x)}
+                for year, x in x_positions.items()
+            ]
+            bottom_y = min(
+                (-(float(d.get("depth", 0.0)) - depth_mid) * float(depth_scale))
+                + float(depth_offsets.get(n, 0.0))
+                for n, d in H.nodes(data=True)
+            )
+            bottom_y = float(bottom_y) - (float(depth_scale) * float(year_label_offset))
+            depth_values = sorted({int(d.get("depth", 0)) for _, d in H.nodes(data=True)})
+            band_items = band_labels if show_band_labels else []
+            max_depth_in_graph = max(depths) if depths else 0.0
+            initial_depth = 1
+            overlay_script = f"""
+<style>
+#mynetwork {{
+  position: relative;
+}}
+#trail-year-overlay {{
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  pointer-events: none;
+  font-size: 12px;
+  color: #444;
+  z-index: 999;
+}}
+#trail-year-overlay .trail-year,
+#trail-year-overlay .trail-year-label {{
+  position: absolute;
+  transform: translateX(-50%);
+  white-space: nowrap;
+}}
+#trail-year-overlay .trail-year {{
+  width: 1px;
+  height: 8px;
+  background: #888;
+}}
+#trail-year-overlay .trail-year-label {{
+  top: 10px;
+}}
+#trail-year-overlay .trail-depth-line {{
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: rgba(0,0,0,0.2);
+}}
+#trail-year-overlay .trail-band-label {{
+  position: absolute;
+  right: 6px;
+  transform: translateY(-50%);
+  white-space: nowrap;
+  text-align: right;
+  max-width: none;
+}}
+</style>
+<script>
+  window.addEventListener('load', function() {{
+    var container = document.getElementById('mynetwork');
+    if (!container) return;
+    var overlay = document.createElement('div');
+    overlay.id = 'trail-year-overlay';
+    var items = {overlay_items};
+    var depths = {depth_values};
+    var depthScale = {float(depth_scale)};
+    var bands = {band_items};
+    var bandOffsetPx = {float(band_label_offset_px) if band_label_offset_px is not None else 0.0};
+    function renderAxis() {{
+      overlay.innerHTML = '';
+      if (typeof network === 'undefined' || !network) return;
+      var view = network.getViewPosition();
+      var h = overlay.clientHeight || 0;
+      var y_px = h - 18;
+      var w = overlay.clientWidth || 0;
+      var depthScale = window.trailDepthScale || depthScale;
+      var depthMid = window.trailDepthMid || {depth_mid};
+      items.forEach(function(item) {{
+        var dom = network.canvasToDOM({{x: item.x, y: view.y}});
+        var tick = document.createElement('span');
+        tick.className = 'trail-year';
+        tick.style.left = dom.x.toFixed(1) + 'px';
+        tick.style.top = y_px.toFixed(1) + 'px';
+        overlay.appendChild(tick);
+        var label = document.createElement('span');
+        label.className = 'trail-year-label';
+        label.style.left = dom.x.toFixed(1) + 'px';
+        label.style.top = (y_px + 10).toFixed(1) + 'px';
+        label.textContent = String(item.year);
+        overlay.appendChild(label);
+      }});
+      depths.forEach(function(d) {{
+        var domY = network.canvasToDOM({{x: view.x, y: -((d + 0.5) - depthMid) * depthScale}});
+        var line = document.createElement('div');
+        line.className = 'trail-depth-line';
+        line.style.top = domY.y.toFixed(1) + 'px';
+        overlay.appendChild(line);
+        var tick = document.createElement('span');
+        tick.className = 'trail-year';
+        tick.style.left = '14px';
+        tick.style.top = domY.y.toFixed(1) + 'px';
+        overlay.appendChild(tick);
+        var label = document.createElement('span');
+        label.className = 'trail-year-label';
+        label.style.left = '28px';
+        label.style.top = (domY.y - 6).toFixed(1) + 'px';
+        label.textContent = 'd' + String(d);
+        overlay.appendChild(label);
+      }});
+      bands.forEach(function(b) {{
+        if (!b.node) return;
+        var box = network.getBoundingBox(b.node);
+        if (!box) return;
+        var centerY = (box.top + box.bottom) / 2.0;
+        var domY = network.canvasToDOM({{x: 0, y: centerY}});
+        var label = document.createElement('span');
+        label.className = 'trail-band-label';
+        label.style.top = (domY.y + bandOffsetPx).toFixed(1) + 'px';
+        label.textContent = b.label;
+        overlay.appendChild(label);
+      }});
+    }}
+    window.renderAxis = renderAxis;
+    container.appendChild(overlay);
+    var tries = 0;
+    function bindAxis() {{
+      if (typeof network !== 'undefined' && network) {{
+        renderAxis();
+        network.on('zoom', renderAxis);
+        network.on('dragEnd', renderAxis);
+        network.on('stabilized', renderAxis);
+      }} else if (tries < 10) {{
+        tries += 1;
+        setTimeout(bindAxis, 200);
+      }}
+    }}
+    bindAxis();
+  }});
+</script>
+"""
+            html = html.replace("</body>", overlay_script + "\n</body>")
+            with open(filename, "w", encoding="utf-8") as f:
+                f.write(html)
+        except Exception:
+            pass
+
+    try:
+        with open(filename, "r", encoding="utf-8") as f:
+            html = f.read()
+        # Build branch selector data for depth-0 -> depth-1 edges
+        branch_items: list[dict[str, object]] = []
+        if H.number_of_nodes() > 0:
+            grouped: dict[tuple[str, str], set[str]] = {}
+            for u, v in H.edges():
+                if int(H.nodes[u].get("depth", 0)) == 0 and int(
+                    H.nodes[v].get("depth", 0)
+                ) == 1:
+                    key = _branch_key(v)
+                    label = key[0]
+                    if key[1]:
+                        label = f"{label} | {key[1]}"
+                    if key[2]:
+                        label = f"{label} | {key[2]}"
+                    nodes_set = grouped.setdefault(key, set())
+                    nodes_set.add(mapping[v])
+                    nodes_set.add(mapping[u])
+                    try:
+                        for desc in nx.descendants(H, v):
+                            nodes_set.add(mapping[desc])
+                    except Exception:
+                        pass
+            for key, nodes_set in grouped.items():
+                label = key[0]
+                if key[1]:
+                    label = f"{label} | {key[1]}"
+                if key[2]:
+                    label = f"{label} | {key[2]}"
+                branch_items.append(
+                    {
+                        "label": label,
+                        "nodes": sorted(nodes_set),
+                    }
+                )
+
+        full_nodes_json = json.dumps(full_nodes)
+        full_edges_json = json.dumps(full_edges)
+        base_depth_scale = float(depth_scale)
+        auto_depth_flag = bool(auto_depth_scale)
+        year_scale_val = float(year_scale)
+        selector_script = f"""
+<style>
+#trail-depth-selector {{
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 1000;
+  background: rgba(255,255,255,0.9);
+  border: 1px solid #ccc;
+  padding: 6px 8px;
+  font-size: 12px;
+  border-radius: 4px;
+}}
+#trail-branch-selector {{
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 1000;
+  background: rgba(255,255,255,0.9);
+  border: 1px solid #ccc;
+  padding: 6px 8px;
+  font-size: 12px;
+  border-radius: 4px;
+}}
+</style>
+<script>
+  window.addEventListener('load', function() {{
+    var container = document.getElementById('mynetwork');
+    if (!container) return;
+    var fullNodes = {full_nodes_json};
+    var fullEdges = {full_edges_json};
+    var baseDepthScale = {base_depth_scale};
+    var autoDepthScale = {str(auto_depth_flag).lower()};
+    var yearScale = {year_scale_val};
+    var sel = document.createElement('select');
+    sel.id = 'trail-depth-selector';
+    var maxDepth = 0;
+    fullNodes.forEach(function(n) {{
+      if (n.depth !== undefined && n.depth > maxDepth) maxDepth = n.depth;
+    }});
+    for (var d = 0; d <= maxDepth; d++) {{
+      var opt = document.createElement('option');
+      opt.value = d;
+      opt.textContent = 'max depth: ' + d;
+      sel.appendChild(opt);
+    }}
+    sel.value = '{initial_depth}';
+    var branchItems = {branch_items};
+    var currentBranch = 'all';
+    function applyFilters(d, branchKey) {{
+      if (typeof nodes === 'undefined' || typeof edges === 'undefined') return;
+      var visible = {{}};
+      var branchSet = null;
+      if (branchKey && branchKey !== 'all') {{
+        branchItems.forEach(function(b) {{
+          if (b.label === branchKey) {{
+            branchSet = {{}};
+            b.nodes.forEach(function(nid) {{ branchSet[nid] = true; }});
+          }}
+        }});
+      }}
+      var nodesFiltered = [];
+      fullNodes.forEach(function(n) {{
+        var show = (n.depth || 0) <= d;
+        if (branchSet) {{
+          show = show && !!branchSet[n.id];
+        }}
+        if (show) {{
+          visible[n.id] = true;
+          nodesFiltered.push(n);
+        }}
+      }});
+      // recompute depth spacing based on visible bands
+      var depthBandCounts = {{}};
+      nodesFiltered.forEach(function(n) {{
+        var k = String(n.depth) + '|' + String(n.band_key || '');
+        depthBandCounts[k] = true;
+      }});
+      var bandsPerDepth = {{}};
+      Object.keys(depthBandCounts).forEach(function(k) {{
+        var depth = k.split('|', 1)[0];
+        bandsPerDepth[depth] = (bandsPerDepth[depth] || 0) + 1;
+      }});
+      var maxBands = 1;
+      Object.keys(bandsPerDepth).forEach(function(k) {{
+        if (bandsPerDepth[k] > maxBands) maxBands = bandsPerDepth[k];
+      }});
+      var depthScale = baseDepthScale;
+      if (autoDepthScale) {{
+        var maxBandOffset = (24 * (maxBands - 1)) / 2.0;
+        var computed = Math.max(200, 2.0 * maxBandOffset + 200);
+        depthScale = (computed > baseDepthScale) ? computed : Math.min(baseDepthScale, computed);
+      }}
+      // recompute band offsets per depth
+      var bandOffsets = {{}};
+      var perDepth = {{}};
+      nodesFiltered.forEach(function(n) {{
+        var depth = n.depth || 0;
+        var key = String(n.band_key || '');
+        if (!perDepth[depth]) perDepth[depth] = {{}};
+        perDepth[depth][key] = true;
+      }});
+      Object.keys(perDepth).forEach(function(depthStr) {{
+        var keys = Object.keys(perDepth[depthStr]).sort();
+        var count = keys.length || 1;
+        var bandStep = 32;
+        var bandStart = -bandStep * (count - 1) / 2.0;
+        keys.forEach(function(k, i) {{
+          var off = bandStart + i * bandStep;
+          var maxOff = depthScale * 0.35;
+          if (off > maxOff) off = maxOff;
+          if (off < -maxOff) off = -maxOff;
+          bandOffsets[depthStr + '|' + k] = off;
+        }});
+      }});
+      // recompute centers
+      var minYear = null, maxYear = null;
+      nodesFiltered.forEach(function(n) {{
+        var y = n.year || 0;
+        if (minYear === null || y < minYear) minYear = y;
+        if (maxYear === null || y > maxYear) maxYear = y;
+      }});
+      if (minYear === null) {{ minYear = 0; maxYear = 0; }}
+      var yearMid = (minYear + maxYear) / 2.0;
+      var depthMid = 0.0;
+      window.trailDepthScale = depthScale;
+      window.trailDepthMid = depthMid;
+      // assign positions
+      nodesFiltered.forEach(function(n) {{
+        var bandKey = String(n.depth) + '|' + String(n.band_key || '');
+        var bandOffset = bandOffsets[bandKey] || 0.0;
+        n.x = (n.year - yearMid) * yearScale;
+        n.y = -((n.depth || 0) - depthMid) * depthScale + bandOffset;
+      }});
+      var edgesFiltered = [];
+      fullEdges.forEach(function(e) {{
+        var show = visible[e.from] && visible[e.to];
+        if (show) edgesFiltered.push(e);
+      }});
+      nodes.clear();
+      edges.clear();
+      nodes.add(nodesFiltered);
+      edges.add(edgesFiltered);
+      if (typeof network !== 'undefined' && network) {{
+        try {{ network.fit({{animation: false}}); }} catch (e) {{}}
+      }}
+      if (window.renderAxis) window.renderAxis();
+    }}
+    sel.addEventListener('change', function() {{
+      applyFilters(parseInt(sel.value), currentBranch);
+    }});
+    container.appendChild(sel);
+
+    var branchSel = document.createElement('select');
+    branchSel.id = 'trail-branch-selector';
+    var optAll = document.createElement('option');
+    optAll.value = 'all';
+    optAll.textContent = 'branch: all';
+    branchSel.appendChild(optAll);
+    branchItems.forEach(function(b) {{
+      var opt = document.createElement('option');
+      opt.value = b.label;
+      opt.textContent = 'branch: ' + b.label;
+      branchSel.appendChild(opt);
+    }});
+    branchSel.addEventListener('change', function() {{
+      currentBranch = branchSel.value;
+      applyFilters(parseInt(sel.value), currentBranch);
+    }});
+    container.appendChild(branchSel);
+    applyFilters(parseInt(sel.value), currentBranch);
+  }});
+</script>
+"""
+        html = html.replace("</body>", selector_script + "\n</body>")
+        with open(filename, "w", encoding="utf-8") as f:
+            f.write(html)
+    except Exception:
+        pass
+    return filename
+
+
 def _add_cumulative_trace(
     fig: go.Figure,
     years: list[int],
@@ -464,6 +1254,7 @@ def _apply_linear_yaxis_alignment(
     Y: np.ndarray,
     cum_vals: np.ndarray | None,
     static_score: float | None,
+    y_min: float | None,
     y_max: float | None,
     y2_max: float | None,
     y2_headroom: float,
@@ -478,6 +1269,8 @@ def _apply_linear_yaxis_alignment(
     :type cum_vals: numpy.ndarray | None
     :param static_score: Optional static score value.
     :type static_score: float | None
+    :param y_min: Optional min for primary y-axis.
+    :type y_min: float | None
     :param y_max: Optional max for primary y-axis.
     :type y_max: float | None
     :param y2_max: Optional max for secondary y-axis.
@@ -491,6 +1284,9 @@ def _apply_linear_yaxis_alignment(
     y1_max_data = max(y1_max_data, 0.0)
     if y1_max_data == y1_min:
         y1_max_data = y1_min + 1.0
+
+    if y_min is not None:
+        y1_min = float(y_min)
 
     y1_max = float(y_max) if (y_max is not None) else y1_max_data
     y1_max = max(y1_max, 0.0)
@@ -963,6 +1759,7 @@ def plot_temporal_scores(
     static_score_label: str = "Static score",
     static_score_dash: str = "dash",
     static_score_color: str = "black",
+    y_min: Optional[float] = None,
     y_max: Optional[float] = None,
     y2_max: Optional[float] = None,
 ) -> go.Figure:
@@ -1022,6 +1819,8 @@ def plot_temporal_scores(
     :type static_score_dash: str
     :param static_score_color: Color for static score trace.
     :type static_score_color: str
+    :param y_min: Optional min for primary y-axis.
+    :type y_min: float | None
     :param y_max: Optional max for primary y-axis.
     :type y_max: float | None
     :param y2_max: Optional max for secondary y-axis.
@@ -1178,13 +1977,14 @@ def plot_temporal_scores(
             Y=Y,
             cum_vals=cum_vals,
             static_score=static_score,
+            y_min=y_min,
             y_max=y_max,
             y2_max=y2_max,
             y2_headroom=y2_headroom,
         )
 
-    if yaxis_type != "linear" and y_max is not None:
-        fig.update_layout(yaxis=dict(range=[None, float(y_max)]))
+    if yaxis_type != "linear" and (y_min is not None or y_max is not None):
+        fig.update_layout(yaxis=dict(range=[y_min, y_max]))
 
     if yaxis_type != "linear" and y2_max is not None:
         use_y2 = bool(show_cumulative_axis) or (static_score is not None)

@@ -10,3 +10,4 @@ pyprind
 plotly
 tqdm
 xarray
+networkx

@@ -213,12 +213,7 @@ def lca_static_simple(
 
 def lca(
     trails: Trails,
-    start_year: int,
-    start_act_idx: int,
     methods: List[str],
-    amount: float = 1.0,
-    max_depth: int = 2,
-    min_amount: float = 1e-18,
     show_progress: bool = True,
     attribute_to_roots: bool = True,
     *,
@@ -261,63 +256,86 @@ def lca(
                 "chunk-based inventory builders."
             )
 
-    start_activity = int(start_act_idx)
-    start_year_int = int(start_year)
-    start_amount = float(amount)
-
-    # Traversal
-    if attribute_to_roots:
-        (
-            frontier,
-            provenance,
-            injected_supply_by_year_act,
-            injected_supply_prov_by_year_act,
-        ) = trails.temporal_traversal(
-            start_year=start_year_int,
-            start_act_idx=start_activity,
-            amount=start_amount,
-            max_depth=int(max_depth),
-            min_amount=float(min_amount),
-            return_provenance=True,
-            show_progress=bool(show_progress),
-            debug=debug,
+    # Routing must be run explicitly before LCA.
+    graph = getattr(trails, "graph", None)
+    if graph is None:
+        raise RuntimeError(
+            "Temporal routing not initialized; run trails.temporal_routing(...) "
+            "before trails.lca()."
         )
-        if injected_supply_by_year_act is None:
-            injected_supply_by_year_act = {}
-        if injected_supply_prov_by_year_act is None:
-            injected_supply_prov_by_year_act = {}
-    else:
-        frontier, injected_supply_by_year_act = trails.temporal_traversal(
-            start_year=start_year_int,
-            start_act_idx=start_activity,
-            amount=start_amount,
-            max_depth=int(max_depth),
-            min_amount=float(min_amount),
-            return_provenance=False,
-            show_progress=bool(show_progress),
-            debug=debug,
-        )
-        provenance = {}
-        if injected_supply_by_year_act is None:
-            injected_supply_by_year_act = {}
-        injected_supply_prov_by_year_act = {}
 
-    # Always inject FU directly
-    injected_supply_by_year_act[(start_year_int, start_activity)] = (
-        float(injected_supply_by_year_act.get((start_year_int, start_activity), 0.0))
-        + start_amount
-    )
-    injected_supply_prov_by_year_act.setdefault((start_year_int, start_activity), {})
-    injected_supply_prov_by_year_act[(start_year_int, start_activity)][
-        start_activity
-    ] = (
-        float(
-            injected_supply_prov_by_year_act[(start_year_int, start_activity)].get(
-                start_activity, 0.0
+    routing_params = getattr(trails, "_routing_params", {}) or {}
+    routing_attr_to_roots = getattr(trails, "_routing_attribute_to_roots", None)
+    if routing_attr_to_roots is not None and routing_attr_to_roots != bool(
+        attribute_to_roots
+    ):
+        raise RuntimeError(
+            "Temporal routing was computed with attribute_to_roots="
+            f"{routing_attr_to_roots}; rerun temporal_routing with "
+            f"attribute_to_roots={attribute_to_roots}."
+        )
+
+    if not routing_params:
+        raise RuntimeError(
+            "Temporal routing parameters missing; rerun trails.temporal_routing(...)."
+        )
+
+    start_year_int = int(routing_params["start_year"])
+    start_activity = int(routing_params["start_act_idx"])
+    start_amount = float(routing_params["amount"])
+
+    frontier: dict[tuple[int, int], float] = {}
+    provenance: dict[tuple[int, int], dict[int, float]] = {}
+    injected_supply_by_year_act: dict[tuple[int, int], float] = {}
+    injected_supply_prov_by_year_act: dict[tuple[int, int], dict[int, float]] = {}
+
+    for node, data in graph.nodes(data=True):
+        year = int(data.get("year"))
+        act = int(data.get("act_idx"))
+        frontier_amt = float(data.get("frontier_amount") or 0.0)
+        direct_bio_amt = float(data.get("direct_bio_amount") or 0.0)
+
+        if frontier_amt:
+            key = (year, act)
+            frontier[key] = float(frontier.get(key, 0.0)) + frontier_amt
+            if attribute_to_roots:
+                roots = data.get("frontier_roots") or {}
+                bucket = provenance.setdefault(key, {})
+                for root_act, amt in roots.items():
+                    bucket[int(root_act)] = float(bucket.get(int(root_act), 0.0)) + float(
+                        amt
+                    )
+
+        if direct_bio_amt:
+            key = (year, act)
+            injected_supply_by_year_act[key] = float(
+                injected_supply_by_year_act.get(key, 0.0)
+            ) + direct_bio_amt
+            if attribute_to_roots:
+                roots = data.get("direct_bio_roots") or {}
+                bucket = injected_supply_prov_by_year_act.setdefault(key, {})
+                for root_act, amt in roots.items():
+                    bucket[int(root_act)] = float(bucket.get(int(root_act), 0.0)) + float(
+                        amt
+                    )
+
+    # Inject FU directly only when it is not already in the frontier (e.g., max_depth=0).
+    if (start_year_int, start_activity) not in frontier:
+        injected_supply_by_year_act[(start_year_int, start_activity)] = (
+            float(injected_supply_by_year_act.get((start_year_int, start_activity), 0.0))
+            + start_amount
+        )
+        injected_supply_prov_by_year_act.setdefault((start_year_int, start_activity), {})
+        injected_supply_prov_by_year_act[(start_year_int, start_activity)][
+            start_activity
+        ] = (
+            float(
+                injected_supply_prov_by_year_act[(start_year_int, start_activity)].get(
+                    start_activity, 0.0
+                )
             )
+            + start_amount
         )
-        + start_amount
-    )
 
     # Frontier -> demand vectors (calendar years preserved)
     frontier_by_year = trails.frontier_to_demand_vectors(frontier)
