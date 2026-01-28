@@ -283,6 +283,7 @@ def lca(
     start_year_int = int(routing_params["start_year"])
     start_activity = int(routing_params["start_act_idx"])
     start_amount = float(routing_params["amount"])
+    min_amount = float(routing_params.get("min_amount", 1e-18))
 
     frontier: dict[tuple[int, int], float] = {}
     provenance: dict[tuple[int, int], dict[int, float]] = {}
