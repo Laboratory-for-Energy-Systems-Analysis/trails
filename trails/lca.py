@@ -302,30 +302,34 @@ def lca(
                 roots = data.get("frontier_roots") or {}
                 bucket = provenance.setdefault(key, {})
                 for root_act, amt in roots.items():
-                    bucket[int(root_act)] = float(bucket.get(int(root_act), 0.0)) + float(
-                        amt
-                    )
+                    bucket[int(root_act)] = float(
+                        bucket.get(int(root_act), 0.0)
+                    ) + float(amt)
         # Inject direct biosphere only for expanded nodes (not frontier nodes).
         if direct_bio_amt and not frontier_amt:
             key = (year, act)
-            injected_supply_by_year_act[key] = float(
-                injected_supply_by_year_act.get(key, 0.0)
-            ) + direct_bio_amt
+            injected_supply_by_year_act[key] = (
+                float(injected_supply_by_year_act.get(key, 0.0)) + direct_bio_amt
+            )
             if attribute_to_roots:
                 roots = data.get("direct_bio_roots") or {}
                 bucket = injected_supply_prov_by_year_act.setdefault(key, {})
                 for root_act, amt in roots.items():
-                    bucket[int(root_act)] = float(bucket.get(int(root_act), 0.0)) + float(
-                        amt
-                    )
+                    bucket[int(root_act)] = float(
+                        bucket.get(int(root_act), 0.0)
+                    ) + float(amt)
 
     # Inject FU directly only when it is not already in the frontier (e.g., max_depth=0).
     if (start_year_int, start_activity) not in frontier:
         injected_supply_by_year_act[(start_year_int, start_activity)] = (
-            float(injected_supply_by_year_act.get((start_year_int, start_activity), 0.0))
+            float(
+                injected_supply_by_year_act.get((start_year_int, start_activity), 0.0)
+            )
             + start_amount
         )
-        injected_supply_prov_by_year_act.setdefault((start_year_int, start_activity), {})
+        injected_supply_prov_by_year_act.setdefault(
+            (start_year_int, start_activity), {}
+        )
         injected_supply_prov_by_year_act[(start_year_int, start_activity)][
             start_activity
         ] = (

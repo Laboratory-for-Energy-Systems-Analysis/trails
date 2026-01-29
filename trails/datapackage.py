@@ -589,7 +589,9 @@ def load_matrices_from_package(
                     amount_source = None
             except Exception:
                 pass
-            ssrc = str(amount_source).strip().lower() if amount_source is not None else ""
+            ssrc = (
+                str(amount_source).strip().lower() if amount_source is not None else ""
+            )
             if ssrc:
                 if ssrc not in {"port", "matrix"}:
                     raise ValueError(f"Unknown temporal_amount_source: {ssrc}")
