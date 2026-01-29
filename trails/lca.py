@@ -295,7 +295,6 @@ def lca(
         act = int(data.get("act_idx"))
         frontier_amt = float(data.get("frontier_amount") or 0.0)
         direct_bio_amt = float(data.get("direct_bio_amount") or 0.0)
-
         if frontier_amt:
             key = (year, act)
             frontier[key] = float(frontier.get(key, 0.0)) + frontier_amt
@@ -306,8 +305,8 @@ def lca(
                     bucket[int(root_act)] = float(bucket.get(int(root_act), 0.0)) + float(
                         amt
                     )
-
-        if direct_bio_amt:
+        # Inject direct biosphere only for expanded nodes (not frontier nodes).
+        if direct_bio_amt and not frontier_amt:
             key = (year, act)
             injected_supply_by_year_act[key] = float(
                 injected_supply_by_year_act.get(key, 0.0)

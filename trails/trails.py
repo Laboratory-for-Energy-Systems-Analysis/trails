@@ -179,6 +179,10 @@ class Trails:
         self.graph = None
         self._routing_attribute_to_roots: Optional[bool] = None
         self._routing_params: Optional[dict[str, object]] = None
+        self._td_offsets_cache: dict[tuple, list[tuple[int, float]]] = {}
+        self._tech_td_cache: dict[tuple[int, int, int], Optional[TemporalExchange]] = {}
+        self._A_row_cache: dict[tuple[int, int], tuple[np.ndarray, np.ndarray]] = {}
+        self._direct_bio_cache_by_year: dict[int, np.ndarray] = {}
 
     def reset_scores(
         self,
@@ -1024,9 +1028,7 @@ class Trails:
         :param debug: Whether to emit debug logging.
         :type debug: bool
         """
-        td = TemporalDistribution(tex)
-
-        offsets_and_weights = list(td.iter_offsets_and_weights(debug=debug))
+        offsets_and_weights = self._get_td_offsets(tex=tex, debug=debug)
         if not offsets_and_weights:
             if debug:
                 logger.warning(
@@ -1051,6 +1053,25 @@ class Trails:
                 product_index,
                 child_amount * float(weight),
             )
+
+    def _get_td_offsets(
+        self, *, tex: TemporalExchange, debug: bool
+    ) -> list[tuple[int, float]]:
+        """Return cached temporal distribution offsets/weights."""
+        key = (
+            int(tex.distribution),
+            float(tex.loc) if tex.loc is not None else None,
+            float(tex.scale) if tex.scale is not None else None,
+            int(tex.offset_min),
+            int(tex.offset_max),
+        )
+        cached = self._td_offsets_cache.get(key)
+        if cached is not None:
+            return cached
+        td = TemporalDistribution(tex)
+        offsets_and_weights = list(td.iter_offsets_and_weights(debug=debug))
+        self._td_offsets_cache[key] = offsets_and_weights
+        return offsets_and_weights
 
     def get_A_for_scenario(self, label: str) -> sparse.COO:
         """Return the 2D A matrix (activity x product) for a given scenario label."""
@@ -1143,28 +1164,57 @@ class Trails:
         start_year_int = int(start_year)
         start_amount = float(amount)
 
+        # Hot-path caches
+        year_cache: dict[int, int] = {}
+        node_key_cache: dict[tuple[int, int, int], tuple] = {}
+        meta_cache: dict[tuple[int, int], dict] = {}
+        bio_cache: dict[tuple[int, int], bool] = {}
+
+        def map_year(y: int) -> int:
+            yi = int(y)
+            if yi in year_cache:
+                return year_cache[yi]
+            mapped = int(self._map_year_to_scenario_year(yi))
+            year_cache[yi] = mapped
+            return mapped
+
         def _get_activity_meta(label: str, idx: int) -> dict:
+            key = (int(label), int(idx)) if label.isdigit() else None
+            if key is not None and key in meta_cache:
+                return meta_cache[key]
             mapping = self.activity_indices.get(label)
             if mapping and idx in mapping:
-                return mapping.get(idx, {})
+                meta = mapping.get(idx, {})
+                if key is not None:
+                    meta_cache[key] = meta
+                return meta
             for _label, _mapping in self.activity_indices.items():
                 if idx in _mapping:
-                    return _mapping.get(idx, {})
+                    meta = _mapping.get(idx, {})
+                    if key is not None:
+                        meta_cache[key] = meta
+                    return meta
             return {}
 
+
         def _node_key(year: int, depth: int, act_idx: int) -> tuple:
-            scenario_year = self._map_year_to_scenario_year(year)
+            k = (int(year), int(depth), int(act_idx))
+            if k in node_key_cache:
+                return node_key_cache[k]
+            scenario_year = map_year(year)
             label = str(scenario_year)
             meta = _get_activity_meta(label, int(act_idx))
             name = meta.get("name") or ""
             ref_prod = meta.get("reference product") or ""
             location = meta.get("location") or ""
-            return (int(year), int(depth), name, ref_prod, location, int(act_idx))
+            key = (int(year), int(depth), name, ref_prod, location, int(act_idx))
+            node_key_cache[k] = key
+            return key
 
         def _ensure_node(key: tuple, year: int, depth: int, act_idx: int) -> None:
             if key in G:
                 return
-            scenario_year = self._map_year_to_scenario_year(year)
+            scenario_year = map_year(year)
             label = str(scenario_year)
             meta = _get_activity_meta(label, int(act_idx))
             G.add_node(
@@ -1204,12 +1254,11 @@ class Trails:
         else:
             pbar = None
 
-        bio_cache: dict[tuple[int, int], bool] = {}
         nodes_processed = 0
 
         while queue:
             year, act, amt, depth, path, root_act = queue.popleft()
-            year = int(self._map_year_to_scenario_year(year))
+            year = map_year(year)
 
             if amt == 0.0:
                 continue
@@ -1232,7 +1281,7 @@ class Trails:
             _ensure_node(node_key, year, depth, act)
             G.nodes[node_key]["amount"] = float(G.nodes[node_key]["amount"]) + float(amt)
 
-            scenario_year = self._map_year_to_scenario_year(year)
+            scenario_year = year
             has_direct_bio = self._has_direct_biosphere(scenario_year, act, bio_cache)
 
             if depth >= max_depth:
@@ -1278,7 +1327,7 @@ class Trails:
                     if child_amt == 0.0:
                         continue
 
-                    child_year = int(self._map_year_to_scenario_year(child_year))
+                    child_year = map_year(child_year)
                     child_act = int(child_act)
                     child_depth = int(depth) + 1
                     child_node = _node_key(child_year, child_depth, child_act)
@@ -1391,12 +1440,17 @@ class Trails:
                 float(amount),
             )
 
-        A_row = self.A[t, act_idx, :]
-        if A_row.nnz == 0:
-            return demand
-
-        product_indices = A_row.coords[0]
-        values = A_row.data
+        cache_key = (int(t), int(act_idx))
+        cached = self._A_row_cache.get(cache_key)
+        if cached is not None:
+            product_indices, values = cached
+        else:
+            A_row = self.A[t, act_idx, :]
+            if A_row.nnz == 0:
+                return demand
+            product_indices = A_row.coords[0]
+            values = A_row.data
+            self._A_row_cache[cache_key] = (product_indices, values)
 
         for product_index, exchange_value in zip(product_indices, values):
             n_exchanges += 1
@@ -1503,9 +1557,12 @@ class Trails:
             return None
 
         y_tpl = self._map_year_to_template_year(year)
-        return self.temporal_technosphere_exchanges.get(
-            (str(y_tpl), int(act_idx), int(prod_idx))
-        )
+        key = (int(y_tpl), int(act_idx), int(prod_idx))
+        if key in self._tech_td_cache:
+            return self._tech_td_cache[key]
+        tex = self.temporal_technosphere_exchanges.get((str(y_tpl), key[1], key[2]))
+        self._tech_td_cache[key] = tex
+        return tex
 
     def _get_bio_temporal_exchange(
         self, year: int, act_idx: int, flow_idx: int
@@ -3703,15 +3760,24 @@ class Trails:
         :rtype: bool
         """
         label = str(scenario_year)
-        if label in self.scenario_index and (self.B is not None):
-            t = self.scenario_index[label]
-            key = (scenario_year, act)
-            if key in bio_cache:
-                return bio_cache[key]
-            has_direct_bio = self.B[t, act, :].nnz > 0
-            bio_cache[key] = has_direct_bio
-            return has_direct_bio
-        return False
+        if label not in self.scenario_index or self.B is None:
+            return False
+        key = (scenario_year, act)
+        if key in bio_cache:
+            return bio_cache[key]
+        t = self.scenario_index[label]
+        # Build per-year cache once: boolean array of direct biosphere presence.
+        if t not in self._direct_bio_cache_by_year:
+            # Convert row indices to presence flags.
+            rows = self.B[t, :, :].coords[0] if self.B is not None else np.array([])
+            present = np.zeros(int(self.B.shape[1]), dtype=bool)
+            if rows.size:
+                present[rows] = True
+            self._direct_bio_cache_by_year[t] = present
+        present = self._direct_bio_cache_by_year[t]
+        has_direct_bio = bool(present[int(act)])
+        bio_cache[key] = has_direct_bio
+        return has_direct_bio
 
     def temporal_traversal(
         self,
@@ -4168,8 +4234,7 @@ class Trails:
         if int(product_index) == int(act_idx):
             return
 
-        td = TemporalDistribution(tex)
-        offsets_and_weights = list(td.iter_offsets_and_weights(debug=debug))
+        offsets_and_weights = self._get_td_offsets(tex=tex, debug=debug)
         if not offsets_and_weights:
             return
 
