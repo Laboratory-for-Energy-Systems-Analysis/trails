@@ -11,3 +11,4 @@ plotly
 tqdm
 xarray
 networkx
+prettytable
