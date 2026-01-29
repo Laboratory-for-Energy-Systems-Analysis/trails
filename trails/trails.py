@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional, Callable
 import importlib
 import importlib.util
 from collections import defaultdict, deque
+from pathlib import Path
 
 import numpy as np
 import sparse
@@ -14,6 +15,10 @@ import xarray as xr
 
 from tqdm import tqdm
 
+from .cache_interpolation import (
+    load_cached_interpolation,
+    save_cached_interpolation,
+)
 from .datapackage import (
     load_matrices_from_package,
     interpolate_to_annual,
@@ -69,6 +74,7 @@ class Trails:
         self,
         package: Any,
         interpolate_annual: bool = True,
+        cache_interpolation: bool = True,
         value_dtype: np.dtype = np.float32,
         index_dtype: np.dtype = np.int32,
         debug: bool = False,
@@ -79,6 +85,8 @@ class Trails:
         :type package: Package
         :param interpolate_annual: Whether to interpolate matrices to annual resolution.
         :type interpolate_annual: bool
+        :param cache_interpolation: Cache annual interpolation to disk for reuse.
+        :type cache_interpolation: bool
         :param value_dtype: Data type for matrix values.
         :type value_dtype: numpy.dtype
         :param index_dtype: Data type for matrix indices.
@@ -90,6 +98,13 @@ class Trails:
         self.value_dtype = value_dtype
         self.index_dtype = index_dtype
         self.debug = debug
+
+        # If a zip archive is provided, Frictionless unpacks it to a temp basepath.
+        pkg_path = getattr(self.package, "path", None)
+        pkg_base = getattr(self.package, "basepath", None)
+        if pkg_path and str(pkg_path).lower().endswith(".zip"):
+            base_str = f" -> {pkg_base}" if pkg_base else ""
+            print(f"Data package unarchived from: {pkg_path}{base_str}")
 
         self.scenario_labels: List[str] = []
         self.scenario_index: Dict[str, int] = {}
@@ -105,20 +120,66 @@ class Trails:
         self._inventory_data: Optional[list[np.ndarray]] = None
         self.provenance: Optional[dict] = None
 
-        print("Loading matrices from data package          [1/3]")
-        (
-            self.A,
-            self.B,
-            self.scenario_labels,
-            self.scenario_index,
-            self.temporal_technosphere_exchanges,
-            self.temporal_biosphere_exchanges,
-        ) = load_matrices_from_package(
-            package=self.package,
-            value_dtype=self.value_dtype,
-            index_dtype=self.index_dtype,
-            debug=debug,
-        )
+        cache_loaded = False
+        if interpolate_annual and cache_interpolation:
+            (
+                A_cached,
+                B_cached,
+                labels,
+                template_labels_cached,
+                temporal_tech,
+                temporal_bio,
+                indices_cached,
+                cache_dir,
+            ) = load_cached_interpolation(
+                self.package,
+                value_dtype=str(self.value_dtype),
+                index_dtype=str(self.index_dtype),
+            )
+            if (
+                A_cached is not None
+                and B_cached is not None
+                and labels
+                and temporal_tech is not None
+                and temporal_bio is not None
+                and indices_cached is not None
+            ):
+                self.A = A_cached
+                self.B = B_cached
+                self.scenario_labels = list(labels)
+                self.scenario_index = {
+                    lbl: i for i, lbl in enumerate(self.scenario_labels)
+                }
+                self.template_labels = (
+                    list(template_labels_cached) if template_labels_cached else list(labels)
+                )
+                self.temporal_technosphere_exchanges = temporal_tech
+                self.temporal_biosphere_exchanges = temporal_bio
+                self.activity_indices = indices_cached.get("activity_indices", {})
+                self.biosphere_indices = indices_cached.get("biosphere_indices", {})
+                cache_loaded = True
+                print(f"Loaded interpolated matrices from cache: {cache_dir}")
+                if debug:
+                    logger.info(
+                        "Trails init: loaded interpolated matrices from cache %s",
+                        str(cache_dir),
+                    )
+
+        if not cache_loaded:
+            print("Loading matrices from data package          [1/4]")
+            (
+                self.A,
+                self.B,
+                self.scenario_labels,
+                self.scenario_index,
+                self.temporal_technosphere_exchanges,
+                self.temporal_biosphere_exchanges,
+            ) = load_matrices_from_package(
+                package=self.package,
+                value_dtype=self.value_dtype,
+                index_dtype=self.index_dtype,
+                debug=debug,
+            )
 
         if debug:
             logger.info(
@@ -133,7 +194,8 @@ class Trails:
                 len(getattr(self, "temporal_exchanges", {})),
             )
 
-        self.template_labels = list(self.scenario_labels)
+        if not hasattr(self, "template_labels"):
+            self.template_labels = list(self.scenario_labels)
         self.template_years_int = np.array(
             [int(lbl) for lbl in self.template_labels], dtype=int
         )
@@ -142,16 +204,17 @@ class Trails:
         self.min_year = int(self.years_int.min())
         self.max_year = int(self.years_int.max())
 
-        # Load indices/metadata
-        print("Loading indices from data package           [2/3]")
-        (
-            self.activity_indices,
-            self.biosphere_indices,
-        ) = load_indices_from_package(self.package)
+        if not cache_loaded:
+            # Load indices/metadata
+            print("Loading indices from data package           [2/4]")
+            (
+                self.activity_indices,
+                self.biosphere_indices,
+            ) = load_indices_from_package(self.package)
 
         # Optional temporal interpolation to annual resolution
-        if interpolate_annual and self.scenario_labels:
-            print("Interpolating matrices to annual resolution [3/3]")
+        if interpolate_annual and self.scenario_labels and not cache_loaded:
+            print("Interpolating matrices to annual resolution [3/4]")
             (
                 self.A,
                 self.B,
@@ -171,6 +234,31 @@ class Trails:
             self.min_year = int(self.years_int.min())
             self.max_year = int(self.years_int.max())
 
+            if cache_interpolation:
+                try:
+                    print("Building cache                               [4/4]")
+                    cache_dir = save_cached_interpolation(
+                        self.package,
+                        value_dtype=str(self.value_dtype),
+                        index_dtype=str(self.index_dtype),
+                        A=self.A,
+                        B=self.B,
+                        scenario_labels=self.scenario_labels,
+                        template_labels=self.template_labels,
+                        temporal_technosphere_exchanges=self.temporal_technosphere_exchanges,
+                        temporal_biosphere_exchanges=self.temporal_biosphere_exchanges,
+                        activity_indices=self.activity_indices,
+                        biosphere_indices=self.biosphere_indices,
+                    )
+                    print(f"Data package cached at: {cache_dir}")
+                    if debug:
+                        logger.info(
+                            "Trails init: cached interpolated matrices at %s",
+                            str(cache_dir),
+                        )
+                except Exception:
+                    pass
+
         self.scores: Optional[xr.DataArray] = (
             None  # dims: (activity, year) or (activity, year, root activity) or (+method)
         )
@@ -183,6 +271,9 @@ class Trails:
         self._tech_td_cache: dict[tuple[int, int, int], Optional[TemporalExchange]] = {}
         self._A_row_cache: dict[tuple[int, int], tuple[np.ndarray, np.ndarray]] = {}
         self._direct_bio_cache_by_year: dict[int, np.ndarray] = {}
+        self._tech_td_expanded_cache: dict[
+            tuple[int, int, int], tuple[Optional[TemporalExchange], list[tuple[int, float]]]
+        ] = {}
 
     def reset_scores(
         self,
@@ -1054,6 +1145,23 @@ class Trails:
                 child_amount * float(weight),
             )
 
+    def _get_tech_td_expanded(
+        self, *, year: int, act_idx: int, prod_idx: int, debug: bool
+    ) -> tuple[Optional[TemporalExchange], list[tuple[int, float]]]:
+        """Return (tex, offsets_and_weights) for technosphere TD, cached per exchange."""
+        y_tpl = self._map_year_to_template_year(year)
+        key = (int(y_tpl), int(act_idx), int(prod_idx))
+        cached = self._tech_td_expanded_cache.get(key)
+        if cached is not None:
+            return cached
+        tex = self._get_tech_temporal_exchange(int(year), int(act_idx), int(prod_idx))
+        if tex is None:
+            self._tech_td_expanded_cache[key] = (None, [])
+            return (None, [])
+        offsets_and_weights = self._get_td_offsets(tex=tex, debug=debug)
+        self._tech_td_expanded_cache[key] = (tex, offsets_and_weights)
+        return tex, offsets_and_weights
+
     def _get_td_offsets(
         self, *, tex: TemporalExchange, debug: bool
     ) -> list[tuple[int, float]]:
@@ -1465,8 +1573,10 @@ class Trails:
                 n_skipped_prod += 1
                 continue
 
-            # Fetch TD metadata (template-year lookup; stable across interpolation)
-            tex = self._get_tech_temporal_exchange(year, act_idx, product_index)
+            # Fetch TD metadata + offsets (cached per exchange)
+            tex, offsets_and_weights = self._get_tech_td_expanded(
+                year=year, act_idx=act_idx, prod_idx=product_index, debug=debug
+            )
 
             # ------------------------------------------------------------------
             # No temporal distribution (or disabled): status quo
@@ -1487,12 +1597,12 @@ class Trails:
             # ------------------------------------------------------------------
             if amount_source == "matrix":
                 n_td_matrix += 1
-                self._apply_temporal_distribution_matrix_sourced_to_demand(
+                self._apply_temporal_distribution_matrix_sourced_to_demand_offsets(
                     year=year,
                     act_idx=act_idx,
                     product_index=product_index,
                     parent_amount=amount,
-                    tex=tex,
+                    offsets_and_weights=offsets_and_weights,
                     demand=demand,
                     debug=debug,
                 )
@@ -1506,14 +1616,22 @@ class Trails:
             if child_amount == 0.0:
                 continue
 
-            self._apply_temporal_distribution_to_demand(
-                year=year,
-                product_index=product_index,
-                child_amount=child_amount,
-                tex=tex,
-                demand=demand,
-                debug=debug,
-            )
+            if not offsets_and_weights:
+                if debug:
+                    logger.warning(
+                        "expand_temporal_exchanges: TD produced no offsets/weights for (year=%d prod=%d) -> dropping exchange",
+                        year,
+                        product_index,
+                    )
+                continue
+            for offset, weight in offsets_and_weights:
+                raw_year = year + offset
+                self._add_demand_entry(
+                    demand,
+                    int(raw_year),
+                    product_index,
+                    child_amount * float(weight),
+                )
 
         if demand:
             years_out = list(demand.keys())
@@ -4255,6 +4373,56 @@ class Trails:
                 continue
 
             # IMPORTANT: distribute mass using TD weights
+            weighted_child_amount = float(child_amount) * float(weight)
+            if weighted_child_amount == 0.0:
+                continue
+
+            if debug:
+                logger.debug(
+                    "expand_temporal_exchanges: matrix pulse raw_year=%d mapped_year=%d weight=%g",
+                    int(raw_year),
+                    int(y_eff),
+                    float(weight),
+                )
+            self._add_demand_entry(
+                demand, int(raw_year), int(product_index), weighted_child_amount
+            )
+
+    def _apply_temporal_distribution_matrix_sourced_to_demand_offsets(
+        self,
+        *,
+        year: int,
+        act_idx: int,
+        product_index: int,
+        parent_amount: float,
+        offsets_and_weights: list[tuple[int, float]],
+        demand: dict[int, dict[int, float]],
+        debug: bool,
+    ) -> None:
+        if self.A is None:
+            return
+
+        if int(product_index) == int(act_idx):
+            return
+
+        if not offsets_and_weights:
+            return
+
+        for offset, weight in offsets_and_weights:
+            raw_year = int(year + int(offset))
+            y_eff = int(self._map_year_to_scenario_year(raw_year))
+            t_eff = self.scenario_index.get(str(y_eff))
+            if t_eff is None:
+                continue
+
+            exchange_value = float(self.A[t_eff, int(act_idx), int(product_index)])
+            if exchange_value == 0.0:
+                continue
+
+            child_amount = self._child_amount(float(parent_amount), exchange_value)
+            if child_amount == 0.0:
+                continue
+
             weighted_child_amount = float(child_amount) * float(weight)
             if weighted_child_amount == 0.0:
                 continue
