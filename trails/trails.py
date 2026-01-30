@@ -151,7 +151,9 @@ class Trails:
                     lbl: i for i, lbl in enumerate(self.scenario_labels)
                 }
                 self.template_labels = (
-                    list(template_labels_cached) if template_labels_cached else list(labels)
+                    list(template_labels_cached)
+                    if template_labels_cached
+                    else list(labels)
                 )
                 self.temporal_technosphere_exchanges = temporal_tech
                 self.temporal_biosphere_exchanges = temporal_bio
@@ -272,7 +274,8 @@ class Trails:
         self._A_row_cache: dict[tuple[int, int], tuple[np.ndarray, np.ndarray]] = {}
         self._direct_bio_cache_by_year: dict[int, np.ndarray] = {}
         self._tech_td_expanded_cache: dict[
-            tuple[int, int, int], tuple[Optional[TemporalExchange], list[tuple[int, float]]]
+            tuple[int, int, int],
+            tuple[Optional[TemporalExchange], list[tuple[int, float]]],
         ] = {}
 
     def reset_scores(
@@ -1304,7 +1307,6 @@ class Trails:
                     return meta
             return {}
 
-
         def _node_key(year: int, depth: int, act_idx: int) -> tuple:
             k = (int(year), int(depth), int(act_idx))
             if k in node_key_cache:
@@ -1387,7 +1389,9 @@ class Trails:
 
             node_key = _node_key(year, depth, act)
             _ensure_node(node_key, year, depth, act)
-            G.nodes[node_key]["amount"] = float(G.nodes[node_key]["amount"]) + float(amt)
+            G.nodes[node_key]["amount"] = float(G.nodes[node_key]["amount"]) + float(
+                amt
+            )
 
             scenario_year = year
             has_direct_bio = self._has_direct_biosphere(scenario_year, act, bio_cache)
@@ -1442,9 +1446,9 @@ class Trails:
                     _ensure_node(child_node, child_year, child_depth, child_act)
 
                     if G.has_edge(node_key, child_node):
-                        G.edges[node_key, child_node]["amount"] = float(
-                            G.edges[node_key, child_node]["amount"]
-                        ) + child_amt
+                        G.edges[node_key, child_node]["amount"] = (
+                            float(G.edges[node_key, child_node]["amount"]) + child_amt
+                        )
                     else:
                         G.add_edge(node_key, child_node, amount=child_amt)
 
@@ -1470,7 +1474,14 @@ class Trails:
                         child_path = path + ((child_year, child_act),)
 
                     queue.append(
-                        (child_year, child_act, child_amt, child_depth, child_path, child_root)
+                        (
+                            child_year,
+                            child_act,
+                            child_amt,
+                            child_depth,
+                            child_path,
+                            child_root,
+                        )
                     )
 
         if pbar is not None:
@@ -1766,7 +1777,9 @@ class Trails:
                         continue
                     flow_type = "prod" if prod_idx == int(act_idx) else "tech"
                     meta = _get_activity_meta(scenario_label, prod_idx)
-                    tex = self._get_tech_temporal_exchange(int(year), int(act_idx), prod_idx)
+                    tex = self._get_tech_temporal_exchange(
+                        int(year), int(act_idx), prod_idx
+                    )
                     rows.append(
                         {
                             "direction": "out" if amount > 0.0 else "in",
@@ -1795,7 +1808,9 @@ class Trails:
                     if amount == 0.0:
                         continue
                     meta = _get_bio_meta(scenario_label, flow_idx)
-                    tex = self._get_bio_temporal_exchange(int(year), int(act_idx), flow_idx)
+                    tex = self._get_bio_temporal_exchange(
+                        int(year), int(act_idx), flow_idx
+                    )
                     rows.append(
                         {
                             "direction": "emission" if amount > 0.0 else "uptake",
@@ -1817,6 +1832,7 @@ class Trails:
             return
 
         if sort_by_amount:
+
             def _sort_key(row: dict[str, object]) -> float:
                 raw = row.get("amount", "0")
                 try:
@@ -1826,6 +1842,7 @@ class Trails:
                         return abs(float(str(raw)))
                     except ValueError:
                         return 0.0
+
             rows.sort(key=_sort_key, reverse=True)
 
         if max_rows is not None:
@@ -3201,7 +3218,9 @@ class Trails:
                     if dbg is not None and dbg_flow_id is not None:
                         if dbg_act is None or int(dbg_act) == int(a):
                             pos = idx[flows_full[idx] == int(dbg_flow_id)]
-                            if pos.size and (dbg_year is None or int(dbg_year) == int(base_year)):
+                            if pos.size and (
+                                dbg_year is None or int(dbg_year) == int(base_year)
+                            ):
                                 logger.debug(
                                     "bio_inv_no_td: year=%d act=%d flow=%d contrib=%s",
                                     int(base_year),
@@ -3450,9 +3469,17 @@ class Trails:
                             if dbg_act is None or int(dbg_act) == int(a):
                                 flow_mask = f_use == int(dbg_flow_id)
                                 if np.any(flow_mask):
-                                    for (raw_year, weight), v in zip(year_weights, vals_eff[flow_mask]):
-                                        if dbg_year is None or int(raw_year) == int(dbg_year):
-                                            contrib = float(supply_amt) * float(v) * float(weight)
+                                    for (raw_year, weight), v in zip(
+                                        year_weights, vals_eff[flow_mask]
+                                    ):
+                                        if dbg_year is None or int(raw_year) == int(
+                                            dbg_year
+                                        ):
+                                            contrib = (
+                                                float(supply_amt)
+                                                * float(v)
+                                                * float(weight)
+                                            )
                                             logger.debug(
                                                 "bio_inv_matrix: base_year=%d act=%d flow=%d raw_year=%d weight=%.6g Bval=%.6g contrib=%.6g",
                                                 int(base_year),

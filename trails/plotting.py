@@ -316,7 +316,9 @@ def plot_temporal_graph(
     """
     G = getattr(trails, "graph", None)
     if G is None:
-        raise RuntimeError("Trails graph is missing; run trails.temporal_routing(...) first.")
+        raise RuntimeError(
+            "Trails graph is missing; run trails.temporal_routing(...) first."
+        )
 
     try:
         import networkx as nx
@@ -509,7 +511,9 @@ def plot_temporal_graph(
                 str(d.get("location", "")),
             )
             x = (year - year_mid) * float(year_scale)
-            y = -(depth - depth_mid) * float(depth_scale) + float(depth_offsets.get(n, 0.0))
+            y = -(depth - depth_mid) * float(depth_scale) + float(
+                depth_offsets.get(n, 0.0)
+            )
             color = _node_color(n)
             hidden = int(depth) > int(initial_depth)
             if color:
@@ -628,10 +632,12 @@ def plot_temporal_graph(
                 node_payload_copy = dict(node_payload)
                 node_payload_copy.pop("id", None)
                 net.add_node(n_id, **node_payload_copy)
+
         def _edge_title(src_label: str, dst_label: str, amount: float) -> str:
             src = src_label.split("\n", 1)[0]
             dst = dst_label.split("\n", 1)[0]
             return f"{src} → {dst} | amount={amount:.3g}"
+
         for u, v, d in H.edges(data=True):
             src_depth = int(H.nodes[u].get("depth", 0))
             dst_depth = int(H.nodes[v].get("depth", 0))
@@ -664,8 +670,7 @@ def plot_temporal_graph(
             with open(filename, "r", encoding="utf-8") as f:
                 html = f.read()
             overlay_items = [
-                {"year": int(year), "x": float(x)}
-                for year, x in x_positions.items()
+                {"year": int(year), "x": float(x)} for year, x in x_positions.items()
             ]
             bottom_y = min(
                 (-(float(d.get("depth", 0.0)) - depth_mid) * float(depth_scale))
@@ -673,7 +678,9 @@ def plot_temporal_graph(
                 for n, d in H.nodes(data=True)
             )
             bottom_y = float(bottom_y) - (float(depth_scale) * float(year_label_offset))
-            depth_values = sorted({int(d.get("depth", 0)) for _, d in H.nodes(data=True)})
+            depth_values = sorted(
+                {int(d.get("depth", 0)) for _, d in H.nodes(data=True)}
+            )
             band_items = band_labels if show_band_labels else []
             max_depth_in_graph = max(depths) if depths else 0.0
             initial_depth = 1
@@ -820,9 +827,10 @@ def plot_temporal_graph(
         if H.number_of_nodes() > 0:
             grouped: dict[tuple[str, str], set[str]] = {}
             for u, v in H.edges():
-                if int(H.nodes[u].get("depth", 0)) == 0 and int(
-                    H.nodes[v].get("depth", 0)
-                ) == 1:
+                if (
+                    int(H.nodes[u].get("depth", 0)) == 0
+                    and int(H.nodes[v].get("depth", 0)) == 1
+                ):
                     key = _branch_key(v)
                     label = key[0]
                     if key[1]:
