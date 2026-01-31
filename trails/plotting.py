@@ -166,8 +166,8 @@ def _add_root_traces(
     fig: go.Figure,
     years: list[int],
     Y: np.ndarray,
-    all_roots: list[int],
-    idx_to_label: dict[int, str],
+    all_roots: list[Any],
+    idx_to_label: dict[Any, str],
     method_label: str,
     stacked: bool,
     showlegend_roots: Optional[set[int]] = None,
@@ -196,7 +196,7 @@ def _add_root_traces(
     """
     alpha = 0.4 if not stacked else 1.0
 
-    def label_for_root(idx: int) -> str:
+    def label_for_root(idx: Any) -> str:
         """Resolve a root index to its display label.
 
         :param idx: Activity index to label.
@@ -204,7 +204,11 @@ def _add_root_traces(
         :returns: Display label for the root.
         :rtype: str
         """
-        return idx_to_label.get(idx, f"Activity {idx}")
+        if idx in idx_to_label:
+            return idx_to_label[idx]
+        if isinstance(idx, str):
+            return idx
+        return f"Activity {idx}"
 
     for ri, root in enumerate(all_roots):
         showlegend = True
@@ -1737,115 +1741,67 @@ def _scores_to_results(
     return results
 
 
-def plot_temporal_scores(
-    results_by_year: Union[
-        Dict[int, Dict[str, Any]], Dict[str, Any], xr.DataArray, None
-    ],
+def _aggregate_flow_results_by_name(
+    results_by_year: Dict[int, Dict[str, Any]],
     trails: Trails,
-    title: str = "Temporal impacts by responsible activity",
-    method_label: str = "Impact score",
-    cumulative: bool = False,
-    stacked: bool = True,
-    legend_top_n: int = 5,
-    show_flow_contributions: bool = False,
-    width: Optional[int] = None,
-    height: Optional[int] = None,
-    year_tick: int = 1,
-    year_range: Optional[Tuple[int, int]] = None,
-    show_year_grid: bool = True,
-    yaxis_type: Literal["linear", "log"] = "linear",
-    log_eps: float = 1e-30,
-    reference_year: Optional[int] = None,
-    show_cumulative_axis: bool = False,
-    cumulative_axis_label: str = "Cumulative impact",
-    legend_entrywidth: int = 260,
-    legend_row_height: int = 18,
-    legend_y: float = 1.02,
-    y2_headroom: float = 0.05,
-    show_cumulative_in_legend: bool = False,
-    static_score: Optional[float] = None,
-    static_score_label: str = "Static score",
-    static_score_dash: str = "dash",
-    static_score_color: str = "black",
-    y_min: Optional[float] = None,
-    y_max: Optional[float] = None,
-    y2_max: Optional[float] = None,
-) -> go.Figure:
-    """Plot temporal impact scores by responsible activity.
+) -> Dict[int, Dict[str, Any]]:
+    """Aggregate per-flow results by biosphere flow name."""
+    flow_id_to_name: dict[int, str] = {}
+    for _label, meta in trails.biosphere_indices.items():
+        for fid, md in meta.items():
+            if fid in flow_id_to_name:
+                continue
+            name = md.get("name") if isinstance(md, dict) else None
+            if name:
+                flow_id_to_name[int(fid)] = str(name)
 
-    :param results_by_year: Impact-year results mapping or characterized inventory.
-    :type results_by_year: dict[int, dict[str, Any]] | xarray.DataArray | None
-    :param trails: Trails instance used for labels.
-    :type trails: Trails
-    :param title: Plot title.
-    :type title: str
-    :param method_label: Label for the impact score axis.
-    :type method_label: str
-    :param cumulative: Whether to accumulate scores over time.
-    :type cumulative: bool
-    :param stacked: Whether to stack root traces.
-    :type stacked: bool
-    :param legend_top_n: Number of top-contributing items to show in legend.
-    :type legend_top_n: int
-    :param show_flow_contributions: Whether to plot flow contributions instead of activities.
-    :type show_flow_contributions: bool
-    :param width: Figure width in pixels.
-    :type width: int | None
-    :param height: Figure height in pixels.
-    :type height: int | None
-    :param year_tick: Tick step for the year axis.
-    :type year_tick: int
-    :param year_range: Optional ``(start, end)`` year bounds.
-    :type year_range: tuple[int, int] | None
-    :param show_year_grid: Whether to show grid lines on the year axis.
-    :type show_year_grid: bool
-    :param yaxis_type: Axis scale type.
-    :type yaxis_type: Literal["linear", "log"]
-    :param log_eps: Epsilon for log scaling.
-    :type log_eps: float
-    :param reference_year: Optional reference year line.
-    :type reference_year: int | None
-    :param show_cumulative_axis: Whether to show cumulative axis.
-    :type show_cumulative_axis: bool
-    :param cumulative_axis_label: Label for cumulative axis.
-    :type cumulative_axis_label: str
-    :param legend_entrywidth: Legend entry width in pixels.
-    :type legend_entrywidth: int
-    :param legend_row_height: Legend row height in pixels.
-    :type legend_row_height: int
-    :param legend_y: Legend y position.
-    :type legend_y: float
-    :param y2_headroom: Headroom multiplier for secondary axis.
-    :type y2_headroom: float
-    :param show_cumulative_in_legend: Whether cumulative trace is shown in legend.
-    :type show_cumulative_in_legend: bool
-    :param static_score: Optional static score value.
-    :type static_score: float | None
-    :param static_score_label: Label for static score trace.
-    :type static_score_label: str
-    :param static_score_dash: Dash style for static score trace.
-    :type static_score_dash: str
-    :param static_score_color: Color for static score trace.
-    :type static_score_color: str
-    :param y_min: Optional min for primary y-axis.
-    :type y_min: float | None
-    :param y_max: Optional max for primary y-axis.
-    :type y_max: float | None
-    :param y2_max: Optional max for secondary y-axis.
-    :type y2_max: float | None
-    :returns: Plotly figure.
-    :rtype: plotly.graph_objects.Figure
-    """
-    if results_by_year is None:
-        # Prefer characterized inventory if present; otherwise fall back to scores
-        if trails.characterized_inventory is not None:
-            results_by_year = trails.characterized_inventory
-        elif getattr(trails, "scores", None) is not None:
-            results_by_year = trails.scores
-        else:
-            raise ValueError(
-                "No characterized inventory or scores available for plotting."
-            )
+    out: Dict[int, Dict[str, Any]] = {}
+    for year, payload in results_by_year.items():
+        scores_by_flow = payload.get("scores_by_flow", {})
+        agg: Dict[str, float] = {}
+        total = 0.0
+        for fid, val in scores_by_flow.items():
+            name = flow_id_to_name.get(int(fid), f"Flow {fid}")
+            agg[name] = agg.get(name, 0.0) + float(val)
+            total += float(val)
+        out[int(year)] = {"scores": total, "scores_by_flow": agg}
+    return out
+
+
+def _plot_results_by_year(
+    results_by_year: Union[Dict[int, Dict[str, Any]], Dict[str, Any], xr.DataArray],
+    trails: Trails,
+    title: str,
+    method_label: str,
+    cumulative: bool,
+    stacked: bool,
+    legend_top_n: int,
+    show_flow_contributions: bool,
+    width: Optional[int],
+    height: Optional[int],
+    year_tick: int,
+    year_range: Optional[Tuple[int, int]],
+    show_year_grid: bool,
+    yaxis_type: Literal["linear", "log"],
+    log_eps: float,
+    reference_year: Optional[int],
+    show_cumulative_axis: bool,
+    cumulative_axis_label: str,
+    legend_entrywidth: int,
+    legend_row_height: int,
+    legend_y: float,
+    y2_headroom: float,
+    show_cumulative_in_legend: bool,
+    static_score: Optional[float],
+    static_score_label: str,
+    static_score_dash: str,
+    static_score_color: str,
+    y_min: Optional[float],
+    y_max: Optional[float],
+    y2_max: Optional[float],
+    *,
+    flow_groupby_name: bool = False,
+) -> go.Figure:
 
     if isinstance(results_by_year, xr.DataArray):
         # Inventory-style arrays have a "flow" dim; score arrays generally do not.
@@ -1866,7 +1822,7 @@ def plot_temporal_scores(
                     results_by_year, by_flow=show_flow_contributions
                 )
         else:
-            # New behavior: interpret as score array (e.g., trails.scores)
+            # Score array (e.g., trails.scores)
             if show_flow_contributions:
                 # Only works if scores actually has a "flow" dim; otherwise will become totals-only.
                 results_by_year = _scores_to_results(results_by_year, by_flow=True)
@@ -1881,6 +1837,8 @@ def plot_temporal_scores(
     score_key = (
         "scores_by_flow" if show_flow_contributions else "scores_by_first_level_child"
     )
+    if show_flow_contributions and flow_groupby_name:
+        results_by_year = _aggregate_flow_results_by_name(results_by_year, trails)
     years = _select_years_from_results(results_by_year, year_range)
     if not any(score_key in results_by_year[year] for year in years):
         raise ValueError(f"Expected {score_key} in results_by_year for plotting.")
@@ -1900,11 +1858,14 @@ def plot_temporal_scores(
         if static_score is not None:
             static_score = max(static_score, log_eps)
 
-    idx_to_label = (
-        _build_flow_label_map(trails)
-        if show_flow_contributions
-        else _build_activity_label_map(trails)
-    )
+    if show_flow_contributions and flow_groupby_name:
+        idx_to_label = {}
+    else:
+        idx_to_label = (
+            _build_flow_label_map(trails)
+            if show_flow_contributions
+            else _build_activity_label_map(trails)
+        )
 
     if legend_top_n < 0:
         raise ValueError("legend_top_n must be >= 0")
@@ -2010,6 +1971,85 @@ def plot_temporal_scores(
     _add_reference_year_line(fig, reference_year)
 
     return fig
+
+
+def plot_temporal_scores(
+    trails: Trails,
+    title: str = "Temporal impacts by responsible activity",
+    method_label: str = "Impact score",
+    cumulative: bool = False,
+    stacked: bool = True,
+    legend_top_n: int = 5,
+    show_flow_contributions: bool = False,
+    width: Optional[int] = None,
+    height: Optional[int] = None,
+    year_tick: int = 1,
+    year_range: Optional[Tuple[int, int]] = None,
+    show_year_grid: bool = True,
+    yaxis_type: Literal["linear", "log"] = "linear",
+    log_eps: float = 1e-30,
+    reference_year: Optional[int] = None,
+    show_cumulative_axis: bool = False,
+    cumulative_axis_label: str = "Cumulative impact",
+    legend_entrywidth: int = 260,
+    legend_row_height: int = 18,
+    legend_y: float = 1.02,
+    y2_headroom: float = 0.05,
+    show_cumulative_in_legend: bool = False,
+    flow_groupby_name: bool = False,
+    static_score: Optional[float] = None,
+    static_score_label: str = "Static score",
+    static_score_dash: str = "dash",
+    static_score_color: str = "black",
+    y_min: Optional[float] = None,
+    y_max: Optional[float] = None,
+    y2_max: Optional[float] = None,
+) -> go.Figure:
+    """Plot temporal impact scores by responsible activity."""
+    if trails.characterized_inventory is not None:
+        results_by_year: Union[
+            Dict[int, Dict[str, Any]], Dict[str, Any], xr.DataArray
+        ] = trails.characterized_inventory
+    elif getattr(trails, "scores", None) is not None:
+        results_by_year = trails.scores
+    else:
+        raise ValueError(
+            "No characterized inventory or scores available for plotting."
+        )
+
+    return _plot_results_by_year(
+        results_by_year=results_by_year,
+        trails=trails,
+        title=title,
+        method_label=method_label,
+        cumulative=cumulative,
+        stacked=stacked,
+        legend_top_n=legend_top_n,
+        show_flow_contributions=show_flow_contributions,
+        width=width,
+        height=height,
+        year_tick=year_tick,
+        year_range=year_range,
+        show_year_grid=show_year_grid,
+        yaxis_type=yaxis_type,
+        log_eps=log_eps,
+        reference_year=reference_year,
+        show_cumulative_axis=show_cumulative_axis,
+        cumulative_axis_label=cumulative_axis_label,
+        legend_entrywidth=legend_entrywidth,
+        legend_row_height=legend_row_height,
+        legend_y=legend_y,
+        y2_headroom=y2_headroom,
+        show_cumulative_in_legend=show_cumulative_in_legend,
+        flow_groupby_name=flow_groupby_name,
+        static_score=static_score,
+        static_score_label=static_score_label,
+        static_score_dash=static_score_dash,
+        static_score_color=static_score_color,
+        y_min=y_min,
+        y_max=y_max,
+        y2_max=y2_max,
+    )
 
 
 def plot_top_paths_for_year(
@@ -2680,6 +2720,112 @@ def _init_flow_subplots(panel_labels: list[str], ncols: int) -> tuple[go.Figure,
         vertical_spacing=0.12,
     )
     return fig, nrows
+
+
+def plot_rf(
+    trails: Trails,
+    *,
+    by: Literal["flow", "root activity"] = "root activity",
+    title: str = "Radiative forcing by gas/flow",
+    method_label: str = "W/m²",
+    cumulative: bool = False,
+    stacked: bool = False,
+    legend_top_n: int = 5,
+    width: Optional[int] = 550,
+    height: Optional[int] = 450,
+    year_tick: int = 5,
+    year_range: Optional[Tuple[int, int]] = None,
+    show_year_grid: bool = True,
+    yaxis_type: Literal["linear", "log"] = "linear",
+    log_eps: float = 1e-30,
+    reference_year: Optional[int] = None,
+    show_cumulative_axis: bool = True,
+    cumulative_axis_label: str = "Cumulative impacts",
+    legend_entrywidth: int = 260,
+    legend_row_height: int = 18,
+    legend_y: float = 1.0,
+    y2_headroom: float = 0.05,
+    show_cumulative_in_legend: bool = False,
+    flow_groupby_name: bool = False,
+    y_min: Optional[float] = None,
+    y_max: Optional[float] = None,
+    y2_max: Optional[float] = None,
+) -> go.Figure:
+    """Plot radiative forcing time series by flow or root activity."""
+    rf = getattr(trails, "instant_radiative_forcing", None)
+    if rf is None:
+        raise ValueError("No radiative forcing data stored on Trails.")
+
+    if "year" not in rf.dims:
+        raise ValueError("RF data must include a 'year' dimension.")
+
+    if by == "flow":
+        if "flow" not in rf.dims:
+            raise ValueError("RF data must include a 'flow' dimension for by='flow'.")
+        if "root activity" in rf.dims:
+            rf = rf.sum(dim="root activity")
+        if "activity" in rf.dims:
+            rf = rf.sum(dim="activity")
+        results_by_year = _scores_to_results(rf, by_flow=True)
+    elif by == "root activity":
+        if "root activity" not in rf.dims:
+            raise ValueError(
+                "RF data must include 'root activity' for by='root activity'."
+            )
+        data = rf
+        if "flow" in data.dims:
+            data = data.sum(dim="flow")
+        if "activity" in data.dims:
+            data = data.sum(dim="activity")
+        results_by_year = _scores_to_results(data, by_flow=False)
+    else:
+        raise ValueError("by must be 'flow' or 'root activity'.")
+
+    fig = _plot_results_by_year(
+        results_by_year=results_by_year,
+        trails=trails,
+        title=title,
+        method_label=method_label,
+        cumulative=cumulative,
+        stacked=stacked,
+        legend_top_n=legend_top_n,
+        show_flow_contributions=(by == "flow"),
+        width=width,
+        height=height,
+        year_tick=year_tick,
+        year_range=year_range,
+        show_year_grid=show_year_grid,
+        yaxis_type=yaxis_type,
+        log_eps=log_eps,
+        reference_year=reference_year,
+        show_cumulative_axis=show_cumulative_axis,
+        cumulative_axis_label=cumulative_axis_label,
+        legend_entrywidth=legend_entrywidth,
+        legend_row_height=legend_row_height,
+        legend_y=legend_y,
+        y2_headroom=y2_headroom,
+        show_cumulative_in_legend=show_cumulative_in_legend,
+        flow_groupby_name=flow_groupby_name,
+        static_score=None,
+        static_score_label="Static score",
+        static_score_dash="dash",
+        static_score_color="black",
+        y_min=y_min,
+        y_max=y_max,
+        y2_max=y2_max,
+    )
+    fig.update_layout(title=dict(text=""))
+    fig.add_annotation(
+        text=title,
+        x=0.5,
+        y=-0.2,
+        xref="paper",
+        yref="paper",
+        xanchor="center",
+        yanchor="top",
+        showarrow=False,
+    )
+    return fig
 
 
 def _configure_flow_axes(

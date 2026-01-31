@@ -283,7 +283,15 @@ class Trails:
         *,
         attribute_to_roots: bool = False,
     ) -> None:
-        years = np.arange(int(self.min_year), int(self.max_year) + 1, dtype=int)
+        min_offset, max_offset = self._biosphere_offset_bounds()
+        # Extend the inventory time axis to allow biosphere emissions to spread/decay
+        # beyond the matrix years (e.g., for long-lived gases).
+        tail_years = 500
+        years = np.arange(
+            int(self.min_year) + int(min_offset),
+            int(self.max_year) + int(max_offset) + int(tail_years) + 1,
+            dtype=int,
+        )
 
         self._score_years = years
         self._score_year_index = {int(y): int(i) for i, y in enumerate(years)}
@@ -411,7 +419,13 @@ class Trails:
                 )
             self.min_year = int(years_int.min())
             self.max_year = int(years_int.max())
-        years = np.arange(int(self.min_year), int(self.max_year) + 1, dtype=int)
+        min_offset, max_offset = self._biosphere_offset_bounds()
+        tail_years = 500
+        years = np.arange(
+            int(self.min_year) + int(min_offset),
+            int(self.max_year) + int(max_offset) + int(tail_years) + 1,
+            dtype=int,
+        )
 
         self._inventory_years = years
         self._inventory_year_index = {int(y): int(i) for i, y in enumerate(years)}
@@ -601,6 +615,21 @@ class Trails:
         ):
             if not exchanges:
                 continue
+            for tex in exchanges.values():
+                offset_min = getattr(tex, "offset_min", None)
+                offset_max = getattr(tex, "offset_max", None)
+                if offset_min is not None:
+                    min_offset = min(min_offset, int(offset_min))
+                if offset_max is not None:
+                    max_offset = max(max_offset, int(offset_max))
+        return min_offset, max_offset
+
+    def _biosphere_offset_bounds(self) -> tuple[int, int]:
+        """Return min/max year offsets implied by temporal biosphere metadata."""
+        min_offset = 0
+        max_offset = 0
+        exchanges = self.temporal_biosphere_exchanges
+        if exchanges:
             for tex in exchanges.values():
                 offset_min = getattr(tex, "offset_min", None)
                 offset_max = getattr(tex, "offset_max", None)

@@ -213,7 +213,7 @@ def lca_static_simple(
 
 def lca(
     trails: Trails,
-    methods: List[str],
+    methods: List[str] | None = None,
     show_progress: bool = True,
     attribute_to_roots: bool = True,
     *,
@@ -233,6 +233,8 @@ def lca(
 
     cf = None
     if compute_score:
+        if not methods:
+            raise ValueError("methods must be provided when compute_score=True.")
         cf = get_cf_vector(
             trails=trails,
             methods=methods,
@@ -589,8 +591,8 @@ def lca(
                 "This indicates lca() did not finalize scores correctly."
             )
 
-    # Characterized inventory is optional.
-    if store_inventory and (not compute_score):
+    # Characterized inventory is optional and only meaningful when scoring.
+    if store_inventory and compute_score:
         build_characterized_inventory(
             trails=trails, methods=methods, char_cache=_CHAR_CACHE
         )

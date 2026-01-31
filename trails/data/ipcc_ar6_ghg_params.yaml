@@ -1,0 +1,1300 @@
+(4s,5s)-1,1,2,2,3, 3,4,5-octafluoro- cyclopentane:
+  biosphere_name: []
+  formula: trans-cyc(-CF2CF2CF2CHFCHF-)
+  lifetime_yr: 3.2
+  rad_eff_Wm2_per_ppb: 0.259
+(e)-1-chloro-2- fluoroethene:
+  biosphere_name: []
+  formula: (E/Z)-CHCl=CHF
+  lifetime_yr: 0.005
+  rad_eff_Wm2_per_ppb: 0.001
+(e)-hex-2-en-1-ol:
+  biosphere_name: []
+  formula: CH3CH2CH2CH=CHCH2OH
+  lifetime_yr: 0.0
+  rad_eff_Wm2_per_ppb: 0.036
+(z)-hex-2-en-1-ol:
+  biosphere_name: []
+  formula: CH3CH2CH2CH=CHCH2OH
+  lifetime_yr: 0.0
+  rad_eff_Wm2_per_ppb: 0.038
+1,1,1,2,2,3, 3-heptafluoro-3- (1,2,2,2-tetra- fluoroethoxy) propane:
+  biosphere_name: []
+  formula: CF3CF2CF2OCHFCF3
+  lifetime_yr: 59.4
+  rad_eff_Wm2_per_ppb: 0.591
+1,1,1,2,2,4,5,5, 5-nonafluoro-4- (trifluoromethyl) pentan-3-one:
+  biosphere_name: []
+  formula: CF3CF2COCF(CF3)2
+  lifetime_yr: 0.019
+  rad_eff_Wm2_per_ppb: 0.028
+1,1,1,3,3,3-hexa- fluoropropan-2-ol:
+  biosphere_name: []
+  formula: (CF3)2CHOH
+  lifetime_yr: 1.9
+  rad_eff_Wm2_per_ppb: 0.274
+1,1,1-trifluoro- butan-2-one:
+  biosphere_name: []
+  formula: CF3COCH2CH3
+  lifetime_yr: 0.018
+  rad_eff_Wm2_per_ppb: 0.01
+1,1,1-trifluoro- propan-2-one:
+  biosphere_name: []
+  formula: CF3COCH3
+  lifetime_yr: 0.014
+  rad_eff_Wm2_per_ppb: 0.011
+1,1,2,2,3,3,4,4, 4a,5,5,6,6,7,7, 8,8,8a-octade- cafluoronaph- thalene:
+  biosphere_name: []
+  formula: Z-C10F18
+  lifetime_yr: 2000.0
+  rad_eff_Wm2_per_ppb: 0.56
+1,1,2,2,3,3,4,4, 4a,5,5,6,6,7,7,8, 8,8a-octadeca- fluoronaphtha- lene:
+  biosphere_name: []
+  formula: E-C10F18
+  lifetime_yr: 2000.0
+  rad_eff_Wm2_per_ppb: 0.512
+1,1,2,2,3,3,4-hep- tafluorocyclo- pentane:
+  biosphere_name: []
+  formula: cyc(-CF2CF2CF2CHFCH2-)
+  lifetime_yr: 2.8
+  rad_eff_Wm2_per_ppb: 0.243
+1,1,2,2,3,3-hexa- fluorocyclo- pentane:
+  biosphere_name: []
+  formula: cyc(-CF2CF2CF2CH2CH2-)
+  lifetime_yr: 1.6
+  rad_eff_Wm2_per_ppb: 0.2
+1,1,2,2-tetra- chloroethene:
+  biosphere_name: []
+  formula: CCl2=CCl2
+  lifetime_yr: 0.301
+  rad_eff_Wm2_per_ppb: 0.052
+1,1,2,2-tetra- fluoro-3-meth- oxypropane:
+  biosphere_name: []
+  formula: CHF2CF2CH2OCH3
+  lifetime_yr: 0.071
+  rad_eff_Wm2_per_ppb: 0.052
+1,1,2,3,4,4-hexa- fluorobuta-1,3- diene:
+  biosphere_name: []
+  formula: CF2=CFCF=CF2
+  lifetime_yr: 0.003
+  rad_eff_Wm2_per_ppb: 0.003
+1,1,2-trichloro- ethene:
+  biosphere_name: []
+  formula: CHCl=CCl2
+  lifetime_yr: 0.015
+  rad_eff_Wm2_per_ppb: 0.006
+1,1,2-trifluoro-2- (trifluoromethoxy) ethane:
+  biosphere_name: []
+  formula: CHF2CHFOCF3
+  lifetime_yr: 9.0
+  rad_eff_Wm2_per_ppb: 0.353
+1,2-dibromo- ethane:
+  biosphere_name: []
+  formula: CH2BrCH2Br
+  lifetime_yr: 0.244
+  rad_eff_Wm2_per_ppb: 0.012
+1,2-dichloro- ethane:
+  biosphere_name: []
+  formula: CH2ClCH2Cl
+  lifetime_yr: 0.225
+  rad_eff_Wm2_per_ppb: 0.009
+1,3,3,4,4,5,5- heptafluoro- cyclopentene:
+  biosphere_name: []
+  formula: cyc(-CF2CF2CF2CF=CH-)
+  lifetime_yr: 0.61
+  rad_eff_Wm2_per_ppb: 0.215
+1,3,3,4,4-penta- fluorocyclo- butene:
+  biosphere_name: []
+  formula: cyc(-CH=CFCF2CF2-)
+  lifetime_yr: 0.74
+  rad_eff_Wm2_per_ppb: 0.27
+1-bromopropane:
+  biosphere_name: []
+  formula: CH3CH2CH2Br
+  lifetime_yr: 0.041
+  rad_eff_Wm2_per_ppb: 0.002
+1-chloro-2-ethen- oxyethane:
+  biosphere_name: []
+  formula: ClCH2CH2OCH=CH2
+  lifetime_yr: 0.0
+  rad_eff_Wm2_per_ppb: 0.001
+1-chlorobutane:
+  biosphere_name: []
+  formula: CH3(CH2)2CH2Cl
+  lifetime_yr: 0.012
+  rad_eff_Wm2_per_ppb: 0.001
+1-ethoxy- 1,1,2,3,3,3- hexafluoro- propane:
+  biosphere_name: []
+  formula: CF3CHFCF2OCH2CH3
+  lifetime_yr: 0.403
+  rad_eff_Wm2_per_ppb: 0.193
+2,2,2-trifluoro- ethanol:
+  biosphere_name: []
+  formula: CF3CH2OH
+  lifetime_yr: 0.458
+  rad_eff_Wm2_per_ppb: 0.117
+2,2,2-trifluoro- ethyl formate:
+  biosphere_name: []
+  formula: CF3CH2OCHO
+  lifetime_yr: 0.548
+  rad_eff_Wm2_per_ppb: 0.192
+2,2,3,3,3-penta- fluoropropan-1-ol:
+  biosphere_name: []
+  formula: CF3CF2CH2OH
+  lifetime_yr: 0.471
+  rad_eff_Wm2_per_ppb: 0.164
+2,2,3,3,4,4,4-hep- tafluorobutan-1-ol:
+  biosphere_name: []
+  formula: CF3CF2CF2CH2OH
+  lifetime_yr: 0.55
+  rad_eff_Wm2_per_ppb: 0.199
+2,2,3,3,4,4,5,5- octafluorocyclo- pentan-1-ol:
+  biosphere_name: []
+  formula: cyc(-(CF2)4CH(OH)-)
+  lifetime_yr: 0.301
+  rad_eff_Wm2_per_ppb: 0.156
+2,2,3,3-tetra- fluoropropan-1-ol:
+  biosphere_name: []
+  formula: CHF2CF2CH2OH
+  lifetime_yr: 0.255
+  rad_eff_Wm2_per_ppb: 0.112
+2,2,3,4,4,4- hexafluoro- butan-1-ol:
+  biosphere_name: []
+  formula: CF3CHFCF2CH2OH
+  lifetime_yr: 0.367
+  rad_eff_Wm2_per_ppb: 0.227
+2,2-difluoro- ethanol:
+  biosphere_name: []
+  formula: CHF2CH2OH
+  lifetime_yr: 0.167
+  rad_eff_Wm2_per_ppb: 0.046
+2-bromopropane:
+  biosphere_name: []
+  formula: CH3CHBrCH3
+  lifetime_yr: 0.055
+  rad_eff_Wm2_per_ppb: 0.004
+2-chloro-1,1, 2-trifluoro-1- methoxyethane:
+  biosphere_name: []
+  formula: CH3OCF2CHClF
+  lifetime_yr: 1.43
+  rad_eff_Wm2_per_ppb: 0.211
+2-chloropropane:
+  biosphere_name: []
+  formula: CH3CHClCH3
+  lifetime_yr: 0.06
+  rad_eff_Wm2_per_ppb: 0.004
+2-ethoxy-3,3,4,4, 5-pentafluoro- tetrahydro-2,5- bis[1,2,2,2-tetra- fluoro-1- (trifluoromethyl) ethyl]-furan:
+  biosphere_name: []
+  formula: C12H5F19O2
+  lifetime_yr: 0.81
+  rad_eff_Wm2_per_ppb: 0.489
+2-fluoroethanol:
+  biosphere_name: []
+  formula: CH2FCH2OH
+  lifetime_yr: 0.044
+  rad_eff_Wm2_per_ppb: 0.012
+2-methylpentan- 3-one:
+  biosphere_name: []
+  formula: CH3CH2COCH(CH3)2
+  lifetime_yr: 0.015
+  rad_eff_Wm2_per_ppb: 0.02
+3,3,3-trifluoro- propan-1-ol:
+  biosphere_name: []
+  formula: CF3CH2CH2OH
+  lifetime_yr: 0.041
+  rad_eff_Wm2_per_ppb: 0.026
+3,3,3-trifluoro- propanal:
+  biosphere_name: []
+  formula: CF3CH2CHO
+  lifetime_yr: 0.008
+  rad_eff_Wm2_per_ppb: 0.005
+3,3,3-trifluoro-2- (trifluoromethyl) prop-1-ene:
+  biosphere_name: []
+  formula: (CF3)2C=CH2
+  lifetime_yr: 0.028
+  rad_eff_Wm2_per_ppb: 0.033
+3,3,4,4,5,5,6,6, 6-nonafluorohex- 1-ene:
+  biosphere_name: []
+  formula: n-C4F9CH=CH2
+  lifetime_yr: 0.025
+  rad_eff_Wm2_per_ppb: 0.03
+3,3,4,4,5,5,6,6, 7,7,7-undeca- fluoroheptan-1-ol:
+  biosphere_name: []
+  formula: CF3(CF2)4CH2CH2OH
+  lifetime_yr: 0.047
+  rad_eff_Wm2_per_ppb: 0.054
+3,3,4,4,5,5,6,6, 7,7,8,8,9,9,9- pentadecafluoro- nonan-1-ol:
+  biosphere_name: []
+  formula: CF3(CF2)6CH2CH2OH
+  lifetime_yr: 0.047
+  rad_eff_Wm2_per_ppb: 0.06
+3,3,4,4,5,5,6,6,7, 7,8,8,8-trideca- fluorooct-1-ene:
+  biosphere_name: []
+  formula: n-C6F13CH=CH2
+  lifetime_yr: 0.025
+  rad_eff_Wm2_per_ppb: 0.034
+3,3,4,4,5,5,6,6,7, 7,8,8,9,9,10,10, 10-heptadeca- fluorodec-1-ene:
+  biosphere_name: []
+  formula: n-C8F17CH=CH2
+  lifetime_yr: 0.025
+  rad_eff_Wm2_per_ppb: 0.038
+3,3,4,4,5,5,6,6,7, 7,8,8,9,9,10,10, 11,11,11-nona- decafluoroun- decan-1-ol:
+  biosphere_name: []
+  formula: CF3(CF2)8CH2CH2OH
+  lifetime_yr: 0.047
+  rad_eff_Wm2_per_ppb: 0.045
+3,3,4,4-tetra- fluorocyclo- butene:
+  biosphere_name: []
+  formula: cyc(-CH=CHCF2CF2-)
+  lifetime_yr: 0.23
+  rad_eff_Wm2_per_ppb: 0.21
+4,4,4-trifluoro- butan-1-ol:
+  biosphere_name: []
+  formula: CF3(CH2)2CH2OH
+  lifetime_yr: 0.015
+  rad_eff_Wm2_per_ppb: 0.006
+Allyl cyanide:
+  biosphere_name: []
+  formula: CH2=CHCH2CN
+  lifetime_yr: 0.002
+  rad_eff_Wm2_per_ppb: 0.0
+Allyl ether:
+  biosphere_name: []
+  formula: (CH2=CHCH2)2O
+  lifetime_yr: 0.0
+  rad_eff_Wm2_per_ppb: 0.001
+Allyl ethyl ether:
+  biosphere_name: []
+  formula: CH3CH2OCH2CH=CH2
+  lifetime_yr: 0.001
+  rad_eff_Wm2_per_ppb: 0.001
+Bromoethane:
+  biosphere_name: []
+  formula: CH3CH2Br
+  lifetime_yr: 0.137
+  rad_eff_Wm2_per_ppb: 0.006
+Butane:
+  biosphere_name: []
+  formula: n-C4H10
+  lifetime_yr: 0.019
+  rad_eff_Wm2_per_ppb: 0.0
+CFC 1112:
+  biosphere_name: []
+  formula: CClF=CClF
+  lifetime_yr: 0.019
+  rad_eff_Wm2_per_ppb: 0.013
+CFC 1112a:
+  biosphere_name: []
+  formula: CCl2=CF2
+  lifetime_yr: 0.006
+  rad_eff_Wm2_per_ppb: 0.007
+CFC-11:
+  biosphere_name:
+  - Trichlorofluoromethane
+  formula: CCl3F
+  lifetime_yr: 52.0
+  rad_eff_Wm2_per_ppb: 0.291
+  molar_mass_g_per_mol: 137.359
+CFC-112:
+  biosphere_name: []
+  formula: CCl2FCCl2F
+  lifetime_yr: 63.6
+  rad_eff_Wm2_per_ppb: 0.282
+CFC-112a:
+  biosphere_name: []
+  formula: CCl3CClF2
+  lifetime_yr: 52.0
+  rad_eff_Wm2_per_ppb: 0.246
+CFC-113:
+  biosphere_name: []
+  formula: CCl2FCClF2
+  lifetime_yr: 93.0
+  rad_eff_Wm2_per_ppb: 0.301
+CFC-113a:
+  biosphere_name: []
+  formula: CCl3CF3
+  lifetime_yr: 55.0
+  rad_eff_Wm2_per_ppb: 0.241
+CFC-114:
+  biosphere_name: []
+  formula: CClF2CClF2
+  lifetime_yr: 189.0
+  rad_eff_Wm2_per_ppb: 0.314
+CFC-114a:
+  biosphere_name: []
+  formula: CCl2FCF3
+  lifetime_yr: 105.0
+  rad_eff_Wm2_per_ppb: 0.297
+CFC-115:
+  biosphere_name: []
+  formula: CClF2CF3
+  lifetime_yr: 540.0
+  rad_eff_Wm2_per_ppb: 0.246
+CFC-12:
+  biosphere_name:
+  - Dichlorodifluoromethane
+  formula: CCl2F2
+  lifetime_yr: 102.0
+  rad_eff_Wm2_per_ppb: 0.358
+  molar_mass_g_per_mol: 120.90700000000001
+CFC-13:
+  biosphere_name: []
+  formula: CClF3
+  lifetime_yr: 640.0
+  rad_eff_Wm2_per_ppb: 0.278
+Carbon dioxide:
+  formula: CO2
+  model: co2
+  biosphere_name:
+    - Carbon dioxide, fossil
+    - Carbon dioxide, non-fossil
+    - Carbon dioxide, from soil or biomass stock
+    - Carbon dioxide, to soil or biomass stock
+    - Carbon dioxide, non-fossil, resource correction
+    - Carbon dioxide, in air
+    - Carbon dioxide, resource correction
+  biosphere_signs:
+    Carbon dioxide, in air: -1
+    Carbon dioxide, to soil or biomass stock: -1
+    Carbon dioxide, non-fossil, resource correction: -1
+
+  lifetime_yr: null
+  rad_eff_Wm2_per_ppb: null
+  concentration_from_emissions:
+    kind: impulse_response_multi_exponential
+    a0: 0.2173
+    a:
+      - 0.224
+      - 0.2824
+      - 0.2763
+    tau:
+      - 394.4
+      - 36.54
+      - 4.304
+  forcing:
+    kind: logarithmic
+    formula: myhre1998
+    C0_ppm: 278.3
+  molar_mass_g_per_mol: 44.009
+Carbon tetrachloride:
+  biosphere_name: []
+  formula: CCl4
+  lifetime_yr: 32.0
+  rad_eff_Wm2_per_ppb: 0.166
+Chloroethane:
+  biosphere_name: []
+  formula: CH3CH2Cl
+  lifetime_yr: 0.132
+  rad_eff_Wm2_per_ppb: 0.004
+Chloroform:
+  biosphere_name: []
+  formula: CHCl3
+  lifetime_yr: 0.501
+  rad_eff_Wm2_per_ppb: 0.074
+Crotonaldehyde:
+  biosphere_name: []
+  formula: CH3CH=CHCHO
+  lifetime_yr: 0.001
+  rad_eff_Wm2_per_ppb: 0.0
+Decamethyl- tetrasiloxane:
+  biosphere_name: []
+  formula: C10H30O3Si4
+  lifetime_yr: 0.014
+  rad_eff_Wm2_per_ppb: 0.06
+Decamethylcyclo- pentasiloxane:
+  biosphere_name: []
+  formula: C10H30O5Si5
+  lifetime_yr: 0.016
+  rad_eff_Wm2_per_ppb: 0.098
+Difluoro (methoxy) methane:
+  biosphere_name: []
+  formula: CH3OCHF2
+  lifetime_yr: 1.1
+  rad_eff_Wm2_per_ppb: 0.153
+Dodecamethyl- cyclohexasiloxane:
+  biosphere_name: []
+  formula: C12H36O6Si6
+  lifetime_yr: 0.011
+  rad_eff_Wm2_per_ppb: 0.086
+Dodecamethyl- pentasiloxane:
+  biosphere_name: []
+  formula: C12H36O4Si5
+  lifetime_yr: 0.011
+  rad_eff_Wm2_per_ppb: 0.064
+E-R316c:
+  biosphere_name: []
+  formula: transcyc(-CClFCF2CF2CClF-)
+  lifetime_yr: 75.0
+  rad_eff_Wm2_per_ppb: 0.27
+Ethane:
+  biosphere_name: []
+  formula: C2H6
+  lifetime_yr: 0.159
+  rad_eff_Wm2_per_ppb: 0.001
+Ethenyl 2,2,2- trifluoroacetate:
+  biosphere_name: []
+  formula: CF3COOCH=CH2
+  lifetime_yr: 0.004
+  rad_eff_Wm2_per_ppb: 0.004
+Ethyl 2,2,2- trifluoroacetate:
+  biosphere_name: []
+  formula: CF3COOCH2CH3
+  lifetime_yr: 0.06
+  rad_eff_Wm2_per_ppb: 0.056
+Ethyl methyl ether:
+  biosphere_name: []
+  formula: CH3CH2OCH3
+  lifetime_yr: 0.005
+  rad_eff_Wm2_per_ppb: 0.002
+Fluroxene:
+  biosphere_name: []
+  formula: CF3CH2OCH=CH2
+  lifetime_yr: 0.01
+  rad_eff_Wm2_per_ppb: 0.011
+Formic acid;1,1,1, 3,3,3-hexafluoro- propan-2-ol:
+  biosphere_name: []
+  formula: (CF3)2CHOCHO
+  lifetime_yr: 3.1
+  rad_eff_Wm2_per_ppb: 0.255
+HCFC-121:
+  biosphere_name: []
+  formula: CHCl2CCl2F
+  lifetime_yr: 1.11
+  rad_eff_Wm2_per_ppb: 0.146
+HCFC-122:
+  biosphere_name: []
+  formula: CHCl2CClF2
+  lifetime_yr: 0.9
+  rad_eff_Wm2_per_ppb: 0.159
+HCFC-122a:
+  biosphere_name: []
+  formula: CHClFCCl2F
+  lifetime_yr: 3.1
+  rad_eff_Wm2_per_ppb: 0.201
+HCFC-123:
+  biosphere_name: []
+  formula: CHCl2CF3
+  lifetime_yr: 1.3
+  rad_eff_Wm2_per_ppb: 0.16
+HCFC-123a:
+  biosphere_name: []
+  formula: CHClFCClF2
+  lifetime_yr: 4.0
+  rad_eff_Wm2_per_ppb: 0.227
+HCFC-124:
+  biosphere_name: []
+  formula: CHClFCF3
+  lifetime_yr: 5.9
+  rad_eff_Wm2_per_ppb: 0.207
+HCFC-124a:
+  biosphere_name: []
+  formula: CHF2CClF2
+  lifetime_yr: 17.0
+  rad_eff_Wm2_per_ppb: 0.25
+HCFC-132:
+  biosphere_name: []
+  formula: CHClFCHClF
+  lifetime_yr: 1.73
+  rad_eff_Wm2_per_ppb: 0.143
+HCFC-132a:
+  biosphere_name: []
+  formula: CHCl2CHF2
+  lifetime_yr: 1.12
+  rad_eff_Wm2_per_ppb: 0.127
+HCFC-132c:
+  biosphere_name: []
+  formula: CH2FCCl2F
+  lifetime_yr: 4.1
+  rad_eff_Wm2_per_ppb: 0.169
+HCFC-133a:
+  biosphere_name: []
+  formula: CH2ClCF3
+  lifetime_yr: 4.6
+  rad_eff_Wm2_per_ppb: 0.15
+HCFC-141:
+  biosphere_name: []
+  formula: CH2ClCHClF
+  lifetime_yr: 1.14
+  rad_eff_Wm2_per_ppb: 0.072
+HCFC-141b:
+  biosphere_name:
+  - 1,1-Dichloro-1-fluoroethane
+  formula: CH3CCl2F
+  lifetime_yr: 9.4
+  rad_eff_Wm2_per_ppb: 0.161
+  molar_mass_g_per_mol: 116.944
+HCFC-142b:
+  biosphere_name:
+  - 1-Chloro-1,1-difluoroethane
+  formula: CH3CClF2
+  lifetime_yr: 18.0
+  rad_eff_Wm2_per_ppb: 0.193
+  molar_mass_g_per_mol: 100.492
+HCFC-21:
+  biosphere_name: []
+  formula: CHCl2F
+  lifetime_yr: 1.7
+  rad_eff_Wm2_per_ppb: 0.145
+HCFC-22:
+  biosphere_name:
+  - Chlorodifluoromethane
+  formula: CHClF2
+  lifetime_yr: 11.9
+  rad_eff_Wm2_per_ppb: 0.214
+  molar_mass_g_per_mol: 86.465
+HCFC-225ca:
+  biosphere_name: []
+  formula: CHCl2CF2CF3
+  lifetime_yr: 1.9
+  rad_eff_Wm2_per_ppb: 0.219
+HCFC-225cb:
+  biosphere_name: []
+  formula: CHClFCF2CClF2
+  lifetime_yr: 5.9
+  rad_eff_Wm2_per_ppb: 0.293
+HCFC-31:
+  biosphere_name: []
+  formula: CH2ClF
+  lifetime_yr: 1.2
+  rad_eff_Wm2_per_ppb: 0.068
+HCFE-235ca2:
+  biosphere_name: []
+  formula: CHF2OCF2CHFCl
+  lifetime_yr: 4.42
+  rad_eff_Wm2_per_ppb: 0.409
+HCFE-235da2:
+  biosphere_name: []
+  formula: CHF2OCHClCF3
+  lifetime_yr: 3.5
+  rad_eff_Wm2_per_ppb: 0.426
+HCFO-1233zd(E):
+  biosphere_name: []
+  formula: (E)-CF3CH=CHCl
+  lifetime_yr: 0.116
+  rad_eff_Wm2_per_ppb: 0.065
+HCFO-1233zd(Z):
+  biosphere_name: []
+  formula: (Z)-CF3CH=CHCl
+  lifetime_yr: 0.036
+  rad_eff_Wm2_per_ppb: 0.025
+HFC-125:
+  biosphere_name:
+  - Pentafluoroethane
+  formula: CHF2CF3
+  lifetime_yr: 30.0
+  rad_eff_Wm2_per_ppb: 0.234
+  molar_mass_g_per_mol: 120.02
+HFC-134:
+  biosphere_name: []
+  formula: CHF2CHF2
+  lifetime_yr: 10.0
+  rad_eff_Wm2_per_ppb: 0.194
+HFC-134a:
+  biosphere_name:
+  - 1,1,1,2-Tetrafluoroethane
+  formula: CH2FCF3
+  lifetime_yr: 14.0
+  rad_eff_Wm2_per_ppb: 0.167
+  molar_mass_g_per_mol: 102.03
+HFC-143:
+  biosphere_name: []
+  formula: CH2FCHF2
+  lifetime_yr: 3.6
+  rad_eff_Wm2_per_ppb: 0.128
+HFC-143a:
+  biosphere_name:
+  - 1,1,1-Trifluoroethane
+  formula: CH3CF3
+  lifetime_yr: 51.0
+  rad_eff_Wm2_per_ppb: 0.168
+  molar_mass_g_per_mol: 84.03999999999999
+HFC-152:
+  biosphere_name: []
+  formula: CH2FCH2F
+  lifetime_yr: 0.471
+  rad_eff_Wm2_per_ppb: 0.045
+HFC-152a:
+  biosphere_name:
+  - 1,1-Difluoroethane
+  formula: CH3CHF2
+  lifetime_yr: 1.6
+  rad_eff_Wm2_per_ppb: 0.102
+  molar_mass_g_per_mol: 66.05
+HFC-161:
+  biosphere_name: []
+  formula: CH3CH2F
+  lifetime_yr: 0.219
+  rad_eff_Wm2_per_ppb: 0.016
+HFC-227ca:
+  biosphere_name: []
+  formula: CF3CF2CHF2
+  lifetime_yr: 30.0
+  rad_eff_Wm2_per_ppb: 0.264
+HFC-227ea:
+  biosphere_name: []
+  formula: CF3CHFCF3
+  lifetime_yr: 36.0
+  rad_eff_Wm2_per_ppb: 0.273
+HFC-23:
+  biosphere_name:
+  - Trifluoromethane
+  formula: CHF3
+  lifetime_yr: 228.0
+  rad_eff_Wm2_per_ppb: 0.191
+  molar_mass_g_per_mol: 70.013
+HFC-236cb:
+  biosphere_name: []
+  formula: CH2FCF2CF3
+  lifetime_yr: 13.4
+  rad_eff_Wm2_per_ppb: 0.231
+HFC-236ea:
+  biosphere_name: []
+  formula: CHF2CHFCF3
+  lifetime_yr: 11.4
+  rad_eff_Wm2_per_ppb: 0.3
+HFC-236fa:
+  biosphere_name: []
+  formula: CF3CH2CF3
+  lifetime_yr: 213.0
+  rad_eff_Wm2_per_ppb: 0.251
+HFC-245ca:
+  biosphere_name: []
+  formula: CH2FCF2CHF2
+  lifetime_yr: 6.6
+  rad_eff_Wm2_per_ppb: 0.24
+HFC-245cb:
+  biosphere_name: []
+  formula: CF3CF2CH3
+  lifetime_yr: 39.9
+  rad_eff_Wm2_per_ppb: 0.251
+HFC-245ea:
+  biosphere_name: []
+  formula: CHF2CHFCHF2
+  lifetime_yr: 3.2
+  rad_eff_Wm2_per_ppb: 0.16
+HFC-245eb:
+  biosphere_name: []
+  formula: CH2FCHFCF3
+  lifetime_yr: 3.2
+  rad_eff_Wm2_per_ppb: 0.204
+HFC-245fa:
+  biosphere_name: []
+  formula: CHF2CH2CF3
+  lifetime_yr: 7.9
+  rad_eff_Wm2_per_ppb: 0.245
+HFC-263fb:
+  biosphere_name: []
+  formula: CH3CH2CF3
+  lifetime_yr: 1.1
+  rad_eff_Wm2_per_ppb: 0.1
+HFC-272ca:
+  biosphere_name: []
+  formula: CH3CF2CH3
+  lifetime_yr: 9.0
+  rad_eff_Wm2_per_ppb: 0.08
+HFC-32:
+  biosphere_name:
+  - Difluoromethane
+  formula: CH2F2
+  lifetime_yr: 5.4
+  rad_eff_Wm2_per_ppb: 0.111
+  molar_mass_g_per_mol: 52.023
+HFC-329p:
+  biosphere_name: []
+  formula: CHF2CF2CF2CF3
+  lifetime_yr: 32.0
+  rad_eff_Wm2_per_ppb: 0.313
+HFC-365mfc:
+  biosphere_name: []
+  formula: CH3CF2CH2CF3
+  lifetime_yr: 8.9
+  rad_eff_Wm2_per_ppb: 0.228
+HFC-41:
+  biosphere_name: []
+  formula: CH3F
+  lifetime_yr: 2.8
+  rad_eff_Wm2_per_ppb: 0.025
+HFC-43-10mee:
+  biosphere_name: []
+  formula: CF3CHFCHFCF2CF3
+  lifetime_yr: 17.0
+  rad_eff_Wm2_per_ppb: 0.357
+HFE-125:
+  biosphere_name: []
+  formula: CHF2OCF3
+  lifetime_yr: 135.0
+  rad_eff_Wm2_per_ppb: 0.417
+HFE-134:
+  biosphere_name: []
+  formula: CHF2OCHF2
+  lifetime_yr: 26.9
+  rad_eff_Wm2_per_ppb: 0.449
+HFE-143a:
+  biosphere_name: []
+  formula: CH3OCF3
+  lifetime_yr: 4.9
+  rad_eff_Wm2_per_ppb: 0.189
+HFE-216:
+  biosphere_name: []
+  formula: CF3OCF=CF2
+  lifetime_yr: 0.004
+  rad_eff_Wm2_per_ppb: 0.006
+HFE-227ea:
+  biosphere_name: []
+  formula: CF3CHFOCF3
+  lifetime_yr: 54.8
+  rad_eff_Wm2_per_ppb: 0.459
+HFE-236ca12:
+  biosphere_name: []
+  formula: CHF2OCF2OCHF2
+  lifetime_yr: 26.5
+  rad_eff_Wm2_per_ppb: 0.648
+HFE-236ea2:
+  biosphere_name: []
+  formula: CHF2OCHFCF3
+  lifetime_yr: 14.1
+  rad_eff_Wm2_per_ppb: 0.464
+HFE-236fa:
+  biosphere_name: []
+  formula: CF3CH2OCF3
+  lifetime_yr: 7.5
+  rad_eff_Wm2_per_ppb: 0.371
+HFE-245cb2:
+  biosphere_name: []
+  formula: CF3CF2OCH3
+  lifetime_yr: 5.0
+  rad_eff_Wm2_per_ppb: 0.336
+HFE-245fa1:
+  biosphere_name: []
+  formula: CHF2CH2OCF3
+  lifetime_yr: 6.7
+  rad_eff_Wm2_per_ppb: 0.314
+HFE-245fa2:
+  biosphere_name: []
+  formula: CHF2OCH2CF3
+  lifetime_yr: 5.5
+  rad_eff_Wm2_per_ppb: 0.36
+HFE-254cb1:
+  biosphere_name: []
+  formula: CH3OCF2CHF2
+  lifetime_yr: 2.5
+  rad_eff_Wm2_per_ppb: 0.26
+HFE-263m1:
+  biosphere_name: []
+  formula: CF3OCH2CH3
+  lifetime_yr: 0.397
+  rad_eff_Wm2_per_ppb: 0.126
+HFE-263mf:
+  biosphere_name: []
+  formula: CF3CH2OCH3
+  lifetime_yr: 0.077
+  rad_eff_Wm2_per_ppb: 0.046
+HFE-329mcc2:
+  biosphere_name: []
+  formula: CHF2CF2OCF2CF3
+  lifetime_yr: 25.0
+  rad_eff_Wm2_per_ppb: 0.545
+HFE-329me3:
+  biosphere_name: []
+  formula: CF3CFHCF2OCF3
+  lifetime_yr: 33.6
+  rad_eff_Wm2_per_ppb: 0.489
+HFE-338mcf2:
+  biosphere_name: []
+  formula: CF3CH2OCF2CF3
+  lifetime_yr: 7.5
+  rad_eff_Wm2_per_ppb: 0.454
+HFE-338mmz1:
+  biosphere_name: []
+  formula: (CF3)2CHOCHF2
+  lifetime_yr: 22.3
+  rad_eff_Wm2_per_ppb: 0.452
+HFE-338pcc13:
+  biosphere_name: []
+  formula: CHF2OCF2CF2OCHF2
+  lifetime_yr: 13.4
+  rad_eff_Wm2_per_ppb: 0.87
+HFE-347mcc3:
+  biosphere_name: []
+  formula: CH3OCF2CF2CF3
+  lifetime_yr: 5.1
+  rad_eff_Wm2_per_ppb: 0.339
+HFE-347mcf2:
+  biosphere_name: []
+  formula: CHF2CH2OCF2CF3
+  lifetime_yr: 6.7
+  rad_eff_Wm2_per_ppb: 0.431
+HFE-347mmy1:
+  biosphere_name: []
+  formula: (CF3)2CFOCH3
+  lifetime_yr: 3.7
+  rad_eff_Wm2_per_ppb: 0.318
+HFE-347mmz1:
+  biosphere_name: []
+  formula: (CF3)2CHOCH2F
+  lifetime_yr: 1.9
+  rad_eff_Wm2_per_ppb: 0.308
+HFE-347pcf2:
+  biosphere_name: []
+  formula: CHF2CF2OCH2CF3
+  lifetime_yr: 6.1
+  rad_eff_Wm2_per_ppb: 0.482
+HFE-356mec3:
+  biosphere_name: []
+  formula: CH3OCF2CHFCF3
+  lifetime_yr: 2.5
+  rad_eff_Wm2_per_ppb: 0.288
+HFE-356mff2:
+  biosphere_name: []
+  formula: CF3CH2OCH2CF3
+  lifetime_yr: 0.351
+  rad_eff_Wm2_per_ppb: 0.19
+HFE-356mmz1:
+  biosphere_name: []
+  formula: (CF3)2CHOCH3
+  lifetime_yr: 0.178
+  rad_eff_Wm2_per_ppb: 0.125
+HFE-356pcc3:
+  biosphere_name: []
+  formula: CH3OCF2CF2CHF2
+  lifetime_yr: 2.5
+  rad_eff_Wm2_per_ppb: 0.303
+HFE-356pcf2:
+  biosphere_name: []
+  formula: CHF2CH2OCF2CHF2
+  lifetime_yr: 6.0
+  rad_eff_Wm2_per_ppb: 0.378
+HFE-356pcf3:
+  biosphere_name: []
+  formula: CHF2OCH2CF2CHF2
+  lifetime_yr: 3.5
+  rad_eff_Wm2_per_ppb: 0.378
+HFE-365mcf3:
+  biosphere_name: []
+  formula: CF3CF2CH2OCH3
+  lifetime_yr: 0.069
+  rad_eff_Wm2_per_ppb: 0.058
+HFE-374pc2:
+  biosphere_name: []
+  formula: CHF2CF2OCH2CH3
+  lifetime_yr: 0.208
+  rad_eff_Wm2_per_ppb: 0.132
+HFE-43- 10pccc124:
+  biosphere_name: []
+  formula: CHF2OCF2OCF2CF2OCHF2
+  lifetime_yr: 14.1
+  rad_eff_Wm2_per_ppb: 1.03
+HFE-449s1:
+  biosphere_name: []
+  formula: C4F9OCH3
+  lifetime_yr: 4.8
+  rad_eff_Wm2_per_ppb: 0.36
+HFE-569sf2:
+  biosphere_name: []
+  formula: C4F9OC2H5
+  lifetime_yr: 0.8
+  rad_eff_Wm2_per_ppb: 0.301
+HFE-7300:
+  biosphere_name: []
+  formula: (CF3)2CFCFOC2H5CF2CF2CF3
+  lifetime_yr: 5.24
+  rad_eff_Wm2_per_ppb: 0.48
+HFE-7500:
+  biosphere_name: []
+  formula: n-C3F7CFOC2H5CF(CF3)2
+  lifetime_yr: 0.3
+  rad_eff_Wm2_per_ppb: 0.27
+HFO-1123:
+  biosphere_name: []
+  formula: CHF=CF2
+  lifetime_yr: 0.004
+  rad_eff_Wm2_per_ppb: 0.002
+HFO-1132a:
+  biosphere_name: []
+  formula: CH2=CF2
+  lifetime_yr: 0.013
+  rad_eff_Wm2_per_ppb: 0.004
+HFO-1141:
+  biosphere_name: []
+  formula: CH2=CHF
+  lifetime_yr: 0.007
+  rad_eff_Wm2_per_ppb: 0.002
+HFO-1225ye(E):
+  biosphere_name: []
+  formula: (E)-CF3CF=CHF
+  lifetime_yr: 0.016
+  rad_eff_Wm2_per_ppb: 0.015
+HFO-1225ye(Z):
+  biosphere_name: []
+  formula: (Z)-CF3CF=CHF
+  lifetime_yr: 0.027
+  rad_eff_Wm2_per_ppb: 0.025
+HFO-1234yf:
+  biosphere_name: []
+  formula: CF3CF=CH2
+  lifetime_yr: 0.033
+  rad_eff_Wm2_per_ppb: 0.026
+HFO-1234ze(E):
+  biosphere_name: []
+  formula: (E)-CF3CH=CHF
+  lifetime_yr: 0.052
+  rad_eff_Wm2_per_ppb: 0.045
+HFO-1234ze(Z):
+  biosphere_name: []
+  formula: (Z)-CF3CH=CHF
+  lifetime_yr: 0.027
+  rad_eff_Wm2_per_ppb: 0.02
+HFO-1243zf:
+  biosphere_name: []
+  formula: CF3CH=CH2
+  lifetime_yr: 0.025
+  rad_eff_Wm2_per_ppb: 0.015
+HFO-1336mzz(E):
+  biosphere_name: []
+  formula: (E)-CF3CH=CHCF3
+  lifetime_yr: 0.334
+  rad_eff_Wm2_per_ppb: 0.132
+HFO-1336mzz(Z):
+  biosphere_name: []
+  formula: (Z)-CF3CH=CHCF3
+  lifetime_yr: 0.074
+  rad_eff_Wm2_per_ppb: 0.069
+HFO-1345zfc:
+  biosphere_name: []
+  formula: CF3CF2CH=CH2
+  lifetime_yr: 0.025
+  rad_eff_Wm2_per_ppb: 0.016
+HFO-1438ezy(E):
+  biosphere_name: []
+  formula: (E)-(CF3)2CFCH=CHF
+  lifetime_yr: 0.334
+  rad_eff_Wm2_per_ppb: 0.079
+HFO-1447fz:
+  biosphere_name: []
+  formula: CF3(CF2)2CH=CH2
+  lifetime_yr: 0.025
+  rad_eff_Wm2_per_ppb: 0.028
+HG-02:
+  biosphere_name: []
+  formula: CHF2(OCF2CF2)2OCHF2
+  lifetime_yr: 26.9
+  rad_eff_Wm2_per_ppb: 1.15
+HG-03:
+  biosphere_name: []
+  formula: CHF2(OCF2CF2)3OCHF2
+  lifetime_yr: 26.9
+  rad_eff_Wm2_per_ppb: 1.43
+HG-04:
+  biosphere_name: []
+  formula: CHF2O(CF2CF2O)4CHF2
+  lifetime_yr: 26.9
+  rad_eff_Wm2_per_ppb: 1.46
+HG’-01:
+  biosphere_name: []
+  formula: CH3OCF2CF2OCH3
+  lifetime_yr: 1.7
+  rad_eff_Wm2_per_ppb: 0.289
+HG’-02:
+  biosphere_name: []
+  formula: CH3O(CF2CF2O)2CH3
+  lifetime_yr: 1.7
+  rad_eff_Wm2_per_ppb: 0.562
+HG’-03:
+  biosphere_name: []
+  formula: CH3O(CF2CF2O)3CH3
+  lifetime_yr: 1.7
+  rad_eff_Wm2_per_ppb: 0.762
+Halon-1011:
+  biosphere_name: []
+  formula: CH2BrCl
+  lifetime_yr: 0.452
+  rad_eff_Wm2_per_ppb: 0.02
+Halon-1201:
+  biosphere_name: []
+  formula: CHBrF2
+  lifetime_yr: 4.9
+  rad_eff_Wm2_per_ppb: 0.152
+Halon-1202:
+  biosphere_name: []
+  formula: CBr2F2
+  lifetime_yr: 2.5
+  rad_eff_Wm2_per_ppb: 0.272
+Halon-1211:
+  biosphere_name: []
+  formula: CBrClF2
+  lifetime_yr: 16.0
+  rad_eff_Wm2_per_ppb: 0.3
+Halon-1301:
+  biosphere_name: []
+  formula: CBrF3
+  lifetime_yr: 72.0
+  rad_eff_Wm2_per_ppb: 0.299
+Halon-2301:
+  biosphere_name: []
+  formula: CH2BrCF3
+  lifetime_yr: 3.2
+  rad_eff_Wm2_per_ppb: 0.135
+Halon-2311:
+  biosphere_name: []
+  formula: CHBrClCF3
+  lifetime_yr: 1.0
+  rad_eff_Wm2_per_ppb: 0.133
+Halon-2401:
+  biosphere_name: []
+  formula: CHBrFCF3
+  lifetime_yr: 2.9
+  rad_eff_Wm2_per_ppb: 0.189
+Halon-2402:
+  biosphere_name: []
+  formula: CBrF2CBrF2
+  lifetime_yr: 28.0
+  rad_eff_Wm2_per_ppb: 0.312
+Heptacosafluoro- tributylamine:
+  biosphere_name: []
+  formula: N(CF2CF2CF2CF3)3
+  lifetime_yr: 1000.0
+  rad_eff_Wm2_per_ppb: 0.907
+Heptafluoroiso- butyronitrile:
+  biosphere_name: []
+  formula: (CF3)2CFCN
+  lifetime_yr: 34.5
+  rad_eff_Wm2_per_ppb: 0.248
+Hexafluoro- cyclobutene:
+  biosphere_name: []
+  formula: cyc(-CF=CFCF2CF2-)
+  lifetime_yr: 1.02
+  rad_eff_Wm2_per_ppb: 0.3
+Hexamethyl- cyclotrisiloxane:
+  biosphere_name: []
+  formula: C6H18O3Si3
+  lifetime_yr: 0.038
+  rad_eff_Wm2_per_ppb: 0.1
+Hexamethyl- disiloxane:
+  biosphere_name: []
+  formula: C6H18OSi2
+  lifetime_yr: 0.025
+  rad_eff_Wm2_per_ppb: 0.047
+Methane1:
+  biosphere_name: []
+  formula: CH4
+  lifetime_yr: 11.8
+  rad_eff_Wm2_per_ppb: 0.000388
+Methyl 2,2,2- trifluoroacetate:
+  biosphere_name: []
+  formula: CF3COOCH3
+  lifetime_yr: 1.0
+  rad_eff_Wm2_per_ppb: 0.158
+Methyl bromide:
+  biosphere_name: []
+  formula: CH3Br
+  lifetime_yr: 0.8
+  rad_eff_Wm2_per_ppb: 0.004
+Methyl chloride:
+  biosphere_name: []
+  formula: CH3Cl
+  lifetime_yr: 0.9
+  rad_eff_Wm2_per_ppb: 0.005
+Methyl chloroform:
+  biosphere_name: []
+  formula: CH3CCl3
+  lifetime_yr: 5.0
+  rad_eff_Wm2_per_ppb: 0.065
+Methyl vinyl ketone:
+  biosphere_name: []
+  formula: CH3COCH=CH2
+  lifetime_yr: 0.001
+  rad_eff_Wm2_per_ppb: 0.0
+Methyl-perfluoro- heptene-ethers:
+  biosphere_name: []
+  formula: CH3OC7F13
+  lifetime_yr: 0.304
+  rad_eff_Wm2_per_ppb: 0.27
+Methylene bromide:
+  biosphere_name: []
+  formula: CH2Br2
+  lifetime_yr: 0.411
+  rad_eff_Wm2_per_ppb: 0.01
+Methylene chloride:
+  biosphere_name: []
+  formula: CH2Cl2
+  lifetime_yr: 0.493
+  rad_eff_Wm2_per_ppb: 0.029
+Nitrogen trifluoride:
+  biosphere_name: []
+  formula: NF3
+  lifetime_yr: 569.0
+  rad_eff_Wm2_per_ppb: 0.204
+Nitrous oxide:
+  biosphere_name:
+  - Dinitrogen monoxide
+  formula: N2O
+  lifetime_yr: 109.0
+  rad_eff_Wm2_per_ppb: 0.0032
+  molar_mass_g_per_mol: 44.013
+Octafluoro- cyclopentene:
+  biosphere_name: []
+  formula: cyc(-CF=CFCF2CF2CF2-)
+  lifetime_yr: 1.1
+  rad_eff_Wm2_per_ppb: 0.246
+Octafluoro- oxolane:
+  biosphere_name: []
+  formula: c-C4F8O
+  lifetime_yr: 3000.0
+  rad_eff_Wm2_per_ppb: 0.463
+Octafluoro-1- butene:
+  biosphere_name: []
+  formula: CF3CF2CF=CF2
+  lifetime_yr: 0.016
+  rad_eff_Wm2_per_ppb: 0.019
+Octafluoro-2- buene:
+  biosphere_name: []
+  formula: CF3CF=CFCF3
+  lifetime_yr: 0.085
+  rad_eff_Wm2_per_ppb: 0.07
+Octamethylcyclo- tetrasiloxane:
+  biosphere_name: []
+  formula: C8H24O4Si4
+  lifetime_yr: 0.027
+  rad_eff_Wm2_per_ppb: 0.12
+Octamethyltri- siloxane:
+  biosphere_name: []
+  formula: C8H24O2Si3
+  lifetime_yr: 0.019
+  rad_eff_Wm2_per_ppb: 0.06
+PFC-1114:
+  biosphere_name: []
+  formula: CF2=CF2
+  lifetime_yr: 0.003
+  rad_eff_Wm2_per_ppb: 0.002
+PFC-116:
+  biosphere_name: []
+  formula: C2F6
+  lifetime_yr: 10000.0
+  rad_eff_Wm2_per_ppb: 0.261
+PFC-1216:
+  biosphere_name: []
+  formula: CF3CF=CF2
+  lifetime_yr: 0.015
+  rad_eff_Wm2_per_ppb: 0.013
+PFC-14:
+  biosphere_name: []
+  formula: CF4
+  lifetime_yr: 50000.0
+  rad_eff_Wm2_per_ppb: 0.099
+PFC-218:
+  biosphere_name: []
+  formula: C3F8
+  lifetime_yr: 2600.0
+  rad_eff_Wm2_per_ppb: 0.27
+PFC-31-10:
+  biosphere_name: []
+  formula: n-C4F10
+  lifetime_yr: 2600.0
+  rad_eff_Wm2_per_ppb: 0.369
+PFC-41-12:
+  biosphere_name: []
+  formula: n-C5F12
+  lifetime_yr: 4100.0
+  rad_eff_Wm2_per_ppb: 0.408
+PFC-51-14:
+  biosphere_name: []
+  formula: n-C6F14
+  lifetime_yr: 3100.0
+  rad_eff_Wm2_per_ppb: 0.449
+PFC-61-16:
+  biosphere_name: []
+  formula: n-C7F16
+  lifetime_yr: 3000.0
+  rad_eff_Wm2_per_ppb: 0.503
+PFC-71-18:
+  biosphere_name: []
+  formula: n-C8F18
+  lifetime_yr: 3000.0
+  rad_eff_Wm2_per_ppb: 0.558
+PFC-91-18:
+  biosphere_name: []
+  formula: C10F18
+  lifetime_yr: 2000.0
+  rad_eff_Wm2_per_ppb: 0.537
+PFC-C-318:
+  biosphere_name: []
+  formula: cyc(-CF2CF2CF2CF2-)
+  lifetime_yr: 3200.0
+  rad_eff_Wm2_per_ppb: 0.314
+PFPMIE:
+  biosphere_name: []
+  formula: CF3OCFCF3CF2OCF2OCF3
+  lifetime_yr: 800.0
+  rad_eff_Wm2_per_ppb: 0.64
+Pentadecafluoro- triethylamine:
+  biosphere_name: []
+  formula: N(C2F5)3
+  lifetime_yr: 1000.0
+  rad_eff_Wm2_per_ppb: 0.61
+Perfluoroethyl formate:
+  biosphere_name: []
+  formula: CF3CF2OCHO
+  lifetime_yr: 3.6
+  rad_eff_Wm2_per_ppb: 0.408
+Perfluorotri- pentylamine:
+  biosphere_name: []
+  formula: N(CF2CF2CF2CF2CF3)3
+  lifetime_yr: 1000.0
+  rad_eff_Wm2_per_ppb: 0.95
+Perfluorotripro- pylamine:
+  biosphere_name: []
+  formula: N(CF2CF2CF3)3
+  lifetime_yr: 1000.0
+  rad_eff_Wm2_per_ppb: 0.75
+Prop-2-enyl 2,2, 2-trifluoroacetate:
+  biosphere_name: []
+  formula: CF3COOCH2CH=CH2
+  lifetime_yr: 0.003
+  rad_eff_Wm2_per_ppb: 0.005
+Propane:
+  biosphere_name: []
+  formula: C3H8
+  lifetime_yr: 0.036
+  rad_eff_Wm2_per_ppb: 0.0
+Sulfuryl fluoride:
+  biosphere_name:
+  - Sulfuryl fluoride
+  formula: SO2F2
+  lifetime_yr: 36.0
+  rad_eff_Wm2_per_ppb: 0.211
+  molar_mass_g_per_mol: 102.054
+Sulphur hexafluoride:
+  biosphere_name: []
+  formula: SF6
+  lifetime_yr: 1000.0
+  rad_eff_Wm2_per_ppb: 0.567
+Tribromomethane:
+  biosphere_name: []
+  formula: CHBr3
+  lifetime_yr: 0.156
+  rad_eff_Wm2_per_ppb: 0.006
+Trifluromethyl- sulfur pentafluoride:
+  biosphere_name: []
+  formula: SF5CF3
+  lifetime_yr: 800.0
+  rad_eff_Wm2_per_ppb: 0.585
+Z-R316c:
+  biosphere_name: []
+  formula: ciscyc(-CClFCF2CF2CClF-)
+  lifetime_yr: 114.0
+  rad_eff_Wm2_per_ppb: 0.3
+i-HFE-7100:
+  biosphere_name: []
+  formula: (CF3)2CFCF2OCH3
+  lifetime_yr: 4.8
+  rad_eff_Wm2_per_ppb: 0.341
+i-HFE-7200:
+  biosphere_name: []
+  formula: (CF3)2CFCF2OCH2CH3
+  lifetime_yr: 0.63
+  rad_eff_Wm2_per_ppb: 0.216
+n-HFE-7100:
+  biosphere_name: []
+  formula: CF3CF2CF2CF2OCH3
+  lifetime_yr: 4.8
+  rad_eff_Wm2_per_ppb: 0.425
