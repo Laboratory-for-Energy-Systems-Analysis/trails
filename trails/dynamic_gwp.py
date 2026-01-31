@@ -9,8 +9,9 @@ from typing import Dict, Tuple, Optional, Union, Literal
 @dataclass(frozen=True)
 class WMGHGParams:
     """Well-mixed GHG treated as a linear, first-order box model (single lifetime)."""
-    lifetime_yr: float                 # tau
-    rad_eff_Wm2_per_ppb: float         # epsilon (W m-2 ppb-1)
+
+    lifetime_yr: float  # tau
+    rad_eff_Wm2_per_ppb: float  # epsilon (W m-2 ppb-1)
 
 
 @dataclass(frozen=True)
@@ -20,13 +21,16 @@ class CO2Params:
       - multi-exponential impulse response for concentration (airborne fraction)
       - logarithmic forcing formula
     """
+
     # Airborne fraction IRF: a0 + sum(ai * exp(-t/taui))
     a0: float
     a: Tuple[float, ...]
     tau: Tuple[float, ...]  # years
 
     # Forcing formula selection + baseline
-    forcing_formula: Literal["myhre1998", "etminan2016", "meinshausen2020"] = "meinshausen2020"
+    forcing_formula: Literal["myhre1998", "etminan2016", "meinshausen2020"] = (
+        "meinshausen2020"
+    )
     C0_ppm: float = 278.3  # baseline CO2 concentration (ppm)
 
 
@@ -50,6 +54,7 @@ def kg_to_ppb(mass_kg: np.ndarray, molar_mass_g_per_mol: float) -> np.ndarray:
     molar_mass_kg_per_mol = molar_mass_g_per_mol / 1000.0
     kg_per_ppb = N_AIR_MOL * 1e-9 * molar_mass_kg_per_mol
     return mass_kg / kg_per_ppb
+
 
 def kg_to_ppm_co2(mass_kg: np.ndarray) -> np.ndarray:
     """kg CO2 -> ppm CO2 (well-mixed), assuming instantaneous uniform mixing."""
@@ -112,6 +117,7 @@ def co2_airborne_fraction(dt: np.ndarray, p: CO2Params) -> np.ndarray:
         af += ai * np.exp(-dt / taui)
     return af
 
+
 def rf_co2_from_annual_emissions(
     years: np.ndarray,
     emissions_kg_per_yr: np.ndarray,
@@ -155,9 +161,9 @@ def rf_co2_from_annual_emissions(
     dt = np.maximum(dt, 0.0)
 
     # Concentration perturbation from pulse train
-    af = co2_airborne_fraction(dt, params)   # (T,T)
+    af = co2_airborne_fraction(dt, params)  # (T,T)
     af = af * mask
-    dC_t_ppm = af @ dC_ppm                   # (T,) or (T,N)
+    dC_t_ppm = af @ dC_ppm  # (T,) or (T,N)
 
     # Forcing (simple, robust default)
     # Treat perturbation as added on top of baseline C0

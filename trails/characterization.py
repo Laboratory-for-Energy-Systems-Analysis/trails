@@ -9,7 +9,12 @@ import numpy as np
 import sparse
 import xarray as xr
 
-from .dynamic_gwp import CO2Params, WMGHGParams, rf_co2_from_annual_emissions, rf_wmghg_from_annual_emissions
+from .dynamic_gwp import (
+    CO2Params,
+    WMGHGParams,
+    rf_co2_from_annual_emissions,
+    rf_wmghg_from_annual_emissions,
+)
 from .lcia import get_lcia_methods
 
 if TYPE_CHECKING:
@@ -222,7 +227,9 @@ def _load_ipcc_ar6_biosphere_params(
       spec["molar_mass_g_per_mol"] present for wmgHg
     """
     if params_path is None:
-        params_path = Path(__file__).resolve().parent / "data" / "ipcc_ar6_ghg_params.yaml"
+        params_path = (
+            Path(__file__).resolve().parent / "data" / "ipcc_ar6_ghg_params.yaml"
+        )
     else:
         params_path = Path(params_path)
 
@@ -253,12 +260,18 @@ def _load_ipcc_ar6_biosphere_params(
             tau = tuple(float(x) for x in cfe["tau"])
 
             params = CO2Params(
-                a0=a0, a=a, tau=tau,
+                a0=a0,
+                a=a,
+                tau=tau,
                 forcing_formula=str(forcing.get("formula", "myhre1998")),
                 C0_ppm=float(forcing.get("C0_ppm", 278.3)),
             )
 
-            spec = {"model": "co2", "params": params, "molar_mass_g_per_mol": molar_mass}
+            spec = {
+                "model": "co2",
+                "params": params,
+                "molar_mass_g_per_mol": molar_mass,
+            }
 
         elif model == "wmgHg":
             lifetime = p.get("lifetime_yr")
@@ -276,7 +289,11 @@ def _load_ipcc_ar6_biosphere_params(
             if molar_mass is None:
                 continue
 
-            spec = {"model": "wmgHg", "params": params, "molar_mass_g_per_mol": molar_mass}
+            spec = {
+                "model": "wmgHg",
+                "params": params,
+                "molar_mass_g_per_mol": molar_mass,
+            }
 
         else:
             # Unknown model tag
@@ -295,6 +312,7 @@ def _load_ipcc_ar6_biosphere_params(
                 mapping[str(name)] = spec_with_sign
 
     return mapping
+
 
 def build_instant_radiative_forcing(
     trails: Trails,
@@ -371,7 +389,9 @@ def build_instant_radiative_forcing(
 
     if not has_root:
         inv_dense = (
-            np.asarray(summed.todense()) if isinstance(summed, sparse.COO) else np.asarray(summed)
+            np.asarray(summed.todense())
+            if isinstance(summed, sparse.COO)
+            else np.asarray(summed)
         )
         rf = np.zeros_like(inv_dense, dtype=float)
         matched = 0
@@ -409,7 +429,10 @@ def build_instant_radiative_forcing(
         trails.instant_radiative_forcing = xr.DataArray(
             rf,
             dims=("flow", "year"),
-            coords={"flow": inv_ordered.coords["flow"], "year": inv_ordered.coords["year"]},
+            coords={
+                "flow": inv_ordered.coords["flow"],
+                "year": inv_ordered.coords["year"],
+            },
         )
         return trails.instant_radiative_forcing
 
@@ -492,7 +515,6 @@ def build_instant_radiative_forcing(
             data=np.array([], dtype=float),
             shape=(n_flow, n_year, n_root),
         )
-
 
     trails.instant_radiative_forcing = xr.DataArray(
         rf_sparse,
