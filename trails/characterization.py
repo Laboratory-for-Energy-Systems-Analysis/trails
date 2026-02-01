@@ -407,9 +407,9 @@ def build_instant_radiative_forcing(
                 )
 
         trails.instant_radiative_forcing = xr.DataArray(
-            rf,
-            dims=("flow", "year"),
-            coords={"flow": inv_ordered.coords["flow"], "year": inv_ordered.coords["year"]},
+            rf.T,
+            dims=("year", "flow"),
+            coords={"year": inv_ordered.coords["year"], "flow": inv_ordered.coords["flow"]},
         )
         return trails.instant_radiative_forcing
 
@@ -475,7 +475,7 @@ def build_instant_radiative_forcing(
         yy = np.repeat(np.arange(n_year, dtype=int), len(root_ids))
         rr = np.tile(root_ids.astype(int), n_year)
         ff = np.full(yy.shape, int(pos), dtype=int)
-        rf_coords.append(np.vstack([ff, yy, rr]))
+        rf_coords.append(np.vstack([yy, ff, rr]))
         rf_data.append(RF.reshape(-1))
 
     if rf_coords:
@@ -484,22 +484,22 @@ def build_instant_radiative_forcing(
         rf_sparse = sparse.COO(
             coords=coords,
             data=data,
-            shape=(n_flow, n_year, n_root),
+            shape=(n_year, n_flow, n_root),
         )
     else:
         rf_sparse = sparse.COO(
             coords=np.zeros((3, 0), dtype=int),
             data=np.array([], dtype=float),
-            shape=(n_flow, n_year, n_root),
+            shape=(n_year, n_flow, n_root),
         )
 
 
     trails.instant_radiative_forcing = xr.DataArray(
         rf_sparse,
-        dims=("flow", "year", "root activity"),
+        dims=("year", "flow", "root activity"),
         coords={
-            "flow": inv_ordered.coords["flow"],
             "year": inv_ordered.coords["year"],
+            "flow": inv_ordered.coords["flow"],
             "root activity": root_coord,
         },
     )
