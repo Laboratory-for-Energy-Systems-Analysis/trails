@@ -48,24 +48,54 @@ start_act_idx = next(iter(activity_indices.keys()))
 # Choose an LCIA method bundled with TRAILS
 method = get_lcia_method_names(ei_version="3.11")[0]
 
-# Run a temporal LCA (by default, computes scores and stores them on trails.scores)
-lca(
-    trails=trails,
+# Run temporal routing (builds the traversal graph)
+trails.temporal_routing(
     start_year=2030,
     start_act_idx=start_act_idx,
-    methods=[method],
     max_depth=2,
 )
 
-# If you set compute_score=False, use store_inventory=True and call
-# plot_temporal_scores(trails.characterized_inventory, ...)
+# Run temporal LCA (stores scores on trails.scores)
+lca(
+    trails=trails,
+    methods=[method],
+)
 
 # Plot temporal impact scores
-fig = plot_temporal_scores(trails.scores, trails, method_label=method)
+fig = plot_temporal_scores(trails, method_label=method)
 fig.show()
 ```
 
 ---
+
+
+## FaIR Climate Model Integration
+
+TRAILS can translate time-resolved inventories into radiative forcing using the
+FaIR climate model. The workflow runs a baseline FaIR scenario, then performs
+per-species perturbations derived from the Trails inventory. For each species,
+positive and negative emissions are treated separately to preserve long-lived
+CO2 tails for both uptake and release. Results are allocated to root activities
+using cumulative signed emissions for each (flow, root) pair and stored as
+``trails.instant_radiative_forcing``.
+
+Key components:
+
+* Emissions baseline from the bundled REMIND/FAIR IAMC CSV
+* Flow-to-species mapping via ``data/scenarios/fair_species_map.yaml``
+* Per-species FaIR runs with optional auto-scaling
+* Output in ``W/m2`` by year, flow, and root activity
+
+Example:
+
+```python
+from trails.fair_rf import run_fair_delta_rf
+
+rf = run_fair_delta_rf(
+    trails,
+    scenario="high-extension",
+)
+```
 
 ## Method Overview
 
@@ -164,8 +194,9 @@ exist in the package, the nearest available scenario year is used.
 
 **Do I need both scores and inventory?**  
 By default `lca()` computes scores and stores them on `trails.scores`. If you set
-`compute_score=False`, pass `store_inventory=True` and then use
-`trails.characterized_inventory` for plotting.
+`compute_score=False`, pass `store_inventory=True` and use
+`trails.characterized_inventory` for plotting. Remember to run
+`trails.temporal_routing(...)` before `lca()`.
 
 ## Limitations & Assumptions
 

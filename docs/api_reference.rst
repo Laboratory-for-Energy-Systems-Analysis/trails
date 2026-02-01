@@ -42,3 +42,9 @@ Plotting
 --------
 
 .. autofunction:: trails.plot_temporal_scores
+
+
+FaIR integration
+----------------
+
+.. autofunction:: trails.fair_rf.run_fair_delta_rf

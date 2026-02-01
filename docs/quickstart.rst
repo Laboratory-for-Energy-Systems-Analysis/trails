@@ -33,24 +33,47 @@ Run a temporal LCA
     # Choose an LCIA method bundled with TRAILS
     method = get_lcia_method_names(ei_version="3.11")[0]
 
-    # Run a temporal LCA
-    results = lca(
-        trails=trails,
+    # Run temporal routing (builds the traversal graph)
+    trails.temporal_routing(
         start_year=2030,
         start_act_idx=start_act_idx,
-        methods=[method],
         max_depth=2,
+        min_amount=1e-18,
+    )
+
+    # Run temporal LCA (stores scores on trails.scores)
+    lca(
+        trails=trails,
+        methods=[method],
     )
 
     # Plot temporal impact scores
-    fig = plot_temporal_scores(results, trails, method_label=method)
+    fig = plot_temporal_scores(trails, method_label=method)
     fig.show()
 
 What you get
 ------------
 
-The returned ``results`` dictionary contains:
+Temporal LCA results are stored on the Trails instance. Use ``trails.scores``
+for impact scores (when compute_score=True) and ``trails.inventory`` or
+``trails.characterized_inventory`` for time-resolved inventories.
 
-* ``results_by_solve_year``: diagnostics for each solved year
-* ``results_by_impact_year``: impact scores aggregated by impact year (ready for
-  plotting or further analysis)
+
+FaIR radiative forcing
+----------------------
+
+After running a temporal LCA, you can translate the inventory into radiative
+forcing using the FaIR climate model. This uses a baseline IAMC scenario and
+per-species perturbations derived from the Trails inventory.
+
+.. code-block:: python
+
+    from trails.fair_rf import run_fair_delta_rf
+
+    rf = run_fair_delta_rf(
+        trails,
+        scenario="high-extension",
+    )
+
+The resulting ``rf`` is stored on ``trails.instant_radiative_forcing`` with
+coords (year, flow, root activity).

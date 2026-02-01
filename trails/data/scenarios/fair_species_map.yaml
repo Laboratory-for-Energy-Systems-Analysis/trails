@@ -1,0 +1,28 @@
+species_map:
+  "Carbon dioxide, fossil": CO2 FFI
+  "Carbon dioxide, non-fossil": CO2 AFOLU
+  "Carbon dioxide, from soil or biomass stock": CO2 AFOLU
+  "Carbon dioxide, to soil or biomass stock": CO2 AFOLU
+  "Carbon dioxide, non-fossil, resource correction": CO2 AFOLU
+  "Carbon dioxide, in air": CO2 AFOLU
+  "Methane, fossil": CH4
+  "Methane, non-fossil": CH4
+  "Methane, from soil or biomass stock": CH4
+  "Dinitrogen monoxide": N2O
+  "Carbon monoxide, fossil": CO
+  "Carbon monoxide, non-fossil": CO
+  "Carbon monoxide, from soil or biomass stock": CO
+  "VOC, volatile organic compounds": VOC
+  "Nitric oxide": NOx
+  "Sulfur hexafluoride": SF6
+  "Tetrafluoromethane": CF4
+  "Hexafluoroethane": C2F6
+  "Trifluoromethane": HFC-23
+  "1,1,1,2-Tetrafluoroethane": HFC-134a
+  "Difluoromethane": HFC-32
+  "Pentafluoroethane": HFC-125
+
+signs:
+  "Carbon dioxide, in air": -1
+  "Carbon dioxide, to soil or biomass stock": -1
+  "Carbon dioxide, non-fossil, resource correction": -1

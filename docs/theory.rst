@@ -20,6 +20,10 @@ future years. Each frontier slice is solved with the corresponding
 :math:`A_t` and combined with :math:`B_t` to construct inventories for impact
 years.
 
+This traversal is performed by ``trails.temporal_routing(...)`` before running
+``trails.lca(...)``, which consumes the stored routing graph to build the
+time-resolved inventory and impact scores.
+
 The final output is a mapping from impact year to characterized impact scores
 (plus attribution to first-level suppliers when available).
 
@@ -51,11 +55,10 @@ remains consistent across time horizons.
 Impact attribution across time
 ------------------------------
 
-The core LCA routine produces two complementary views:
-
-* **results_by_solve_year**: diagnostic information about each solved year
-  (demand vectors, injected supply pulses, and metadata for debugging).
-* **results_by_impact_year**: the impact time series that you plot and analyze.
+The core LCA routine stores its outputs on the Trails instance. Use
+``trails.scores`` for impact time series (when compute_score=True) and
+``trails.inventory`` / ``trails.characterized_inventory`` for time-resolved
+inventories and attribution.
 
 Because impacts are booked in impact years, TRAILS provides a direct answer to
 questions such as:
@@ -63,3 +66,16 @@ questions such as:
 * *When do impacts occur?*
 * *Which upstream suppliers contribute most over time?*
 * *How do scenario transitions shift the impact profile?*
+
+
+FaIR climate model integration
+------------------------------
+
+TRAILS can translate time-resolved inventories into radiative forcing using the
+FaIR climate model. The method runs a baseline FaIR scenario from the bundled
+IAMC emissions data, then applies per-species perturbations derived from the
+Trails inventory. Positive and negative emissions are treated separately to
+preserve long-lived CO2 tails for both uptake and release. Results are
+allocated to root activities using cumulative signed emissions for each
+(flow, root) pair and stored as ``trails.instant_radiative_forcing`` with
+units of ``W/m2``.

@@ -62,24 +62,27 @@ The primary entry point is ``trails.lca.lca``:
 
     method = get_lcia_method_names(ei_version="3.11")[0]
 
-    results = lca(
-        trails=trails,
+    # Run temporal routing (builds the traversal graph)
+    trails.temporal_routing(
         start_year=2030,
         start_act_idx=start_act_idx,
-        methods=[method],
         amount=1.0,
         max_depth=3,
         min_amount=1e-18,
         show_progress=True,
         debug=False,
-        return_provenance=False,
-        use_temporal_distributions=True,
+        attribute_to_roots=True,
     )
 
-The ``results`` structure provides:
+    # Run temporal LCA (stores results on the Trails instance)
+    lca(
+        trails=trails,
+        methods=[method],
+    )
 
-* ``results_by_solve_year``: demand vectors and diagnostics per solved year
-* ``results_by_impact_year``: scores and attribution by impact year
+Temporal LCA results are stored on the Trails instance. Use ``trails.scores``
+for impact scores (when compute_score=True) and ``trails.inventory`` or
+``trails.characterized_inventory`` for time-resolved inventories.
 
 Temporal distributions
 ----------------------
@@ -91,21 +94,29 @@ effects into scalar multipliers for a static approximation:
 .. code-block:: python
 
     # Use full temporal distributions (default)
-    results = lca(
-        trails=trails,
+    trails.temporal_routing(
         start_year=2030,
         start_act_idx=start_act_idx,
-        methods=[method],
+        max_depth=3,
+        min_amount=1e-18,
         use_temporal_distributions=True,
+    )
+    lca(
+        trails=trails,
+        methods=[method],
     )
 
     # Collapse temporal distributions for a faster static view
-    results_static = lca(
-        trails=trails,
+    trails.temporal_routing(
         start_year=2030,
         start_act_idx=start_act_idx,
-        methods=[method],
+        max_depth=3,
+        min_amount=1e-18,
         use_temporal_distributions=False,
+    )
+    lca(
+        trails=trails,
+        methods=[method],
     )
 
 Plotting results
@@ -119,7 +130,6 @@ first-level suppliers:
     from trails import plot_temporal_scores
 
     fig = plot_temporal_scores(
-        results,
         trails,
         method_label=method,
         stacked=True,
@@ -130,28 +140,37 @@ first-level suppliers:
 Interpreting outputs
 --------------------
 
-``results_by_impact_year`` is structured as:
-
-.. code-block:: python
-
-    {
-        2030: {
-            "scores": 1.23,
-            "scores_by_first_level_child": {
-                42: 0.8,
-                77: 0.4,
-            },
-        },
-        2031: {...},
-    }
-
-Use ``scores`` for the total impact in a year, and
-``scores_by_first_level_child`` for attribution to first-level suppliers.
+Impact time series can be accessed from ``trails.scores`` (if computed) or
+from ``trails.characterized_inventory`` after characterization.
 
 Troubleshooting and diagnostics
 -------------------------------
 
 * If a requested year is not available in the data package, TRAILS will snap to
   the nearest available year and emit a warning.
-* Set ``debug=True`` to retain more diagnostic information in
-  ``results_by_solve_year`` and enable detailed logging.
+* Set ``debug=True`` to enable detailed logging and retain additional
+  diagnostics on the Trails instance.
+
+
+FaIR radiative forcing
+----------------------
+
+TRAILS integrates with the FaIR climate model to convert time-resolved
+inventories into radiative forcing. The workflow runs a baseline FaIR scenario
+from the bundled REMIND/FAIR emissions data, then performs per-species
+perturbation runs derived from the Trails inventory. Positive and negative
+emissions are treated separately to preserve long-lived CO2 tails for both
+uptake and release. Results are allocated to root activities using cumulative
+signed emissions for each (flow, root) pair.
+
+.. code-block:: python
+
+    from trails.fair_rf import run_fair_delta_rf
+
+    rf = run_fair_delta_rf(
+        trails,
+        scenario="high-extension",
+    )
+
+The output is stored on ``trails.instant_radiative_forcing`` with dims
+``(year, flow, root activity)``.

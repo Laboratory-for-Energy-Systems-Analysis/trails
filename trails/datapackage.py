@@ -7,7 +7,11 @@ from typing import Any, Dict, Iterable, Iterator, List, Mapping, Sequence, Tuple
 import numpy as np
 import sparse
 
-from .utils import _parse_float_or_none, _parse_int_or_none
+from .utils import (
+    _parse_float_or_none,
+    _parse_int_or_none,
+    _parse_intish_or_none as _parse_intish_or_none_utils,
+)
 from .temporal_distributions import TemporalExchange
 
 import logging
@@ -247,22 +251,8 @@ def _read_matrix_csv_fast(csv_path, kind="A"):
 
 
 def _parse_intish_or_none(value: object) -> int | None:
-    """Parse an integer from values that may be formatted as strings or floats.
-
-    :param value: Input value to parse.
-    :type value: object
-    :returns: Parsed integer or ``None`` for empty/invalid values.
-    :rtype: int | None
-    """
-    if value is None:
-        return None
-    s = str(value).strip()
-    if s == "":
-        return None
-    try:
-        return int(float(s))
-    except ValueError:
-        return None
+    """Parse an integer from values that may be formatted as strings or floats."""
+    return _parse_intish_or_none_utils(value)
 
 
 # ----------------------------------------------------------------------
@@ -936,63 +926,6 @@ def _read_matrix_csv_faster(csv_path: str, kind="A") -> pd.DataFrame:
             df[col] = df[col].fillna(0).astype(np.int64)
 
     return df
-
-
-def _parse_temporal_exchange_fields(
-    dist, loc, scale, off_min, off_max, amount_source
-) -> TemporalExchange | None:
-    # dist can be "" or 0 or NaN depending on your read path
-    if dist is None:
-        return None
-    if isinstance(dist, str) and dist.strip() == "":
-        return None
-    try:
-        dist_code = int(dist)
-    except Exception:
-        try:
-            dist_code = int(float(dist))
-        except Exception:
-            return None
-
-    # amount_source: only parse if column exists, else default
-    src = "port"
-    if amount_source is not None:
-        s = str(amount_source).strip().lower()
-        if s:
-            if s not in {"port", "matrix"}:
-                raise ValueError(f"Unknown temporal_amount_source: {s}")
-            src = s
-
-    # offsets
-    def _to_int(x, default=0):
-        if x is None:
-            return default
-        if isinstance(x, str) and x.strip() == "":
-            return default
-        try:
-            return int(x)
-        except Exception:
-            try:
-                return int(float(x))
-            except Exception:
-                return default
-
-    return TemporalExchange(
-        distribution=dist_code,
-        loc=(
-            None
-            if (loc is None or (isinstance(loc, float) and np.isnan(loc)))
-            else float(loc)
-        ),
-        scale=(
-            None
-            if (scale is None or (isinstance(scale, float) and np.isnan(scale)))
-            else float(scale)
-        ),
-        offset_min=_to_int(off_min, 0),
-        offset_max=_to_int(off_max, 0),
-        amount_source=src,
-    )
 
 
 def interpolate_to_annual(
