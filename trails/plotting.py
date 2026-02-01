@@ -2013,9 +2013,7 @@ def plot_temporal_scores(
     elif getattr(trails, "scores", None) is not None:
         results_by_year = trails.scores
     else:
-        raise ValueError(
-            "No characterized inventory or scores available for plotting."
-        )
+        raise ValueError("No characterized inventory or scores available for plotting.")
 
     return _plot_results_by_year(
         results_by_year=results_by_year,
