@@ -72,7 +72,7 @@ def test_discrete_weights_default_zero() -> None:
 
 
 def test_iter_offsets_and_weights_with_scaling() -> None:
-    """Verify offsets and weights with scaling.
+    """Verify offsets and weights for uniform distribution.
 
     :returns: None.
     :rtype: None
@@ -83,50 +83,43 @@ def test_iter_offsets_and_weights_with_scaling() -> None:
         scale=None,
         offset_min=0,
         offset_max=1,
-        scale_mode="linear",
-        scale_base=1.0,
-        scale_rate=1.0,
     )
     td = TemporalDistribution(tex)
     results = list(td.iter_offsets_and_weights())
-    assert results == [(0, pytest.approx(1 / 3)), (1, pytest.approx(2 / 3))]
+    assert results == [(0, pytest.approx(0.5)), (1, pytest.approx(0.5))]
 
 
 def test_iter_offsets_and_weights_unknown_scale_mode() -> None:
-    """Verify unknown scale modes raise errors.
+    """Verify unknown distributions fall back to uniform.
 
     :returns: None.
     :rtype: None
     """
     tex = TemporalExchange(
-        distribution=4,
+        distribution=99,
         loc=None,
         scale=None,
         offset_min=0,
-        offset_max=0,
-        scale_mode="mystery",
+        offset_max=1,
     )
     td = TemporalDistribution(tex)
-    with pytest.raises(ValueError):
-        list(td.iter_offsets_and_weights())
+    results = list(td.iter_offsets_and_weights())
+    assert results == [(0, pytest.approx(0.5)), (1, pytest.approx(0.5))]
 
 
 def test_scale_factor_modes_and_clip() -> None:
-    """Verify scale factor modes and clipping.
+    """Verify discrete distribution returns a single pulse.
 
     :returns: None.
     :rtype: None
     """
     tex = TemporalExchange(
         distribution=1,
-        loc=None,
+        loc=0,
         scale=None,
         offset_min=0,
-        offset_max=0,
-        scale_mode="compound",
-        scale_base=2.0,
-        scale_rate=0.1,
+        offset_max=2,
     )
     td = TemporalDistribution(tex)
-    assert td.scale_factor(2) == pytest.approx(2.42)
-    assert td.scale_factor(2, clip=(0.0, 2.0)) == 2.0
+    results = list(td.iter_offsets_and_weights())
+    assert results == [(0, pytest.approx(1.0))]

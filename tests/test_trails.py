@@ -100,14 +100,16 @@ def test_accumulate_temporalized_biosphere_inventory(example_trails: Trails) -> 
     :returns: None.
     :rtype: None
     """
-    inventory_by_year = {}
+    example_trails.reset_inventory()
     example_trails.accumulate_temporalized_biosphere_inventory(
         base_year=2005,
         supply_by_activity={0: 2.0},
-        inventory_by_year=inventory_by_year,
         use_temporal_distributions=False,
     )
-    assert np.isclose(inventory_by_year[2005][0], 30000.0)
+    inv = example_trails.finalize_inventory()
+    year_idx = int(np.where(inv.coords["year"].values == 2005)[0][0])
+    value = inv.data[0, 0, year_idx]
+    assert np.isclose(float(value), 30000.0)
 
 
 def test_temporal_traversal_basic(example_trails: Trails) -> None:

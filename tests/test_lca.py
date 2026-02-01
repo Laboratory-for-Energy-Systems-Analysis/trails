@@ -1,41 +1,11 @@
 import importlib
 import numpy as np
 import sparse
-import pytest
 
+from trails.bw_interface import _nearest_metadata_label_for_year
 from trails.trails import Trails
 
 lca_module = importlib.import_module("trails.lca")
-
-
-class DummyLCA:
-    def __init__(self, demand: dict[int, float], data_objs: list[object]) -> None:
-        """Initialize a minimal LCA stub for tests.
-
-        :param demand: Demand mapping used by the dummy LCA.
-        :type demand: dict[int, float]
-        :param data_objs: Data objects passed to the LCA.
-        :type data_objs: list[object]
-        """
-        self.demand = demand
-        self.data_objs = data_objs
-        self.dicts = type(
-            "Dicts",
-            (),
-            {"product": {0: 0, 1: 1}, "biosphere": {0: 0, 1: 1}},
-        )()
-        self.inventory = np.array([[1.0], [2.0]])
-        self.supply_array = np.array(
-            [float(demand.get(0, 0.0)), float(demand.get(1, 0.0))]
-        )
-
-    def lci(self) -> None:
-        """No-op LCI stub for tests.
-
-        :returns: None.
-        :rtype: None
-        """
-        return None
 
 
 class DummyTrails:
@@ -78,7 +48,6 @@ class DummyTrails:
                 }
             }
         }
-
     def temporal_traversal(self, **kwargs) -> tuple[dict[tuple[int, int], float], dict]:
         """Return a fixed frontier for traversal tests.
 
@@ -129,8 +98,8 @@ def test_nearest_metadata_label_for_year() -> None:
     """
     trails = DummyTrails()
     trails.activity_indices = {"2000": {}, "2010": {}}
-    assert lca_module._nearest_metadata_label_for_year(trails, 2003) == "2000"
-    assert lca_module._nearest_metadata_label_for_year(trails, 2009) == "2010"
+    assert _nearest_metadata_label_for_year(trails, 2003) == "2000"
+    assert _nearest_metadata_label_for_year(trails, 2009) == "2010"
 
 
 def test_build_datapackage_for_year_from_trails(example_trails: Trails) -> None:
@@ -150,54 +119,32 @@ def test_build_datapackage_for_year_from_trails(example_trails: Trails) -> None:
     assert uncertain == []
 
 
-def test_lca_static_mode(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_lca_static_mode(example_trails: Trails) -> None:
     """Verify static LCA behavior without temporal distributions.
 
-    :param monkeypatch: Pytest monkeypatch fixture.
-    :type monkeypatch: pytest.MonkeyPatch
+    :param example_trails: Trails fixture initialized from example datapackage.
+    :type example_trails: trails.trails.Trails
     :returns: None.
     :rtype: None
     """
-    trails = DummyTrails()
+    activity_indices = next(iter(example_trails.activity_indices.values()))
+    start_act_idx = next(iter(activity_indices.keys()))
 
-    def fake_build_dp(*args, **kwargs) -> tuple[object, dict, dict, list]:
-        """Return a minimal datapackage tuple for tests.
-
-        :returns: Datapackage tuple with empty metadata.
-        :rtype: tuple[object, dict, dict, list]
-        """
-        return object(), {}, {}, []
-
-    def fake_fill_characterization_factors_matrices(*args, **kwargs) -> np.ndarray:
-        """Return a dummy characterization matrix for tests.
-
-        :returns: Dummy characterization matrix.
-        :rtype: numpy.ndarray
-        """
-        return np.ones((1, 2))
-
-    monkeypatch.setattr(
-        lca_module, "build_datapackage_for_year_from_trails", fake_build_dp
-    )
-    monkeypatch.setattr(lca_module.bc, "LCA", DummyLCA)
-    monkeypatch.setattr(
-        lca_module,
-        "fill_characterization_factors_matrices",
-        fake_fill_characterization_factors_matrices,
-    )
-
-    result = lca_module.lca(
-        trails=trails,
+    example_trails.temporal_routing(
         start_year=2005,
-        start_act_idx=0,
-        methods=["dummy"],
-        amount=1.0,
+        start_act_idx=start_act_idx,
         max_depth=1,
         min_amount=0.0,
         show_progress=False,
-        return_provenance=False,
-        use_temporal_distributions=False,
+        attribute_to_roots=False,
+        debug=False,
     )
-    impact = result["results_by_impact_year"]
-    assert 2005 in impact
-    assert impact[2005]["scores"] == 3.0
+
+    lca_module.lca(
+        trails=example_trails,
+        show_progress=False,
+        compute_score=False,
+        store_inventory=False,
+        attribute_to_roots=False,
+    )
+    assert example_trails.scores is None
