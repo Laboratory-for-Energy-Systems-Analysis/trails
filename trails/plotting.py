@@ -3,6 +3,7 @@ import json
 import os
 
 import math
+import bisect
 
 from collections import defaultdict
 import numpy as np
@@ -274,12 +275,14 @@ def plot_temporal_graph(
     band_label_chars: int = 80,
     band_label_offset_px: float | None = None,
     auto_depth_scale: bool = True,
+    edge_weight: Literal["amount", "score"] = "amount",
+    node_scores: dict[tuple, float] | None = None,
 ) -> str:
     """Render the routing graph with pyvis.
 
     :param trails: Trails instance with a populated graph.
     :type trails: Trails
-    :param min_edge_amount: Minimum absolute edge amount to include.
+    :param min_edge_amount: Minimum absolute edge value to include (amount or score).
     :type min_edge_amount: float
     :param notebook: Whether to render for Jupyter notebooks.
     :type notebook: bool
@@ -315,6 +318,10 @@ def plot_temporal_graph(
     :type band_label_offset_px: float | None
     :param auto_depth_scale: Increase depth spacing based on band count.
     :type auto_depth_scale: bool
+    :param edge_weight: Whether to size edges by technosphere amount or score.
+    :type edge_weight: Literal["amount", "score"]
+    :param node_scores: Optional node score mapping used when edge_weight="score".
+    :type node_scores: dict[tuple, float] | None
     :returns: Output filename.
     :rtype: str
     """
@@ -341,15 +348,52 @@ def plot_temporal_graph(
             "Install it with `pip install pyvis`."
         ) from exc
 
+    def _node_score(node: object) -> float:
+        if not node_scores:
+            return 0.0
+        if node in node_scores:
+            return float(node_scores.get(node, 0.0))
+        data = G.nodes.get(node, {})
+        year = int(data.get("year", -1))
+        act = int(data.get("act_idx", -1))
+        return float(node_scores.get((year, act), 0.0))
+
+    edge_value_map: dict[tuple, float] = {}
+    if edge_weight == "score":
+        if node_scores is None:
+            raise ValueError(
+                "edge_weight='score' requires node_scores (use score_temporal_graph_nodes)."
+            )
+        incoming_abs: dict[object, float] = defaultdict(float)
+        for u, v, d in G.edges(data=True):
+            amt = float(d.get("amount", 0.0))
+            incoming_abs[v] += abs(amt)
+        for u, v, d in G.edges(data=True):
+            amt = float(d.get("amount", 0.0))
+            denom = float(incoming_abs.get(v, 0.0))
+            child_score = _node_score(v)
+            if denom > 0.0:
+                edge_value_map[(u, v)] = child_score * (abs(amt) / denom)
+            else:
+                edge_value_map[(u, v)] = 0.0
+
     H = G.copy()
 
     # Filter edges by amount
     if min_edge_amount > 0.0:
-        edges = [
-            (u, v)
-            for u, v, d in H.edges(data=True)
-            if abs(float(d.get("amount", 0.0))) >= float(min_edge_amount)
-        ]
+        if edge_weight == "score":
+            edges = [
+                (u, v)
+                for u, v in H.edges()
+                if abs(float(edge_value_map.get((u, v), 0.0)))
+                >= float(min_edge_amount)
+            ]
+        else:
+            edges = [
+                (u, v)
+                for u, v, d in H.edges(data=True)
+                if abs(float(d.get("amount", 0.0))) >= float(min_edge_amount)
+            ]
         H = H.edge_subgraph(edges).copy()
 
     # Relabel tuple node ids to strings for pyvis compatibility
@@ -556,10 +600,17 @@ def plot_temporal_graph(
                 node_payload_copy.pop("id", None)
                 net.add_node(n_id, **node_payload_copy)
 
-        def _edge_title(src_label: str, dst_label: str, amount: float) -> str:
+        def _edge_title(
+            src_label: str,
+            dst_label: str,
+            amount: float,
+            score: float | None = None,
+        ) -> str:
             src = src_label.split("\n", 1)[0]
             dst = dst_label.split("\n", 1)[0]
-            return f"{src} → {dst} | amount={amount:.3g}"
+            if score is None:
+                return f"{src} → {dst} | amount={amount:.3g}"
+            return f"{src} → {dst} | amount={amount:.3g} | score={score:.3g}"
 
         if show_year_labels:
             unique_years = sorted({int(y) for y in years})
@@ -579,12 +630,23 @@ def plot_temporal_graph(
             src_depth = int(H.nodes[u].get("depth", 0))
             dst_depth = int(H.nodes[v].get("depth", 0))
             hidden_edge = (src_depth > initial_depth) or (dst_depth > initial_depth)
+            edge_amount = float(d.get("amount", 0.0))
+            edge_value = (
+                float(edge_value_map.get((u, v), 0.0))
+                if edge_weight == "score"
+                else edge_amount
+            )
             edge_payload = {
                 "from": src,
                 "to": dst,
-                "value": float(d.get("amount", 0.0)),
+                "value": float(edge_value),
                 "color": _edge_color(u, v),
-                "title": _edge_title(src, dst, float(d.get("amount", 0.0))),
+                "title": _edge_title(
+                    src,
+                    dst,
+                    float(edge_amount),
+                    float(edge_value) if edge_weight == "score" else None,
+                ),
                 "depth_from": src_depth,
                 "depth_to": dst_depth,
             }
@@ -637,21 +699,39 @@ def plot_temporal_graph(
                 node_payload_copy.pop("id", None)
                 net.add_node(n_id, **node_payload_copy)
 
-        def _edge_title(src_label: str, dst_label: str, amount: float) -> str:
+        def _edge_title(
+            src_label: str,
+            dst_label: str,
+            amount: float,
+            score: float | None = None,
+        ) -> str:
             src = src_label.split("\n", 1)[0]
             dst = dst_label.split("\n", 1)[0]
-            return f"{src} → {dst} | amount={amount:.3g}"
+            if score is None:
+                return f"{src} → {dst} | amount={amount:.3g}"
+            return f"{src} → {dst} | amount={amount:.3g} | score={score:.3g}"
 
         for u, v, d in H.edges(data=True):
             src_depth = int(H.nodes[u].get("depth", 0))
             dst_depth = int(H.nodes[v].get("depth", 0))
             hidden_edge = (src_depth > initial_depth) or (dst_depth > initial_depth)
+            edge_amount = float(d.get("amount", 0.0))
+            edge_value = (
+                float(edge_value_map.get((u, v), 0.0))
+                if edge_weight == "score"
+                else edge_amount
+            )
             edge_payload = {
                 "from": u,
                 "to": v,
-                "value": float(d.get("amount", 0.0)),
+                "value": float(edge_value),
                 "color": _edge_color(u, v),
-                "title": _edge_title(u, v, float(d.get("amount", 0.0))),
+                "title": _edge_title(
+                    u,
+                    v,
+                    float(edge_amount),
+                    float(edge_value) if edge_weight == "score" else None,
+                ),
                 "depth_from": src_depth,
                 "depth_to": dst_depth,
             }
@@ -2602,6 +2682,319 @@ def plot_temporal_sankey(
     )
 
     return fig
+
+
+def build_sankey_arrays_from_tree(
+    tree: dict[str, Any],
+    *,
+    label_fn: Callable[[dict[str, Any]], str] | None = None,
+    edge_weight: Literal["amount", "score"] = "score",
+    node_scores: dict[tuple[int, int], float] | None = None,
+    trails: Trails | None = None,
+    score_years: list[int] | None = None,
+) -> dict[str, list]:
+    """Convert a nested tree from lca.build_temporal_sankey_tree into Sankey arrays.
+
+    :param tree: Nested tree dict with "node" and "children" entries.
+    :type tree: dict
+    :param label_fn: Optional function to build labels from a node payload.
+    :type label_fn: callable | None
+    :param edge_weight: Use "amount" (technosphere) or "score" (characterized).
+    :type edge_weight: Literal["amount", "score"]
+    :param node_scores: Optional mapping (year, act_idx) -> characterized score.
+    :type node_scores: dict[tuple[int, int], float] | None
+    :param trails: Trails instance used to derive node_scores from trails.scores.
+    :type trails: Trails | None
+    :param score_years: Optional list of years to align scores to node years.
+    :type score_years: list[int] | None
+    :returns: Dict with "labels", "sources", "targets", "values", "node_meta".
+    :rtype: dict
+    """
+    if not tree or "node" not in tree:
+        raise ValueError("Tree is empty or missing 'node' key.")
+
+    def _default_label(node: dict[str, Any]) -> str:
+        name = node.get("name") or f"Activity {node.get('act_idx')}"
+        rp = node.get("reference_product") or ""
+        loc = node.get("location") or ""
+        label = name
+        if rp:
+            label += f" | {rp}"
+        if loc:
+            label += f" ({loc})"
+        return label
+
+    label_fn = label_fn or _default_label
+
+    node_index: dict[Any, int] = {}
+    node_meta: list[dict[str, Any]] = []
+    labels: list[str] = []
+    sources: list[int] = []
+    targets: list[int] = []
+    values: list[float] = []
+    edge_scores: list[float] = []
+
+    def _node_key(node_payload: dict[str, Any]) -> Any:
+        key = node_payload.get("key")
+        if key is None:
+            return (
+                node_payload.get("year"),
+                node_payload.get("depth"),
+                node_payload.get("act_idx"),
+            )
+        return key
+
+    if edge_weight == "score":
+        if node_scores is None:
+            if trails is None:
+                raise ValueError(
+                    "edge_weight='score' requires node_scores or a Trails instance."
+                )
+            node_scores = _node_scores_from_trails(trails)
+        node_scores = node_scores or {}
+
+        # Determine if node_scores uses graph node keys or (year, act_idx)
+        uses_node_keys = False
+        if node_scores:
+            first_key = next(iter(node_scores.keys()))
+            if isinstance(first_key, tuple) and len(first_key) >= 4:
+                uses_node_keys = True
+
+        if not uses_node_keys:
+            if score_years is None:
+                if trails is None:
+                    raise ValueError(
+                        "score_years is required when trails is not provided."
+                    )
+                score_years = _score_years_from_trails(trails)
+            score_years = [int(y) for y in score_years]
+            score_years.sort()
+
+    incoming_abs: dict[Any, float] = defaultdict(float)
+    year_map: dict[int, int] = {}
+
+    def _precompute_incoming(subtree: dict[str, Any]) -> None:
+        for child in subtree.get("children", []):
+            edge_amt = float(child.get("edge_amount") or 0.0)
+            child_payload = child.get("node") or {}
+            key = _node_key(child_payload)
+            incoming_abs[key] += abs(edge_amt)
+            _precompute_incoming(child)
+
+    if edge_weight == "score":
+        _precompute_incoming(tree)
+        if score_years:
+            for node in _iter_tree_nodes(tree):
+                y = int(node.get("year"))
+                if y in year_map:
+                    continue
+                year_map[y] = _nearest_year(score_years, y)
+
+    def _get_node_id(node_payload: dict[str, Any]) -> int:
+        key = _node_key(node_payload)
+        if key in node_index:
+            return node_index[key]
+        idx = len(node_index)
+        node_index[key] = idx
+        node_meta.append(node_payload)
+        labels.append(label_fn(node_payload))
+        return idx
+
+    def _walk(subtree: dict[str, Any]) -> None:
+        parent_payload = subtree["node"]
+        parent_id = _get_node_id(parent_payload)
+        for child in subtree.get("children", []):
+            edge_amt = float(child.get("edge_amount") or 0.0)
+            child_payload = child.get("node") or {}
+            child_id = _get_node_id(child_payload)
+            sources.append(parent_id)
+            targets.append(child_id)
+            if edge_weight == "score":
+                year = int(child_payload.get("year"))
+                act_idx = int(child_payload.get("act_idx"))
+                node_key = child_payload.get("key")
+                if node_key in node_scores:
+                    child_score = float(node_scores.get(node_key, 0.0))
+                else:
+                    year_lookup = year_map.get(year, year)
+                    child_score = float(node_scores.get((year_lookup, act_idx), 0.0))
+                denom = float(incoming_abs.get(_node_key(child_payload), 0.0))
+                if denom > 0.0:
+                    edge_score = child_score * (abs(edge_amt) / denom)
+                else:
+                    edge_score = 0.0
+                edge_scores.append(edge_score)
+                values.append(abs(edge_score))
+            else:
+                values.append(abs(edge_amt))
+                edge_scores.append(float(edge_amt))
+            _walk(child)
+
+    _walk(tree)
+
+    return {
+        "labels": labels,
+        "sources": sources,
+        "targets": targets,
+        "values": values,
+        "node_meta": node_meta,
+        "edge_scores": edge_scores,
+    }
+
+
+def _iter_tree_nodes(tree: dict[str, Any]) -> list[dict[str, Any]]:
+    """Return a flat list of node payloads from a Sankey tree."""
+    nodes: list[dict[str, Any]] = []
+
+    def _walk(subtree: dict[str, Any]) -> None:
+        nodes.append(subtree["node"])
+        for child in subtree.get("children", []):
+            _walk(child)
+
+    _walk(tree)
+    return nodes
+
+
+def _nearest_year(years_sorted: list[int], target: int) -> int:
+    """Return nearest year from a sorted list."""
+    if not years_sorted:
+        return int(target)
+    i = bisect.bisect_left(years_sorted, target)
+    if i <= 0:
+        return years_sorted[0]
+    if i >= len(years_sorted):
+        return years_sorted[-1]
+    before = years_sorted[i - 1]
+    after = years_sorted[i]
+    if abs(target - before) <= abs(after - target):
+        return before
+    return after
+
+
+def _score_years_from_trails(trails: Trails) -> list[int]:
+    """Return available score years from trails.scores or characterized inventory."""
+    scores = getattr(trails, "scores", None)
+    if scores is not None and "year" in scores.coords:
+        return [int(y) for y in scores.coords["year"].values.tolist()]
+    characterized = getattr(trails, "characterized_inventory", None)
+    if characterized is not None and "year" in characterized.coords:
+        return [int(y) for y in characterized.coords["year"].values.tolist()]
+    return []
+
+
+def _node_scores_from_trails(trails: Trails) -> dict[tuple[int, int], float]:
+    """Build (year, act_idx) -> score mapping from trails.scores."""
+    scores = getattr(trails, "scores", None)
+    if scores is None:
+        characterized = getattr(trails, "characterized_inventory", None)
+        if characterized is None:
+            raise ValueError(
+                "No scores available. Run lca(..., compute_score=True) or "
+                "build characterized_inventory first."
+            )
+        return _node_scores_from_characterized_inventory(characterized)
+    if "activity" not in scores.dims or "year" not in scores.dims:
+        raise ValueError("trails.scores must include 'activity' and 'year' dims.")
+
+    if "root activity" in scores.dims:
+        scores = scores.sum(dim="root activity")
+
+    years = scores.coords["year"].values
+    activities = scores.coords["activity"].values
+
+    data = scores.data
+    out: dict[tuple[int, int], float] = {}
+
+    if isinstance(data, sparse.COO):
+        coords = data.coords
+        vals = data.data
+        for ai, yi, v in zip(coords[0], coords[1], vals):
+            if v == 0.0:
+                continue
+            year = int(years[int(yi)])
+            act = int(activities[int(ai)])
+            out[(year, act)] = out.get((year, act), 0.0) + float(v)
+        return out
+
+    dense = np.asarray(data)
+    if dense.ndim != 2:
+        raise ValueError("Expected 2D scores array after root aggregation.")
+    idxs = np.nonzero(dense)
+    for ai, yi in zip(idxs[0], idxs[1]):
+        v = float(dense[ai, yi])
+        if v == 0.0:
+            continue
+        year = int(years[int(yi)])
+        act = int(activities[int(ai)])
+        out[(year, act)] = out.get((year, act), 0.0) + v
+
+    return out
+
+
+def _node_scores_from_characterized_inventory(
+    characterized_inventory: xr.DataArray,
+) -> dict[tuple[int, int], float]:
+    """Build (year, act_idx) -> score mapping from characterized inventory."""
+    if "activity" not in characterized_inventory.dims:
+        raise ValueError("characterized_inventory must include an 'activity' dimension.")
+    if "year" not in characterized_inventory.dims:
+        raise ValueError("characterized_inventory must include a 'year' dimension.")
+    if "flow" not in characterized_inventory.dims:
+        raise ValueError("characterized_inventory must include a 'flow' dimension.")
+
+    data = characterized_inventory.data
+    years = characterized_inventory.coords["year"].values
+    activities = characterized_inventory.coords["activity"].values
+
+    out: dict[tuple[int, int], float] = {}
+
+    if "root activity" in characterized_inventory.dims:
+        if isinstance(data, sparse.COO):
+            coords = data.coords
+            vals = data.data
+            for ai, fi, yi, ri, v in zip(coords[0], coords[1], coords[2], coords[3], vals):
+                if v == 0.0:
+                    continue
+                year = int(years[int(yi)])
+                act = int(activities[int(ai)])
+                out[(year, act)] = out.get((year, act), 0.0) + float(v)
+        else:
+            dense = np.asarray(data)
+            dense = dense.sum(axis=3)
+            idxs = np.nonzero(dense)
+            for ai, fi, yi in zip(idxs[0], idxs[1], idxs[2]):
+                v = float(dense[ai, fi, yi])
+                if v == 0.0:
+                    continue
+                year = int(years[int(yi)])
+                act = int(activities[int(ai)])
+                out[(year, act)] = out.get((year, act), 0.0) + v
+        return out
+
+    if isinstance(data, sparse.COO):
+        coords = data.coords
+        vals = data.data
+        for ai, fi, yi, v in zip(coords[0], coords[1], coords[2], vals):
+            if v == 0.0:
+                continue
+            year = int(years[int(yi)])
+            act = int(activities[int(ai)])
+            out[(year, act)] = out.get((year, act), 0.0) + float(v)
+        return out
+
+    dense = np.asarray(data)
+    if dense.ndim != 3:
+        raise ValueError("Expected 3D characterized inventory after root aggregation.")
+    idxs = np.nonzero(dense)
+    for ai, fi, yi in zip(idxs[0], idxs[1], idxs[2]):
+        v = float(dense[ai, fi, yi])
+        if v == 0.0:
+            continue
+        year = int(years[int(yi)])
+        act = int(activities[int(ai)])
+        out[(year, act)] = out.get((year, act), 0.0) + v
+
+    return out
 
 
 def _select_depths(

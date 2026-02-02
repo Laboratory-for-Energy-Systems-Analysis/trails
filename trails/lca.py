@@ -596,3 +596,351 @@ def lca(
         build_characterized_inventory(
             trails=trails, methods=methods, char_cache=_CHAR_CACHE
         )
+
+
+def build_temporal_sankey_tree(
+    trails: Trails,
+    *,
+    root_year: int | None = None,
+    root_act_idx: int | None = None,
+    max_depth: int | None = None,
+    min_amount: float = 0.0,
+    sort_children: bool = True,
+) -> dict[str, Any]:
+    """Build a nested dict from the temporal routing graph for Sankey-style plots.
+
+    The returned structure is a recursive tree:
+        {
+          "node": {...},
+          "children": [
+              {"edge_amount": float, "node": {...}, "children": [...]},
+              ...
+          ],
+        }
+
+    Nodes are taken from ``trails.graph`` built by ``trails.temporal_routing()``.
+
+    :param trails: Trails instance with a populated temporal routing graph.
+    :type trails: Trails
+    :param root_year: Optional root year override (defaults to routing params).
+    :type root_year: int | None
+    :param root_act_idx: Optional root activity override (defaults to routing params).
+    :type root_act_idx: int | None
+    :param max_depth: Optional depth cutoff (inclusive of root at depth 0).
+    :type max_depth: int | None
+    :param min_amount: Filter edges with abs(amount) below this threshold.
+    :type min_amount: float
+    :param sort_children: Sort children by abs(edge_amount) descending.
+    :type sort_children: bool
+    :returns: Nested Sankey-ready tree dict.
+    :rtype: dict
+    """
+    graph = getattr(trails, "graph", None)
+    if graph is None:
+        raise RuntimeError(
+            "Temporal routing graph missing; run trails.temporal_routing(...) first."
+        )
+
+    routing_params = getattr(trails, "_routing_params", {}) or {}
+    if root_year is None:
+        if "start_year" not in routing_params:
+            raise RuntimeError(
+                "Root year not provided and routing params missing; "
+                "rerun temporal_routing or pass root_year."
+            )
+        root_year = int(routing_params["start_year"])
+    if root_act_idx is None:
+        if "start_act_idx" not in routing_params:
+            raise RuntimeError(
+                "Root activity not provided and routing params missing; "
+                "rerun temporal_routing or pass root_act_idx."
+            )
+        root_act_idx = int(routing_params["start_act_idx"])
+
+    min_amount = float(min_amount)
+
+    root_key = None
+    for node, data in graph.nodes(data=True):
+        if int(data.get("depth", -1)) != 0:
+            continue
+        if int(data.get("year", -9999)) != int(root_year):
+            continue
+        if int(data.get("act_idx", -1)) != int(root_act_idx):
+            continue
+        root_key = node
+        break
+
+    if root_key is None:
+        raise ValueError(
+            "Root node not found in temporal routing graph for "
+            f"(year={int(root_year)}, act_idx={int(root_act_idx)})."
+        )
+
+    def _node_payload(node_key: tuple) -> dict[str, Any]:
+        data = graph.nodes[node_key]
+        return {
+            "key": node_key,
+            "year": int(data.get("year")),
+            "depth": int(data.get("depth")),
+            "act_idx": int(data.get("act_idx")),
+            "name": data.get("name") or "",
+            "reference_product": data.get("reference_product") or "",
+            "location": data.get("location") or "",
+            "amount": float(data.get("amount") or 0.0),
+            "frontier_amount": float(data.get("frontier_amount") or 0.0),
+            "direct_bio_amount": float(data.get("direct_bio_amount") or 0.0),
+        }
+
+    def _build_tree(node_key: tuple) -> dict[str, Any]:
+        node_data = graph.nodes[node_key]
+        depth = int(node_data.get("depth"))
+        if max_depth is not None and depth >= int(max_depth):
+            return {"node": _node_payload(node_key), "children": []}
+
+        children = []
+        for child in graph.successors(node_key):
+            edge_data = graph.edges[node_key, child]
+            edge_amt = float(edge_data.get("amount") or 0.0)
+            if abs(edge_amt) < min_amount:
+                continue
+            child_tree = _build_tree(child)
+            children.append(
+                {
+                    "edge_amount": edge_amt,
+                    "node": child_tree["node"],
+                    "children": child_tree["children"],
+                }
+            )
+
+        if sort_children:
+            children.sort(key=lambda c: abs(c["edge_amount"]), reverse=True)
+
+        return {"node": _node_payload(node_key), "children": children}
+
+    return _build_tree(root_key)
+
+
+def score_temporal_graph_nodes(
+    trails: Trails,
+    methods: List[str],
+    *,
+    min_amount: float = 0.0,
+    show_progress: bool = True,
+    ei_version: str = "3.11",
+) -> dict[tuple, float]:
+    """Score nodes in the temporal routing graph for Sankey-style weighting.
+
+    Rules:
+      - Non-frontier nodes: score direct biosphere only.
+      - Frontier nodes: run a full LCA solve for that node-year demand.
+
+    This function does not require calling ``trails.lca()`` beforehand.
+    It only requires a populated routing graph and valid matrices in ``trails``.
+
+    Node scores are keyed by the graph node key (tuple used by networkx).
+    """
+    graph = getattr(trails, "graph", None)
+    if graph is None:
+        raise RuntimeError(
+            "Temporal routing graph missing; run trails.temporal_routing(...) first."
+        )
+
+    if trails.A is None or trails.B is None:
+        raise RuntimeError("Trails matrices missing; run setup before scoring.")
+
+    cf = get_cf_vector(
+        trails=trails,
+        methods=methods,
+        char_cache=_CHAR_CACHE,
+        debug=bool(getattr(trails, "debug", False)),
+        ei_version=ei_version,
+    )
+
+    min_amount = float(min_amount)
+
+    # Caches
+    dp_cache: Dict[tuple, Any] = {}
+    char_row_cache: dict[int, np.ndarray] = {}  # t -> per-activity coeffs
+    has_bio_cache: dict[tuple[int, int], bool] = {}
+    supply_cache: dict[tuple[int, int], dict[int, float]] = {}
+
+    def _char_row_for_year(year: int) -> np.ndarray:
+        context = trails._get_scenario_context(int(year))
+        if context is None:
+            return np.zeros(int(trails.A.shape[1]), dtype=np.float64)
+        _scenario_year, _label, t = context
+        if t in char_row_cache:
+            return char_row_cache[t]
+        B_t = trails.B[t, :, :]
+        # B_t is (activity, flow); multiply by CF (flow) -> per-activity coefficients
+        coeff = B_t @ cf  # type: ignore[operator]
+        coeff = np.asarray(coeff, dtype=np.float64)
+        char_row_cache[t] = coeff
+        return coeff
+
+    def _score_direct_td(year: int, act: int, amount: float) -> float:
+        if amount == 0.0:
+            return 0.0
+
+        # Intercept score appends to avoid mutating trails.scores
+        total = 0.0
+        original_append = trails._append_score_entry
+        original_append_bulk = getattr(trails, "_append_scores_bulk", None)
+
+        def _capture_append(
+            act_idx: int,
+            year_val: int,
+            value: float,
+            *,
+            root_activity: int | None = None,
+        ) -> None:
+            nonlocal total
+            total += float(value)
+
+        def _capture_append_bulk(
+            act_idx: int,
+            year_idx: int,
+            value: float,
+            *,
+            root_activity: int | None = None,
+        ) -> None:
+            nonlocal total
+            total += float(value)
+
+        trails._append_score_entry = _capture_append  # type: ignore[assignment]
+        if original_append_bulk is not None:
+            trails._append_scores_bulk = _capture_append_bulk  # type: ignore[assignment]
+
+        try:
+            trails.accumulate_temporalized_biosphere_score(
+                base_year=int(year),
+                supply_by_activity={int(act): float(amount)},
+                cf=cf,
+                min_amount=min_amount,
+                store_activity=None,
+                use_temporal_distributions=True,
+                debug=bool(getattr(trails, "debug", False)),
+            )
+        finally:
+            trails._append_score_entry = original_append  # type: ignore[assignment]
+            if original_append_bulk is not None:
+                trails._append_scores_bulk = original_append_bulk  # type: ignore[assignment]
+
+        return float(total)
+
+    def _solve_supply(year: int, act: int, amount: float) -> dict[int, float]:
+        key = (int(year), int(act))
+        if key in supply_cache:
+            if amount == 1.0:
+                return supply_cache[key]
+            return {a: float(v) * float(amount) for a, v in supply_cache[key].items()}
+
+        dp, _, _, _ = _get_datapackage(
+            dp_cache=dp_cache,
+            trails=trails,
+            year=int(year),
+            zero_bio=False,
+            debug=bool(getattr(trails, "debug", False)),
+        )
+
+        lca_obj = bc.LCA(demand={int(act): 1.0}, data_objs=[dp])
+        lca_obj.load_lci_data()
+
+        activity_demand = {int(act): 1.0}
+        functional_unit_demand = _map_activity_demands_to_products(
+            lca_obj, activity_demand
+        )
+        if not functional_unit_demand:
+            supply_cache[key] = {}
+            return {}
+
+        act_map = getattr(lca_obj.dicts, "activity", None)
+        act_ids, positions = _get_mapping_arrays(act_map)
+
+        lca_obj.build_demand_array(functional_unit_demand)
+        if not bc.PYPARDISO:
+            lca_obj.decompose_technosphere()
+        lca_obj.supply_array = lca_obj.solve_linear_system()
+
+        if act_ids is None or positions is None:
+            supply_total = _extract_supply_fast(lca_obj, 0.0)
+        else:
+            supply_total = _extract_supply_fast_cached(
+                lca_obj.supply_array, act_ids, positions, 0.0
+            )
+
+        supply_cache[key] = supply_total
+        if amount == 1.0:
+            return supply_total
+        return {a: float(v) * float(amount) for a, v in supply_total.items()}
+
+    def _score_frontier(year: int, act: int, amount: float) -> float:
+        if amount == 0.0:
+            return 0.0
+        supply = _solve_supply(year, act, amount)
+        if not supply:
+            return 0.0
+        coeff = _char_row_for_year(year)
+        total = 0.0
+        for a, v in supply.items():
+            a = int(a)
+            if a < 0 or a >= coeff.size:
+                continue
+            total += float(v) * float(coeff[a])
+        return float(total)
+
+    def _is_frontier(node_data: dict) -> bool:
+        frontier_amt = float(node_data.get("frontier_amount") or 0.0)
+        if frontier_amt != 0.0:
+            return True
+        return False
+
+    def _direct_amount(node_data: dict) -> float:
+        direct_amt = float(node_data.get("direct_bio_amount") or 0.0)
+        if direct_amt != 0.0:
+            return direct_amt
+        depth = int(node_data.get("depth", 0))
+        if depth == 0:
+            year = int(node_data.get("year"))
+            act = int(node_data.get("act_idx"))
+            if trails._has_direct_biosphere(
+                int(trails._map_year_to_scenario_year(year)), act, has_bio_cache
+            ):
+                return float(node_data.get("amount") or 0.0)
+        return 0.0
+
+    nodes = list(graph.nodes(data=True))
+    pbar = None
+    if show_progress:
+        pbar = tqdm(
+            total=len(nodes),
+            desc="Score temporal nodes",
+            unit="node",
+            leave=True,
+        )
+
+    node_scores: dict[tuple, float] = {}
+
+    for node_key, data in nodes:
+        year = int(data.get("year"))
+        act = int(data.get("act_idx"))
+        if _is_frontier(data):
+            amount = float(data.get("frontier_amount") or 0.0)
+            if abs(amount) >= min_amount:
+                node_scores[node_key] = _score_frontier(year, act, amount)
+            else:
+                node_scores[node_key] = 0.0
+        else:
+            amount = _direct_amount(data)
+            if abs(amount) >= min_amount:
+                node_scores[node_key] = _score_direct_td(year, act, amount)
+            else:
+                node_scores[node_key] = 0.0
+
+        if pbar is not None:
+            pbar.update(1)
+
+    if pbar is not None:
+        pbar.close()
+
+    return node_scores
