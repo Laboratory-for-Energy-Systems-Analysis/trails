@@ -453,7 +453,7 @@ def import_excel_inventory(
                     continue
                 technosphere_count += 1
                 tech_pair = (act_idx, prod_idx)
-                stored_amount = amount
+                stored_amount = -amount
             elif ex_type == "biosphere":
                 flow_idx = _biosphere_index_for_exchange(exchange)
                 biosphere_count += 1

@@ -9,6 +9,8 @@ from tqdm import tqdm
 
 from scikits.umfpack import UmfpackContext, UMFPACK_A
 from scipy import sparse as sp
+import sparse
+import xarray as xr
 
 from .bw_interface import (
     _extract_supply_fast,
@@ -156,7 +158,7 @@ def solve_many_rhs_umfpack_factorized(
     return X
 
 
-def lca_static_simple(
+def lca_static(
     trails: Trails,
     year: int,
     fu_act_idx: int,
@@ -178,38 +180,58 @@ def lca_static_simple(
         debug=debug,
     )
 
-    # Build supply
+    # Build supply using the same activity->product mapping as temporal LCA
     lca_obj = bc.LCA(demand={int(fu_act_idx): float(amount)}, data_objs=[dp])
     lca_obj.lci()
 
-    fu_prod_id = _reference_product_id_from_activity_id(lca_obj, int(fu_act_idx))
+    inv = lca_obj.inventory # SciPy sparse (flow_pos x act_pos)
 
-    lca_obj = bc.LCA(demand={int(fu_prod_id): float(amount)}, data_objs=[dp])
-    lca_obj.lci()
+    inv_coo = sparse.COO.from_scipy_sparse(inv)
+    flow_pos = inv_coo.coords[0].astype(np.int64, copy=False)
+    act_pos = inv_coo.coords[1].astype(np.int64, copy=False)
 
-    supply_total = _extract_supply_fast(lca_obj, min_amount=0.0)
+    act_map = getattr(lca_obj.dicts, "activity", None) or {}
+    bio_map = getattr(lca_obj.dicts, "biosphere", None) or {}
+    pos_to_act = {int(pos): int(act_id) for act_id, pos in act_map.items()}
+    pos_to_flow = {int(pos): int(flow_id) for flow_id, pos in bio_map.items()}
 
-    # Accumulate inventory (no TD in static run)
-    trails.accumulate_temporalized_biosphere_inventory(
-        base_year=int(year),
-        supply_by_activity=supply_total,
-        min_amount=0.0,
-        use_temporal_distributions=False,
-        debug=debug,
+    act_ids = np.array([pos_to_act.get(int(p), -1) for p in act_pos], dtype=np.int64)
+    flow_ids = np.array(
+        [pos_to_flow.get(int(p), -1) for p in flow_pos], dtype=np.int64
     )
 
-    trails.finalize_inventory()
+    valid = (act_ids >= 0) & (flow_ids >= 0)
+    act_ids = act_ids[valid]
+    flow_ids = flow_ids[valid]
+    data = inv_coo.data[valid]
 
-    # Reuse the shared characterization cache to avoid rebuilding CF vectors.
-    characterized = build_characterized_inventory(
-        trails=trails,
-        methods=methods,
-        char_cache=_CHAR_CACHE,
+    n_acts = int(trails.A.shape[1]) if trails.A is not None else int(act_ids.max() + 1)
+    n_flows = (
+        int(trails.B.shape[2]) if trails.B is not None else int(flow_ids.max() + 1)
     )
-    trails.static_score = float(characterized.data.sum())
 
-    trails.inventory = prev_inventory
-    trails.characterized_inventory = prev_characterized
+    inv_coo = sparse.COO(
+        coords=np.vstack([act_ids, flow_ids]),
+        data=data,
+        shape=(n_acts, n_flows),
+    )
+
+    trails.inventory = xr.DataArray(
+        inv_coo[:, :, None],  # add year axis
+        dims=("activity", "flow", "year"),
+        coords={
+            "activity": np.arange(n_acts, dtype=int),
+            "flow": np.arange(n_flows, dtype=int),
+            "year": np.array([int(year)], dtype=int),
+        },
+    )
+    trails.demand = lca_obj.demand
+
+    trails.characterized_inventory = build_characterized_inventory(
+        trails=trails, methods=methods, char_cache=_CHAR_CACHE
+    )
+
+    trails.static_score = float(trails.characterized_inventory.data.sum())
 
 
 def lca(

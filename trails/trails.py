@@ -26,6 +26,7 @@ from .datapackage import (
 )
 
 from .temporal_distributions import TemporalDistribution, TemporalExchange
+from .lca import lca_static
 
 import logging
 
@@ -1562,9 +1563,9 @@ class Trails:
         debug: bool = False,
     ) -> None:
         """Run static LCA using this Trails instance."""
-        from .lca import lca_static_simple
 
-        return lca_static_simple(
+
+        lca_static(
             trails=self,
             year=int(year),
             fu_act_idx=int(act_idx),
@@ -1572,6 +1573,7 @@ class Trails:
             amount=float(amount),
             debug=debug,
         )
+        return None
 
     def expand_temporal_exchanges(
         self,
