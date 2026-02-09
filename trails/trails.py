@@ -1564,7 +1564,6 @@ class Trails:
     ) -> None:
         """Run static LCA using this Trails instance."""
 
-
         lca_static(
             trails=self,
             year=int(year),
@@ -1952,7 +1951,9 @@ class Trails:
             fields_table = PrettyTable()
             fields_table.field_names = ["field", "meaning"]
             fields_table.add_row(["temporal_distribution", "distribution code"])
-            fields_table.add_row(["temporal_loc", "location parameter (mean/median/mode)"])
+            fields_table.add_row(
+                ["temporal_loc", "location parameter (mean/median/mode)"]
+            )
             fields_table.add_row(["temporal_scale", "scale parameter (stddev/sigma)"])
             fields_table.add_row(["temporal_min", "minimum integer offset (inclusive)"])
             fields_table.add_row(["temporal_max", "maximum integer offset (inclusive)"])

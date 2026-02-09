@@ -462,9 +462,14 @@ def import_excel_inventory(
                 continue
 
             if ex_type in {"production", "technosphere"}:
-                if _norm(exchange.get("name")) == "" or _norm(
-                    exchange.get("reference product") or exchange.get("product")
-                ) == "" or _norm(exchange.get("location")) == "":
+                if (
+                    _norm(exchange.get("name")) == ""
+                    or _norm(
+                        exchange.get("reference product") or exchange.get("product")
+                    )
+                    == ""
+                    or _norm(exchange.get("location")) == ""
+                ):
                     unlinked_rows.append(
                         {
                             "type": ex_type,
@@ -513,9 +518,9 @@ def import_excel_inventory(
 
                     year_int = int(label) if label.isdigit() else None
                     if year_int is not None:
-                        a_template_values.setdefault(tech_pair, {})[year_int] = (
-                            stored_amount
-                        )
+                        a_template_values.setdefault(tech_pair, {})[
+                            year_int
+                        ] = stored_amount
                 elif ex_type == "biosphere":
                     if not apply_to_all_template_years:
                         b_coords.append((t, act_idx, flow_idx))
@@ -534,7 +539,9 @@ def import_excel_inventory(
                             year_int
                         ] = stored_amount
 
-    def _resize_sparse(matrix: sparse.COO, new_shape: tuple[int, int, int]) -> sparse.COO:
+    def _resize_sparse(
+        matrix: sparse.COO, new_shape: tuple[int, int, int]
+    ) -> sparse.COO:
         if matrix.shape == new_shape:
             return matrix
         return sparse.COO(coords=matrix.coords, data=matrix.data, shape=new_shape)
@@ -569,7 +576,10 @@ def import_excel_inventory(
         else:
             data_arr = data_agg
 
-        return sparse.COO(coords=coords_arr, data=data_arr, shape=matrix.shape), replaced_count
+        return (
+            sparse.COO(coords=coords_arr, data=data_arr, shape=matrix.shape),
+            replaced_count,
+        )
 
     max_act_idx = max(activity_mapping) if activity_mapping else -1
     max_flow_idx = max(biosphere_mapping) if biosphere_mapping else -1

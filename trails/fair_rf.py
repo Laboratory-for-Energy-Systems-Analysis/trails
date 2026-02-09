@@ -31,8 +31,6 @@ from .fair_io import (
 )
 
 
-
-
 def _inventory_emissions_by_fair_species(
     trails: Any,
     species_map: dict[object, str],
@@ -93,7 +91,9 @@ def _inventory_emissions_by_fair_species(
         sign = float(
             signs.get(
                 flow_key,
-                signs.get(flow_key[0] if isinstance(flow_key, tuple) else flow_key, 1.0),
+                signs.get(
+                    flow_key[0] if isinstance(flow_key, tuple) else flow_key, 1.0
+                ),
             )
         )
         series = dense.loc[pos]
@@ -321,18 +321,20 @@ def run_fair_delta_rf(
     )
 
     # Build perturbations from Trails inventory
-    delta_by_species = _inventory_emissions_by_fair_species(
-        trails, species_map, signs
-    )
+    delta_by_species = _inventory_emissions_by_fair_species(trails, species_map, signs)
     no_perturbation = delta_by_species.empty
     if no_perturbation:
         if debug:
-            print("FAIR debug: no inventory emissions matched; returning zero delta RF.")
+            print(
+                "FAIR debug: no inventory emissions matched; returning zero delta RF."
+            )
         if scale_factor is None:
             scale_factor = 1.0
 
     if scale_factor is None and not delta_by_species.empty:
-        df_base = df[(df["scenario"] == scenario) & (df["region"].str.lower() == "world")].copy()
+        df_base = df[
+            (df["scenario"] == scenario) & (df["region"].str.lower() == "world")
+        ].copy()
         df_base = _normalize_emissions_columns(df_base)
         candidates = []
         for specie in delta_by_species.columns:
@@ -351,7 +353,9 @@ def run_fair_delta_rf(
                 delta_unit = _convert_kg_to_unit(np.array([val]), unit)[0]
                 if delta_unit == 0:
                     continue
-                candidates.append(scale_target_fraction * abs(base_val) / abs(delta_unit))
+                candidates.append(
+                    scale_target_fraction * abs(base_val) / abs(delta_unit)
+                )
         if candidates:
             scale_factor = float(min(candidates))
         else:
@@ -594,12 +598,18 @@ def run_fair_delta_rf(
     def _debug_nan_forcing_check(forcing_pert: xr.DataArray) -> None:
         if not debug:
             return
-        if np.isfinite(forcing_base.values).any() and np.isfinite(forcing_pert.values).any():
+        if (
+            np.isfinite(forcing_base.values).any()
+            and np.isfinite(forcing_pert.values).any()
+        ):
             return
         print("FAIR debug: forcing all-NaN detected.")
         print("FAIR debug: ghg_method", getattr(f_base, "ghg_method", None))
         try:
-            print("FAIR debug: ghg flag", bool(getattr(f_base, "_routine_flags", {}).get("ghg", False)))
+            print(
+                "FAIR debug: ghg flag",
+                bool(getattr(f_base, "_routine_flags", {}).get("ghg", False)),
+            )
         except Exception:
             print("FAIR debug: ghg flag unavailable")
         print("FAIR debug: species count", len(f_base.species))
@@ -636,6 +646,7 @@ def run_fair_delta_rf(
                 int(np.isnan(basec).sum()),
             )
             import fair.forcing.ghg as _ghg
+
             conc = f_base.concentration.values
             base_arr = f_base.species_configs["baseline_concentration"].values
             scale_arr = f_base.species_configs["forcing_scale"].values
@@ -751,9 +762,7 @@ def run_fair_delta_rf(
             ghg_method=ghg_method,
             progress=False,
         )
-        forcing_pert = f_pert.forcing.sel(
-            scenario=scenario, config=f_pert.configs[0]
-        )
+        forcing_pert = f_pert.forcing.sel(scenario=scenario, config=f_pert.configs[0])
         _debug_nan_forcing_check(forcing_pert)
         delta_forcing = forcing_pert - forcing_base
         if scale_factor is None:

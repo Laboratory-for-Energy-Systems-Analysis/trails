@@ -184,7 +184,7 @@ def lca_static(
     lca_obj = bc.LCA(demand={int(fu_act_idx): float(amount)}, data_objs=[dp])
     lca_obj.lci()
 
-    inv = lca_obj.inventory # SciPy sparse (flow_pos x act_pos)
+    inv = lca_obj.inventory  # SciPy sparse (flow_pos x act_pos)
 
     inv_coo = sparse.COO.from_scipy_sparse(inv)
     flow_pos = inv_coo.coords[0].astype(np.int64, copy=False)
@@ -196,9 +196,7 @@ def lca_static(
     pos_to_flow = {int(pos): int(flow_id) for flow_id, pos in bio_map.items()}
 
     act_ids = np.array([pos_to_act.get(int(p), -1) for p in act_pos], dtype=np.int64)
-    flow_ids = np.array(
-        [pos_to_flow.get(int(p), -1) for p in flow_pos], dtype=np.int64
-    )
+    flow_ids = np.array([pos_to_flow.get(int(p), -1) for p in flow_pos], dtype=np.int64)
 
     valid = (act_ids >= 0) & (flow_ids >= 0)
     act_ids = act_ids[valid]

@@ -62,9 +62,7 @@ def _candidate_paths(filename: str) -> list[Path]:
         Path("examples") / "data" / "calibrated_constrained_ensemble" / filename,
     ]
     return [
-        parent / target
-        for parent in [root, *root.parents[:6]]
-        for target in targets
+        parent / target for parent in [root, *root.parents[:6]] for target in targets
     ]
 
 

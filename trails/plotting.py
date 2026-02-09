@@ -385,8 +385,7 @@ def plot_temporal_graph(
             edges = [
                 (u, v)
                 for u, v in H.edges()
-                if abs(float(edge_value_map.get((u, v), 0.0)))
-                >= float(min_edge_amount)
+                if abs(float(edge_value_map.get((u, v), 0.0))) >= float(min_edge_amount)
             ]
         else:
             edges = [
@@ -2936,7 +2935,9 @@ def _node_scores_from_characterized_inventory(
 ) -> dict[tuple[int, int], float]:
     """Build (year, act_idx) -> score mapping from characterized inventory."""
     if "activity" not in characterized_inventory.dims:
-        raise ValueError("characterized_inventory must include an 'activity' dimension.")
+        raise ValueError(
+            "characterized_inventory must include an 'activity' dimension."
+        )
     if "year" not in characterized_inventory.dims:
         raise ValueError("characterized_inventory must include a 'year' dimension.")
     if "flow" not in characterized_inventory.dims:
@@ -2952,7 +2953,9 @@ def _node_scores_from_characterized_inventory(
         if isinstance(data, sparse.COO):
             coords = data.coords
             vals = data.data
-            for ai, fi, yi, ri, v in zip(coords[0], coords[1], coords[2], coords[3], vals):
+            for ai, fi, yi, ri, v in zip(
+                coords[0], coords[1], coords[2], coords[3], vals
+            ):
                 if v == 0.0:
                     continue
                 year = int(years[int(yi)])

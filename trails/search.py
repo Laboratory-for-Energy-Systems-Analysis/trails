@@ -84,9 +84,7 @@ def search_activity(
         raise ValueError("reference_product is only valid for technosphere searches.")
 
     results: dict[int, dict] = {}
-    for idx, meta in _iter_metadata(
-        trails, kind=kind, scenario_label=scenario_label
-    ):
+    for idx, meta in _iter_metadata(trails, kind=kind, scenario_label=scenario_label):
         if needle is not None and not _match_text(
             meta.get("name"), needle, match=match, case_sensitive=case_sensitive
         ):
