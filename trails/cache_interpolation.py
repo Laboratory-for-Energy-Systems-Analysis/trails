@@ -51,9 +51,7 @@ def _cache_key(
     return hashlib.sha256(blob).hexdigest()
 
 
-def cache_dir_for_package(
-    package: Any, *, value_dtype: str, index_dtype: str
-) -> Path:
+def cache_dir_for_package(package: Any, *, value_dtype: str, index_dtype: str) -> Path:
     cache_base = platformdirs.user_data_path(appname="trails", appauthor="pylca")
     key = _cache_key(
         package,
@@ -110,7 +108,16 @@ def load_cached_interpolation(
         if idx_path.exists():
             with open(idx_path, "rb") as f:
                 indices = pickle.load(f)
-        return A, B, labels, template_labels, temporal_tech, temporal_bio, indices, cache_dir
+        return (
+            A,
+            B,
+            labels,
+            template_labels,
+            temporal_tech,
+            temporal_bio,
+            indices,
+            cache_dir,
+        )
     except Exception:
         return None, None, [], [], None, None, None, cache_dir
 

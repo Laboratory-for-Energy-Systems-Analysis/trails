@@ -6,7 +6,6 @@ from pathlib import Path
 
 import pandas as pd
 
-
 REMIND_PATH = Path("../trails/data/scenarios/remind_emissions.csv")
 FAIR_EXT_PATH = Path("../trails/data/scenarios/extensions_1750-2500.csv")
 OUTPUT_PATH = Path("../trails/data/scenarios/remind_fair_1750-2500.csv")
@@ -94,16 +93,18 @@ def merge_emissions() -> Path:
     rows = []
     for scenario in sorted(remind_df["scenario"].unique()):
         rem_s = remind_df[remind_df["scenario"] == scenario]
-        rem_by_var = {
-            row["variable"]: row for _, row in rem_s.iterrows()
-        }
+        rem_by_var = {row["variable"]: row for _, row in rem_s.iterrows()}
 
         variables = sorted(set(fair_by_var.keys()) | set(rem_by_var.keys()))
         for var in variables:
             fair_row = fair_by_var.get(var)
             rem_row = rem_by_var.get(var)
 
-            unit = rem_row["unit"] if rem_row is not None else (fair_row["unit"] if fair_row is not None else "")
+            unit = (
+                rem_row["unit"]
+                if rem_row is not None
+                else (fair_row["unit"] if fair_row is not None else "")
+            )
 
             data = {y: float("nan") for y in years}
 

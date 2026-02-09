@@ -48,6 +48,7 @@ class DummyTrails:
                 }
             }
         }
+
     def temporal_traversal(self, **kwargs) -> tuple[dict[tuple[int, int], float], dict]:
         """Return a fixed frontier for traversal tests.
 
