@@ -112,7 +112,10 @@ def _build_rhs_matrix_from_root_demands(
 
 
 def solve_many_rhs_umfpack_factorized(
-    A_csc: sp.csc_matrix, B: np.ndarray
+    A_csc: sp.csc_matrix,
+    B: np.ndarray,
+    *,
+    cache: dict | None = None,
 ) -> np.ndarray:
     """
     Solve A X = B using a single UMFPACK factorization.
@@ -142,11 +145,36 @@ def solve_many_rhs_umfpack_factorized(
     if A_csc.shape != (n, n):
         raise ValueError(f"Shape mismatch: A {A_csc.shape}, B {B.shape}")
 
-    ctx = UmfpackContext()
+    ctx = None
+    symbolic = None
+    pattern_sig = None
+    if cache is not None:
+        ctx = cache.get("ctx")
+        symbolic = cache.get("symbolic")
+        pattern_sig = cache.get("pattern_sig")
+    if ctx is None:
+        ctx = UmfpackContext()
+        if cache is not None:
+            cache["ctx"] = ctx
+
+    # Reuse symbolic factorization when sparsity pattern is unchanged.
+    sig = (
+        A_csc.indptr.size,
+        A_csc.indices.size,
+        int(np.bitwise_xor.reduce(A_csc.indptr)),
+        int(np.bitwise_xor.reduce(A_csc.indices)),
+    )
+    if cache is None or sig != pattern_sig or symbolic is None:
+        symbolic = ctx.symbolic(A_csc)
+        if cache is not None:
+            cache["symbolic"] = symbolic
+            cache["pattern_sig"] = sig
 
     # These calls frequently return None on success; failures raise exceptions.
-    ctx.symbolic(A_csc)
-    ctx.numeric(A_csc)
+    try:
+        ctx.numeric(A_csc, symbolic)
+    except TypeError:
+        ctx.numeric(A_csc)
 
     X = np.empty((n, k), dtype=np.float64)
 
@@ -225,11 +253,14 @@ def lca_static(
     )
     trails.demand = lca_obj.demand
 
-    trails.characterized_inventory = build_characterized_inventory(
+    characterized_inventory = build_characterized_inventory(
         trails=trails, methods=methods, char_cache=_CHAR_CACHE
     )
 
-    trails.static_score = float(trails.characterized_inventory.data.sum())
+    trails.static_score = float(characterized_inventory.data.sum())
+
+    trails.inventory = prev_inventory
+    trails.characterized_inventory = prev_characterized
 
 
 def lca(
@@ -251,6 +282,8 @@ def lca(
     debug = bool(getattr(trails, "debug", False))
 
     trails.reset_inventory(attribute_to_roots=attribute_to_roots)
+
+    umfpack_cache: dict | None = {} if (attribute_to_roots and not bc.PYPARDISO) else None
 
     cf = None
     if compute_score:
@@ -486,7 +519,7 @@ def lca(
                 else:
                     # UMFPACK: factorize once and solve all RHS vectors.
                     root_supply_matrix = solve_many_rhs_umfpack_factorized(
-                        A_csc, rhs_matrix
+                        A_csc, rhs_matrix, cache=umfpack_cache
                     )
                     root_ids = np.asarray(
                         roots, dtype=np.int64

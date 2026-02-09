@@ -3160,18 +3160,28 @@ class Trails:
             )
             return
 
+        append_entries = self._append_inventory_entries
+        append_bulk = self._append_inventory_entries_bulk
+        has_root = bool(getattr(self, "_inventory_has_root", False))
+        store_act = int(store_activity) if store_activity is not None else None
+
+        dbg_flow_id = None if dbg is None else dbg.get("flow_id")
+        dbg_year = None if dbg is None else dbg.get("year")
+        dbg_act = None if dbg is None else dbg.get("act")
+        dbg_max_pulses = 0 if dbg is None else int(dbg.get("max_pulses", 12))
+        dbg_max_matches = 0 if dbg is None else int(dbg.get("max_matches", 50))
+
         for act_idx, supply_amt in supply_by_activity.items():
             supply_amt = float(supply_amt)
             if supply_amt == 0.0:
                 continue
 
             a = int(act_idx)
-            has_root = bool(getattr(self, "_inventory_has_root", False))
             if has_root:
                 inventory_act = a
-                root_activity = int(store_activity) if store_activity is not None else a
+                root_activity = store_act if store_act is not None else a
             else:
-                inventory_act = int(store_activity) if store_activity is not None else a
+                inventory_act = store_act if store_act is not None else a
                 root_activity = None
             if a < 0 or a + 1 >= len(row_ptr):
                 continue
@@ -3181,16 +3191,11 @@ class Trails:
             if start == end:
                 continue
 
-            flows_full = flow_sorted[start:end].astype(np.intp, copy=False)
+            flows_full = np.asarray(flow_sorted[start:end], dtype=np.intp)
             vals_full = data_sorted[start:end]
 
             scaled_full = supply_amt * vals_full.astype(np.float64, copy=False)
 
-            dbg_flow_id = None if dbg is None else dbg.get("flow_id")
-            dbg_year = None if dbg is None else dbg.get("year")
-            dbg_act = None if dbg is None else dbg.get("act")
-            dbg_max_pulses = 0 if dbg is None else int(dbg.get("max_pulses", 12))
-            dbg_max_matches = 0 if dbg is None else int(dbg.get("max_matches", 50))
             if dbg is not None and dbg_flow_id is not None:
                 if dbg_act is None or int(dbg_act) == int(a):
                     if dbg_year is None or int(dbg_year) == int(base_year):
@@ -3301,7 +3306,7 @@ class Trails:
             if no_td_idx is not None:
                 idx = no_td_idx
                 if idx.size:
-                    self._append_inventory_entries(
+                    append_entries(
                         inventory_act,
                         base_year,
                         flows_full[idx],
@@ -3355,7 +3360,7 @@ class Trails:
 
                     # 1) Anchor below-threshold contributions at base_year
                     if idx_anchor is not None and idx_anchor.size:
-                        self._append_inventory_entries(
+                        append_entries(
                             inventory_act,
                             base_year,
                             flows_full[idx_anchor],
@@ -3389,7 +3394,7 @@ class Trails:
 
                     if not pulses:
                         # If TD produces nothing, treat as anchor (still not omitted)
-                        self._append_inventory_entries(
+                        append_entries(
                             inventory_act,
                             base_year,
                             flows_full[idx_td],
@@ -3435,7 +3440,7 @@ class Trails:
                     contrib = scaled_full[idx_rep] * weights_rep
 
                     acts_use = np.full_like(flows_use, inventory_act, dtype=np.int64)
-                    self._append_inventory_entries_bulk(
+                    append_bulk(
                         acts_use,
                         years_use,
                         flows_use,
@@ -3491,7 +3496,7 @@ class Trails:
                         # anchor below-threshold
                         idx_anchor = idx[~temporalize[idx]]
                         if idx_anchor.size:
-                            self._append_inventory_entries(
+                            append_entries(
                                 inventory_act,
                                 base_year,
                                 flows_full[idx_anchor],
@@ -3605,7 +3610,7 @@ class Trails:
                         acts_use = np.full_like(
                             flows_rep, inventory_act, dtype=np.int64
                         )
-                        self._append_inventory_entries_bulk(
+                        append_bulk(
                             acts_use,
                             years_rep,
                             flows_rep,
