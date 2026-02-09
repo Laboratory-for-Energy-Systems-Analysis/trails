@@ -59,6 +59,24 @@ for impact scores (when compute_score=True) and ``trails.inventory`` or
 ``trails.characterized_inventory`` for time-resolved inventories.
 
 
+Importing Excel inventories
+---------------------------
+
+You can import user-provided inventories from Excel using ``bw2io``. When you
+omit ``year`` and ``scenario_label``, the exchanges are applied to all template
+years and interpolated across annual years.
+
+.. code-block:: python
+
+    from trails import Trails
+
+    trails = Trails(package)
+    trails.import_excel_inventory("path/to/inventory.xlsx")
+
+    # Target a single scenario slice instead
+    trails.import_excel_inventory("path/to/inventory.xlsx", year=2020)
+
+
 FaIR radiative forcing
 ----------------------
 

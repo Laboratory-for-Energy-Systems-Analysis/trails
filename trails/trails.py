@@ -469,6 +469,29 @@ class Trails:
 
             self.scores = None
 
+    def import_excel_inventory(
+        self,
+        path: str | Path,
+        *,
+        year: int | None = None,
+        scenario_label: str | None = None,
+        cache_import: bool = False,
+    ) -> dict[str, int]:
+        """Import a user-provided inventory spreadsheet into A/B tensors.
+
+        When neither ``year`` nor ``scenario_label`` is provided, exchanges are
+        applied to all template years and interpolated across annual years.
+        """
+        from .importer import import_excel_inventory
+
+        return import_excel_inventory(
+            self,
+            path,
+            year=year,
+            scenario_label=scenario_label,
+            cache_import=cache_import,
+        )
+
     def _append_score_entry(
         self,
         act_idx: int,
@@ -517,7 +540,7 @@ class Trails:
         )
         if not has_any:
             if has_root:
-                arr = sparse.COO.zeros(
+                arr = sparse.zeros(
                     (n_activities, len(years), n_activities), dtype=self.value_dtype
                 )
                 self.scores = xr.DataArray(
@@ -530,9 +553,7 @@ class Trails:
                     },
                 )
             else:
-                arr = sparse.COO.zeros(
-                    (n_activities, len(years)), dtype=self.value_dtype
-                )
+                arr = sparse.zeros((n_activities, len(years)), dtype=self.value_dtype)
                 self.scores = xr.DataArray(
                     arr,
                     dims=("activity", "year"),
@@ -938,14 +959,13 @@ class Trails:
                 )
         else:
             if has_root:
-                inv = sparse.COO.zeros(
+                inv = sparse.zeros(
                     (n_activities, n_flows, len(years), n_activities),
                     dtype=self.value_dtype,
                 )
             else:
-                inv = sparse.COO.zeros(
-                    (n_activities, n_flows, len(years)),
-                    dtype=self.value_dtype,
+                inv = sparse.zeros(
+                    (n_activities, n_flows, len(years)), dtype=self.value_dtype
                 )
 
         dims = ("activity", "flow", "year")
@@ -1117,7 +1137,7 @@ class Trails:
         :type parent_amount: float
         :param exchange_value: Exchange coefficient from the A matrix.
         :type exchange_value: float
-        :returns: Child demand amount with sign handled.
+        :returns: Child demand amount preserving sign.
         :rtype: float
         """
         if exchange_value < 0.0:
@@ -1766,11 +1786,11 @@ class Trails:
 
         def _format_amount(value: float) -> str:
             if value == 0.0:
-                return "0.00"
+                return "0"
             abs_v = abs(value)
-            if abs_v >= 1e4 or abs_v < 1e-3:
+            if abs_v >= 1e4 or abs_v < 1e-2:
                 return f"{value:.2e}"
-            return f"{value:.2f}"
+            return f"{value:.2f}".rstrip("0").rstrip(".")
 
         def _get_activity_meta(label: str, idx: int) -> dict:
             mapping = self.activity_indices.get(label)
@@ -1791,7 +1811,9 @@ class Trails:
                     return _mapping.get(idx, {})
             return {}
 
-        rows: list[dict[str, object]] = []
+        prod_rows: list[dict[str, object]] = []
+        tech_rows: list[dict[str, object]] = []
+        bio_rows: list[dict[str, object]] = []
 
         # ---- Technosphere + production exchanges (A matrix row) ----
         if self.A is not None:
@@ -1809,21 +1831,23 @@ class Trails:
                     tex = self._get_tech_temporal_exchange(
                         int(year), int(act_idx), prod_idx
                     )
-                    rows.append(
-                        {
-                            "direction": "out" if amount > 0.0 else "in",
-                            "flow type": flow_type,
-                            "id": prod_idx,
-                            "name": meta.get("name") or "",
-                            "reference product": meta.get("reference product") or "",
-                            "amount": _format_amount(amount),
-                            "td type": getattr(tex, "distribution", None),
-                            "loc": getattr(tex, "loc", None),
-                            "scale": getattr(tex, "scale", None),
-                            "min": getattr(tex, "offset_min", None),
-                            "max": getattr(tex, "offset_max", None),
-                        }
-                    )
+                    entry = {
+                        "direction": "out" if amount > 0.0 else "in",
+                        "flow type": flow_type,
+                        "id": prod_idx,
+                        "name": meta.get("name") or "",
+                        "reference product": meta.get("reference product") or "",
+                        "amount": _format_amount(amount),
+                        "td type": getattr(tex, "distribution", None),
+                        "loc": getattr(tex, "loc", None),
+                        "scale": getattr(tex, "scale", None),
+                        "min": getattr(tex, "offset_min", None),
+                        "max": getattr(tex, "offset_max", None),
+                    }
+                    if flow_type == "prod":
+                        prod_rows.append(entry)
+                    else:
+                        tech_rows.append(entry)
 
         # ---- Biosphere exchanges (B matrix row) ----
         if self.B is not None:
@@ -1840,7 +1864,7 @@ class Trails:
                     tex = self._get_bio_temporal_exchange(
                         int(year), int(act_idx), flow_idx
                     )
-                    rows.append(
+                    bio_rows.append(
                         {
                             "direction": "emission" if amount > 0.0 else "uptake",
                             "flow type": "bio",
@@ -1856,7 +1880,7 @@ class Trails:
                         }
                     )
 
-        if not rows:
+        if not (prod_rows or tech_rows or bio_rows):
             print(f"No exchanges found for act={act_idx} in year={scenario_year}")
             return
 
@@ -1872,7 +1896,11 @@ class Trails:
                     except ValueError:
                         return 0.0
 
-            rows.sort(key=_sort_key, reverse=True)
+            prod_rows.sort(key=_sort_key, reverse=True)
+            tech_rows.sort(key=_sort_key, reverse=True)
+            bio_rows.sort(key=_sort_key, reverse=True)
+
+        rows = prod_rows + tech_rows + bio_rows
 
         if max_rows is not None:
             rows = rows[: int(max_rows)]
@@ -1909,6 +1937,27 @@ class Trails:
         try:
             from prettytable import PrettyTable
 
+            dist_table = PrettyTable()
+            dist_table.field_names = ["code", "distribution"]
+            dist_table.add_row([1, "discrete (all mass at loc)"])
+            dist_table.add_row([2, "lognormal"])
+            dist_table.add_row([3, "normal"])
+            dist_table.add_row([4, "uniform"])
+            dist_table.add_row([5, "triangular"])
+            print("Temporal distribution codes:")
+            print(dist_table)
+
+            fields_table = PrettyTable()
+            fields_table.field_names = ["field", "meaning"]
+            fields_table.add_row(["temporal_distribution", "distribution code"])
+            fields_table.add_row(["temporal_loc", "location parameter (mean/median/mode)"])
+            fields_table.add_row(["temporal_scale", "scale parameter (stddev/sigma)"])
+            fields_table.add_row(["temporal_min", "minimum integer offset (inclusive)"])
+            fields_table.add_row(["temporal_max", "maximum integer offset (inclusive)"])
+            fields_table.add_row(["temporal_amount_source", "ported value or matrix"])
+            print("Temporal distribution fields:")
+            print(fields_table)
+
             table = PrettyTable()
             table.field_names = headers
             for row in rows:
@@ -1930,6 +1979,18 @@ class Trails:
             print(sep)
             for row in rows:
                 print(" | ".join(str(row.get(h, "")).ljust(widths[h]) for h in headers))
+
+    def list_lcia_methods(self, ei_version: str = "3.11") -> list[str]:
+        """List LCIA method names bundled with Trails.
+
+        :param ei_version: Ecoinvent release identifier (e.g. ``"3.11"``).
+        :type ei_version: str
+        :returns: Ordered method names formatted as ``"family - method"``.
+        :rtype: list[str]
+        """
+        from .lcia import get_lcia_method_names
+
+        return get_lcia_method_names(ei_version=ei_version)
 
     def _get_biosphere_slice(
         self, base_year: int, debug: bool

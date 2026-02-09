@@ -2,11 +2,24 @@
 
 ## Project Structure & Module Organization
 `trails/` contains the library source (core logic, LCA workflows, plotting, and IO).
-`trails/data/` holds packaged datasets shipped with the library.
+`trails/data/` holds packaged datasets shipped with the library (notably
+scenario inputs under `trails/data/scenarios/`).
 `tests/` contains pytest suites and fixtures; test data lives under `tests/data/`.
 `assets/` stores documentation and branding assets used by the README/docs.
 `docs/` holds Sphinx documentation sources.
 `examples/` and `dev/` include usage examples and local development utilities.
+
+## Module Map (Key Files)
+- `trails/lca.py` main LCA workflow entry points.
+- `trails/lcia.py` LCIA data handling and characterization logic.
+- `trails/datapackage.py` Frictionless datapackage loading and inventory parsing.
+- `trails/characterization.py` characterization factor generation and utilities.
+- `trails/temporal_distributions.py` temporal distribution models and helpers.
+- `trails/importer.py` Excel inventory import (bw2io) and matrix updates.
+- `trails/fair_io.py` FaIR IO helpers and scenario parsing.
+- `trails/fair_rf.py` radiative forcing integration using FaIR.
+- `trails/plotting.py` plotting utilities (primarily Plotly-based).
+- `trails/cache.py` and `trails/cache_interpolation.py` interpolation cache logic.
 
 ## Build, Test, and Development Commands
 - `pip install -e .` installs the package in editable mode from this repo.
@@ -45,7 +58,8 @@ Runtime dependencies include Brightway (`bw2calc`, `bw_processing`), `scikits.um
 
 ## Data Packages & Caching
 `trails` loads Frictionless datapackages with inventories under
-`inventories/<model>/<pathway>/<year>/...`.
+`inventories/<model>/<pathway>/<year>/...` (see `dev/example/` for a sample
+datapackage layout).
 Annual interpolation caches are stored under the platformdirs user data path
 (`appname="trails"`, `appauthor="pylca"`) in a `cache/` subdirectory.
 

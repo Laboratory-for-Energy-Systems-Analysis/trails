@@ -15,6 +15,7 @@ from .bw_interface import (
     _extract_supply_fast_cached,
     _get_datapackage,
     _reference_product_id_from_activity_id,
+    _reference_product_from_activity_id,
     build_datapackage_for_year_from_trails,
 )
 from .characterization import build_characterized_inventory
@@ -56,18 +57,18 @@ def _map_activity_demands_to_products(
 
     mapped: dict[int, float] = {}
     prod_map_keys = prod_map.keys()
-    cache: dict[int, int] = {}
+    cache: dict[int, tuple[int, float]] = {}
     for act_id, amount in activity_demands.items():
         amt = float(amount)
         act_id = int(act_id)
-        prod_id = cache.get(act_id)
-        if prod_id is None:
-            if act_id in prod_map_keys:
-                prod_id = act_id
-            else:
-                prod_id = _reference_product_id_from_activity_id(lca_obj, act_id)
-            cache[act_id] = int(prod_id)
-        mapped[int(prod_id)] = mapped.get(int(prod_id), 0.0) + amt
+        cached = cache.get(act_id)
+        if cached is None:
+            prod_id, prod_value = _reference_product_from_activity_id(lca_obj, act_id)
+            cache[act_id] = (int(prod_id), float(prod_value))
+        else:
+            prod_id, prod_value = cached
+        sign = -1.0 if prod_value < 0.0 else 1.0
+        mapped[int(prod_id)] = mapped.get(int(prod_id), 0.0) + amt * sign
 
     return mapped
 

@@ -6,6 +6,7 @@ sparse >=0.13.0
 datapackage
 packaging
 bw2calc
+bw2io
 pyprind
 plotly
 tqdm
