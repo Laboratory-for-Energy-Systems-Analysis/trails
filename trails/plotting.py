@@ -1572,6 +1572,13 @@ def _characterized_inventory_to_results(
     by_flow: bool = False,
 ) -> Dict[int, Dict[str, Any]]:
     """Convert a characterized inventory DataArray into impact-year results."""
+    if "method" in characterized_inventory.dims:
+        methods = characterized_inventory.coords["method"].values
+        if len(methods) != 1:
+            raise ValueError(
+                "characterized_inventory has multiple methods; select one before plotting."
+            )
+        characterized_inventory = characterized_inventory.sel(method=methods[0])
     if "flow" not in characterized_inventory.dims:
         raise ValueError("characterized_inventory must include a 'flow' dimension.")
     if "activity" not in characterized_inventory.dims:
@@ -1624,6 +1631,13 @@ def _characterized_inventory_to_root_results(
     characterized_inventory: xr.DataArray,
 ) -> Dict[int, Dict[str, Any]]:
     """Convert a characterized inventory with root activity dimension into results."""
+    if "method" in characterized_inventory.dims:
+        methods = characterized_inventory.coords["method"].values
+        if len(methods) != 1:
+            raise ValueError(
+                "characterized_inventory has multiple methods; select one before plotting."
+            )
+        characterized_inventory = characterized_inventory.sel(method=methods[0])
     if "flow" not in characterized_inventory.dims:
         raise ValueError("characterized_inventory must include a 'flow' dimension.")
     if "activity" not in characterized_inventory.dims:
@@ -2056,6 +2070,7 @@ def plot_temporal_scores(
     trails: Trails,
     title: str = "Temporal impacts by responsible activity",
     method_label: str = "Impact score",
+    method: Optional[str] = None,
     cumulative: bool = False,
     stacked: bool = True,
     legend_top_n: int = 5,
@@ -2076,14 +2091,14 @@ def plot_temporal_scores(
     y2_headroom: float = 0.05,
     show_cumulative_in_legend: bool = False,
     flow_groupby_name: bool = False,
-    static_score: Optional[float] = None,
+    static_score: Optional[float] | dict[str, float] = None,
     static_score_label: str = "Static score",
     static_score_dash: str = "dash",
     static_score_color: str = "black",
     y_min: Optional[float] = None,
     y_max: Optional[float] = None,
     y2_max: Optional[float] = None,
-) -> go.Figure:
+) -> go.Figure | list[go.Figure]:
     """Plot temporal impact scores by responsible activity."""
     if trails.characterized_inventory is not None:
         results_by_year: Union[
@@ -2093,6 +2108,82 @@ def plot_temporal_scores(
         results_by_year = trails.scores
     else:
         raise ValueError("No characterized inventory or scores available for plotting.")
+
+    if isinstance(results_by_year, xr.DataArray) and "method" in results_by_year.dims:
+        methods = results_by_year.coords["method"].values.tolist()
+        if method is None and len(methods) > 1:
+            figures: list[go.Figure] = []
+            for idx, m in enumerate(methods):
+                selected = results_by_year.isel(method=idx, drop=True)
+                score_for_method: Optional[float] = None
+                if isinstance(static_score, dict):
+                    if str(m) not in static_score:
+                        raise ValueError(
+                            f"Static score missing for method '{m}'. "
+                            f"Available: {sorted(static_score)}"
+                        )
+                    score_for_method = float(static_score[str(m)])
+                else:
+                    score_for_method = static_score
+                method_title = ""
+                fig = _plot_results_by_year(
+                    results_by_year=selected,
+                    trails=trails,
+                    title=method_title,
+                    method_label=method_label,
+                    cumulative=cumulative,
+                    stacked=stacked,
+                    legend_top_n=legend_top_n,
+                    show_flow_contributions=show_flow_contributions,
+                    width=width,
+                    height=height,
+                    year_tick=year_tick,
+                    year_range=year_range,
+                    show_year_grid=show_year_grid,
+                    yaxis_type=yaxis_type,
+                    log_eps=log_eps,
+                    reference_year=reference_year,
+                    show_cumulative_axis=show_cumulative_axis,
+                    cumulative_axis_label=cumulative_axis_label,
+                    legend_entrywidth=legend_entrywidth,
+                    legend_row_height=legend_row_height,
+                    legend_y=legend_y,
+                    y2_headroom=y2_headroom,
+                    show_cumulative_in_legend=show_cumulative_in_legend,
+                    flow_groupby_name=flow_groupby_name,
+                    static_score=score_for_method,
+                    static_score_label=static_score_label,
+                    static_score_dash=static_score_dash,
+                    static_score_color=static_score_color,
+                    y_min=y_min,
+                    y_max=y_max,
+                    y2_max=y2_max,
+                )
+                figures.append(fig)
+            return figures
+
+        if method is None:
+            method = str(methods[0])
+        if method not in methods:
+            raise ValueError(
+                f"Requested method '{method}' not found. Available: {methods}"
+            )
+        if isinstance(static_score, dict):
+            if method not in static_score:
+                raise ValueError(
+                    f"Static score missing for method '{method}'. "
+                    f"Available: {sorted(static_score)}"
+                )
+            static_score = float(static_score[method])
+        method_idx = methods.index(method)
+        results_by_year = results_by_year.isel(method=method_idx, drop=True)
+    elif isinstance(static_score, dict):
+        if len(static_score) == 1:
+            static_score = float(next(iter(static_score.values())))
+        else:
+            raise ValueError(
+                "Multiple static scores provided; pass method=... to select one."
+            )
 
     return _plot_results_by_year(
         results_by_year=results_by_year,
@@ -2934,6 +3025,13 @@ def _node_scores_from_characterized_inventory(
     characterized_inventory: xr.DataArray,
 ) -> dict[tuple[int, int], float]:
     """Build (year, act_idx) -> score mapping from characterized inventory."""
+    if "method" in characterized_inventory.dims:
+        methods = characterized_inventory.coords["method"].values
+        if len(methods) != 1:
+            raise ValueError(
+                "characterized_inventory has multiple methods; select one before plotting."
+            )
+        characterized_inventory = characterized_inventory.sel(method=methods[0])
     if "activity" not in characterized_inventory.dims:
         raise ValueError(
             "characterized_inventory must include an 'activity' dimension."

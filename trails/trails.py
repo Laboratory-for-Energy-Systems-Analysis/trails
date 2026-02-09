@@ -1561,9 +1561,9 @@ class Trails:
         methods: list[str],
         amount: float = 1.0,
         debug: bool = False,
+        ei_version: str = "3.11",
     ) -> None:
         """Run static LCA using this Trails instance."""
-
         lca_static(
             trails=self,
             year=int(year),
@@ -1571,6 +1571,7 @@ class Trails:
             methods=methods,
             amount=float(amount),
             debug=debug,
+            ei_version=ei_version,
         )
         return None
 

@@ -105,14 +105,14 @@ def _build_flowkey_to_flowid(trails: Trails) -> dict[tuple, int]:
     return out
 
 
-def _build_cf_vector_flowid_space(
+def _build_cf_matrix_flowid_space(
     trails: Trails,
     methods: List[str],
     ei_version: str,
     char_cache: dict[tuple, np.ndarray],
     debug: bool = False,
 ) -> np.ndarray:
-    """Build a CF vector aligned with Trails flow-id space.
+    """Build a CF matrix aligned with Trails flow-id space.
 
     :param trails: Trails instance with biosphere metadata.
     :type trails: Trails
@@ -120,18 +120,18 @@ def _build_cf_vector_flowid_space(
     :type methods: list[str]
     :param ei_version: Ecoinvent release identifier.
     :type ei_version: str
-    :param char_cache: Cache mapping for characterization vectors.
+    :param char_cache: Cache mapping for characterization matrices.
     :type char_cache: dict
     :param debug: Whether to emit debug logging.
     :type debug: bool
-    :returns: CF vector in flow-id space.
+    :returns: CF matrix in flow-id space (method x flow).
     :rtype: numpy.ndarray
     """
     n_flows = int(trails.B.shape[2]) if trails.B is not None else 0
     if n_flows <= 0:
-        return np.zeros(0, dtype=np.float64)
+        return np.zeros((0, 0), dtype=np.float64)
 
-    cache_key = ("cf_vector_flowid_space", ei_version, tuple(methods))
+    cache_key = ("cf_matrix_flowid_space", ei_version, tuple(methods))
     if cache_key in char_cache:
         return char_cache[cache_key]
 
@@ -139,14 +139,17 @@ def _build_cf_vector_flowid_space(
 
     methods_dict = get_lcia_methods(methods=methods, ei_version=ei_version)
 
-    cf = np.zeros(n_flows, dtype=np.float64)
+    cf = np.zeros((len(methods), n_flows), dtype=np.float64)
 
-    for _mname, exc in methods_dict.items():
+    for m, mname in enumerate(methods):
+        exc = methods_dict.get(mname)
+        if exc is None:
+            raise ValueError(f"LCIA method not found: {mname}")
         for flow_key, val in exc.items():
             fid = flowkey_to_flowid.get(flow_key)
             if fid is None:
                 continue
-            cf[fid] += float(val)
+            cf[m, fid] += float(val)
 
     char_cache[cache_key] = cf
     return cf
@@ -164,7 +167,7 @@ def build_characterized_inventory(
     if trails.inventory is None:
         raise ValueError("Trails.inventory is empty; run LCA first.")
 
-    cf = _build_cf_vector_flowid_space(
+    cf = _build_cf_matrix_flowid_space(
         trails=trails,
         methods=methods,
         ei_version=ei_version,
@@ -185,19 +188,34 @@ def build_characterized_inventory(
         inv_data = sparse.COO.from_numpy(np.asarray(inv_data))
 
     has_root = "root activity" in inventory.dims
-    if has_root:
-        characterized = inv_data * cf.astype(np.float64)[None, :, None, None]
+    cf = cf.astype(np.float64, copy=False)
+    if len(methods) == 1:
+        if has_root:
+            cf_b = cf[0][None, :, None, None]
+            characterized = inv_data * cf_b
+        else:
+            cf_b = cf[0][None, :, None]
+            characterized = inv_data * cf_b
+        characterized = sparse.stack([characterized], axis=0)
     else:
-        characterized = inv_data * cf.astype(np.float64)[None, :, None]
+        blocks = []
+        if has_root:
+            for m in range(cf.shape[0]):
+                blocks.append(inv_data * cf[m][None, :, None, None])
+        else:
+            for m in range(cf.shape[0]):
+                blocks.append(inv_data * cf[m][None, :, None])
+        characterized = sparse.stack(blocks, axis=0)
 
-    dims = ("activity", "flow", "year")
+    dims = ("method", "activity", "flow", "year")
     coords = {
+        "method": np.asarray(methods, dtype=object),
         "activity": inventory.coords["activity"],
         "flow": inventory.coords["flow"],
         "year": inventory.coords["year"],
     }
     if has_root:
-        dims = ("activity", "flow", "year", "root activity")
+        dims = ("method", "activity", "flow", "year", "root activity")
         coords["root activity"] = inventory.coords["root activity"]
 
     trails.characterized_inventory = xr.DataArray(
@@ -216,11 +234,15 @@ def get_cf_vector(
     debug: bool = False,
     ei_version: str = "3.11",
 ) -> np.ndarray:
-    """Return a dense CF vector aligned to trails.B flow dimension."""
-    return _build_cf_vector_flowid_space(
+    """Return a dense CF vector aligned to trails.B flow dimension.
+
+    When multiple methods are provided, the vector is the sum across methods.
+    """
+    cf = _build_cf_matrix_flowid_space(
         trails=trails,
         methods=methods,
         ei_version=ei_version,
         char_cache=char_cache,
         debug=debug,
     )
+    return cf.sum(axis=0)

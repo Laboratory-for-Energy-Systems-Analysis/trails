@@ -377,6 +377,19 @@ def run_fair_delta_rf(
             & (df_pert_local["region"].str.lower() == "world")
         ].copy()
         if specie is None:
+            for specie_name in delta_by_species.columns:
+                rows = df_pert_local[df_pert_local["variable"] == specie_name]
+                if rows.empty:
+                    continue
+                unit = rows["unit"].iloc[0]
+                series = delta_by_species[specie_name]
+                for year, val in series.items():
+                    ycol = str(int(year))
+                    if ycol not in df_pert_local.columns:
+                        continue
+                    idx = rows.index[0]
+                    add = _convert_kg_to_unit(np.array([val]), unit)[0]
+                    df_pert_local.loc[idx, ycol] = df_pert_local.loc[idx, ycol] + add
             return df_pert_local
         rows = df_pert_local[df_pert_local["variable"] == specie]
         if rows.empty:

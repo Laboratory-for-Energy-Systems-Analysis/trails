@@ -193,6 +193,7 @@ def lca_static(
     methods: List[str],
     amount: float = 1.0,
     debug: bool = False,
+    ei_version: str = "3.11",
 ) -> None:
     """Run a static LCA for a single functional unit and year."""
     prev_inventory = trails.inventory
@@ -257,7 +258,29 @@ def lca_static(
         trails=trails, methods=methods, char_cache=_CHAR_CACHE
     )
 
-    trails.static_score = float(characterized_inventory.data.sum())
+    if "method" in characterized_inventory.dims:
+        inv = trails.inventory
+        if inv is None:
+            raise RuntimeError("Static inventory missing while scoring methods.")
+        inv_data = inv.data
+        if not isinstance(inv_data, sparse.COO):
+            inv_data = sparse.COO.from_numpy(np.asarray(inv_data))
+        flow_coords = inv_data.coords[1]
+        vals = inv_data.data
+        scores: dict[str, float] = {}
+        for m in methods:
+            cf = get_cf_vector(
+                trails=trails,
+                methods=[m],
+                char_cache=_CHAR_CACHE,
+                debug=debug,
+                ei_version=ei_version,
+            )
+            score = float(np.dot(vals, cf[flow_coords]))
+            scores[str(m)] = score
+        trails.static_score = scores
+    else:
+        trails.static_score = float(characterized_inventory.data.sum())
 
     trails.inventory = prev_inventory
     trails.characterized_inventory = prev_characterized
