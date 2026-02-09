@@ -268,17 +268,13 @@ def build_datapackage_for_year_from_trails(
     return dp, technosphere_indices, biosphere_indices, uncertain_parameters
 
 
-def _reference_product_id_from_activity_id(lca_obj, activity_id: int) -> int:
+def _reference_product_from_activity_id(lca_obj, activity_id: int) -> tuple[int, float]:
     act_map = getattr(lca_obj.dicts, "activity", None)
     prod_map = getattr(lca_obj.dicts, "product", None)
     if not act_map or not prod_map:
         raise ValueError("LCA object missing dicts.activity or dicts.product")
 
     activity_id = int(activity_id)
-
-    # Common case: activity ids are also valid product ids (diagonal identity)
-    if activity_id in prod_map:
-        return activity_id
 
     if activity_id not in act_map:
         raise KeyError(f"activity_id={activity_id} not in lca_obj.dicts.activity")
@@ -299,20 +295,22 @@ def _reference_product_id_from_activity_id(lca_obj, activity_id: int) -> int:
     if rows.size == 0:
         raise ValueError(f"No technosphere entries found for activity_id={activity_id}")
 
-    # YOUR convention: production is positive (typically +1)
-    prod_mask = vals > 0
-
-    # Prefer +1-ish production
-    if np.any(prod_mask):
-        pos_rows = rows[prod_mask]
-        pos_vals = vals[prod_mask]
-        # closest to +1
-        k = int(np.argmin(np.abs(pos_vals - 1.0)))
-        prod_row_pos = int(pos_rows[k])
+    if activity_id in prod_map:
+        prod_row_pos = int(prod_map[activity_id])
+        mask = rows == prod_row_pos
+        if np.any(mask):
+            prod_value = float(vals[mask][0])
+        else:
+            prod_value = 0.0
     else:
-        # No positive entries found: fall back to largest magnitude entry for diagnostics
-        k = int(np.argmax(np.abs(vals)))
+        prod_row_pos = None
+        prod_value = 0.0
+
+    if prod_row_pos is None or prod_value == 0.0:
+        # Prefer a production exchange closest to +1 in magnitude
+        k = int(np.argmin(np.abs(np.abs(vals) - 1.0)))
         prod_row_pos = int(rows[k])
+        prod_value = float(vals[k])
 
     if prod_row_pos not in pos_to_prod_id:
         raise KeyError(
@@ -320,7 +318,12 @@ def _reference_product_id_from_activity_id(lca_obj, activity_id: int) -> int:
             f"(activity_id={activity_id}, act_pos={act_pos})"
         )
 
-    return int(pos_to_prod_id[prod_row_pos])
+    return int(pos_to_prod_id[prod_row_pos]), prod_value
+
+
+def _reference_product_id_from_activity_id(lca_obj, activity_id: int) -> int:
+    prod_id, _ = _reference_product_from_activity_id(lca_obj, activity_id)
+    return prod_id
 
 
 def _extract_supply_fast_cached(
