@@ -66,6 +66,10 @@ You can import user-provided inventories from Excel using ``bw2io``. When you
 omit ``year`` and ``scenario_label``, the exchanges are applied to all template
 years and interpolated across annual years.
 
+Sign conventions for Excel imports:
+- Technosphere exchanges are sign-flipped on import (positive becomes negative, and vice versa).
+- Production and biosphere exchanges are stored as-is.
+
 .. code-block:: python
 
     from trails import Trails
