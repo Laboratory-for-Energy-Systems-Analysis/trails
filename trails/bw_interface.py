@@ -276,11 +276,22 @@ def _reference_product_from_activity_id(lca_obj, activity_id: int) -> tuple[int,
 
     activity_id = int(activity_id)
 
+    ref_cache = getattr(lca_obj, "_ref_product_cache", None)
+    if ref_cache is None:
+        ref_cache = {}
+        setattr(lca_obj, "_ref_product_cache", ref_cache)
+    cached = ref_cache.get(activity_id)
+    if cached is not None:
+        return cached
+
     if activity_id not in act_map:
         raise KeyError(f"activity_id={activity_id} not in lca_obj.dicts.activity")
 
     act_pos = int(act_map[activity_id])
-    pos_to_prod_id = {int(pos): int(pid) for pid, pos in prod_map.items()}
+    pos_to_prod_id = getattr(lca_obj, "_pos_to_prod_id_cache", None)
+    if pos_to_prod_id is None:
+        pos_to_prod_id = {int(pos): int(pid) for pid, pos in prod_map.items()}
+        setattr(lca_obj, "_pos_to_prod_id_cache", pos_to_prod_id)
 
     col = lca_obj.technosphere_matrix[:, act_pos]
     if hasattr(col, "tocoo"):
@@ -318,7 +329,9 @@ def _reference_product_from_activity_id(lca_obj, activity_id: int) -> tuple[int,
             f"(activity_id={activity_id}, act_pos={act_pos})"
         )
 
-    return int(pos_to_prod_id[prod_row_pos]), prod_value
+    result = (int(pos_to_prod_id[prod_row_pos]), prod_value)
+    ref_cache[activity_id] = result
+    return result
 
 
 def _reference_product_id_from_activity_id(lca_obj, activity_id: int) -> int:

@@ -539,37 +539,21 @@ def import_excel_inventory(
             return matrix
         return sparse.COO(coords=matrix.coords, data=matrix.data, shape=new_shape)
 
-    def _replace_sparse_entries(
+    def _append_sparse_entries(
         matrix: sparse.COO,
         coords: list[tuple[int, int, int]],
         data: list[float],
-    ) -> tuple[sparse.COO, int]:
+    ) -> sparse.COO:
         if not coords:
-            return matrix, 0
+            return matrix
 
         coords_arr = np.array(coords, dtype=trails.index_dtype).T
         data_arr = np.array(data, dtype=trails.value_dtype)
 
-        flat = np.ravel_multi_index(coords_arr, matrix.shape)
-        flat_unique, inverse = np.unique(flat, return_inverse=True)
-        data_agg = np.zeros_like(flat_unique, dtype=trails.value_dtype)
-        np.add.at(data_agg, inverse, data_arr)
-        coords_arr = np.array(
-            np.unravel_index(flat_unique, matrix.shape), dtype=trails.index_dtype
-        )
+        coords_all = np.concatenate([matrix.coords, coords_arr], axis=1)
+        data_all = np.concatenate([matrix.data, data_arr], axis=0)
 
-        old_flat = np.ravel_multi_index(matrix.coords, matrix.shape)
-        keep_mask = ~np.isin(old_flat, flat_unique)
-        replaced_count = int(np.isin(flat_unique, old_flat).sum())
-        if keep_mask.any():
-            coords_kept = matrix.coords[:, keep_mask]
-            data_kept = matrix.data[keep_mask]
-            coords_arr = np.concatenate([coords_kept, coords_arr], axis=1)
-            data_arr = np.concatenate([data_kept, data_agg], axis=0)
-        else:
-            data_arr = data_agg
-
-        return sparse.COO(coords=coords_arr, data=data_arr, shape=matrix.shape), replaced_count
+        return sparse.COO(coords=coords_all, data=data_all, shape=matrix.shape)
 
     max_act_idx = max(activity_mapping) if activity_mapping else -1
     max_flow_idx = max(biosphere_mapping) if biosphere_mapping else -1
@@ -673,8 +657,27 @@ def import_excel_inventory(
     trails.A = _drop_rows(trails.A, target_t, affected_acts)
     trails.B = _drop_rows(trails.B, target_t, affected_acts)
 
-    trails.A, replaced_a = _replace_sparse_entries(trails.A, a_coords, a_data)
-    trails.B, replaced_b = _replace_sparse_entries(trails.B, b_coords, b_data)
+    if a_coords:
+        flat = np.ravel_multi_index(
+            np.array(a_coords, dtype=trails.index_dtype).T, trails.A.shape
+        )
+        if np.unique(flat).size != flat.size:
+            raise ValueError(
+                "Duplicate technosphere exchanges detected in import; "
+                "resolve duplicates before importing."
+            )
+    if b_coords:
+        flat = np.ravel_multi_index(
+            np.array(b_coords, dtype=trails.index_dtype).T, trails.B.shape
+        )
+        if np.unique(flat).size != flat.size:
+            raise ValueError(
+                "Duplicate biosphere exchanges detected in import; "
+                "resolve duplicates before importing."
+            )
+
+    trails.A = _append_sparse_entries(trails.A, a_coords, a_data)
+    trails.B = _append_sparse_entries(trails.B, b_coords, b_data)
 
     trails._A_row_cache.clear()
     trails._direct_bio_cache_by_year.clear()
@@ -696,7 +699,7 @@ def import_excel_inventory(
         "Imported Excel inventory: "
         f"new_activities={new_activity_count} matched_existing_activities={len(updated_activity_ids)} "
         f"new_flows={new_biosphere_count} matched_existing_flows={len(updated_biosphere_ids)} "
-        f"unlinked={unlinked_count} replaced_A={replaced_a} replaced_B={replaced_b}"
+        f"unlinked={unlinked_count} replaced_A=rows replaced_B=rows"
     )
 
     if new_activity_rows:
@@ -750,5 +753,7 @@ def import_excel_inventory(
         "matched_existing_activities": len(updated_activity_ids),
         "matched_existing_flows": len(updated_biosphere_ids),
         "unlinked": unlinked_count,
+        "replaced_A": "rows",
+        "replaced_B": "rows",
         "scenario_indices": [int(t) for _, t in targets],
     }
