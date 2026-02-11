@@ -14,7 +14,9 @@ from fair.io import DEFAULT_PROPERTIES_FILE
 
 from .filesystem_constants import DATA_DIR
 
-DEFAULT_EMISSIONS_CSV = DATA_DIR / "scenarios" / "remind_fair_1750-2500.csv"
+DEFAULT_EMISSIONS_CSV = (
+    DATA_DIR / "scenarios" / "extensions_1750-2500_with_scenarios.csv"
+)
 DEFAULT_MAPPING_YAML = DATA_DIR / "scenarios" / "fair_species_map.yaml"
 DEFAULT_CONFIGS_CSV: Path | None = (
     DATA_DIR / "scenarios" / "calibrated_constrained_parameters_calibration1.4.1.csv"
@@ -24,11 +26,34 @@ DEFAULT_PROPERTIES_CSV: Path | None = (
 )
 
 
+def _extend_years_freeze_last(
+    df: pd.DataFrame, *, target_year: int = 2500
+) -> pd.DataFrame:
+    """Extend year columns to target_year by freezing last available values."""
+    year_cols, year_vals = _extract_year_columns(df)
+    if not year_cols:
+        return df
+    max_year = max(year_vals)
+    has_half = any(abs(v - round(v)) > 1e-9 for v in year_vals)
+    target = float(target_year) + (0.5 if has_half else 0.0)
+    if max_year >= target:
+        return df
+    last_col = year_cols[-1]
+    # Step by 1.0 year (preserving .5 if present)
+    y = max_year + 1.0
+    while y <= target + 1e-9:
+        col = f"{y:.1f}" if has_half else str(int(y))
+        df[col] = df[last_col]
+        y += 1.0
+    return df
+
+
 def load_emissions_csv(path: str | Path = DEFAULT_EMISSIONS_CSV) -> pd.DataFrame:
     """Load the merged REMIND/FAIR emissions CSV (IAMC-style)."""
     path = Path(path)
     df = pd.read_csv(path)
     df = _normalize_emissions_columns(df)
+    df = _extend_years_freeze_last(df, target_year=2500)
     return df
 
 
@@ -128,11 +153,11 @@ def _normalize_emissions_columns(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def _extract_year_columns(df: pd.DataFrame) -> tuple[list[str], list[int]]:
-    """Return ordered IAMC year columns and their integer values."""
+def _extract_year_columns(df: pd.DataFrame) -> tuple[list[str], list[float]]:
+    """Return ordered IAMC year columns and their numeric values."""
     meta_cols = {"scenario", "region", "variable", "unit"}
     year_cols: list[str] = []
-    year_vals: list[int] = []
+    year_vals: list[float] = []
     for col in df.columns:
         if col in meta_cols:
             continue
@@ -142,14 +167,13 @@ def _extract_year_columns(df: pd.DataFrame) -> tuple[list[str], list[int]]:
             continue
         if not np.isfinite(val):
             continue
-        if float(val).is_integer():
-            year_cols.append(col)
-            year_vals.append(int(val))
+        year_cols.append(col)
+        year_vals.append(float(val))
 
     if not year_cols:
         return [], []
 
-    order = np.argsort(np.array(year_vals, dtype=int))
+    order = np.argsort(np.array(year_vals, dtype=float))
     year_cols = [year_cols[i] for i in order]
     year_vals = [year_vals[i] for i in order]
     return year_cols, year_vals

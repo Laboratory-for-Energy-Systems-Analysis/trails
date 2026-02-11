@@ -114,7 +114,7 @@ class Trails:
         self.B: Optional[sparse.COO] = None
         self.inventory: Optional[xr.DataArray] = None
         self.characterized_inventory: Optional[xr.DataArray] = None
-        self.static_score: Optional[float] = None
+        self.static_score: Optional[float | list[float]] = None
         self._inventory_years: Optional[np.ndarray] = None
         self._inventory_year_index: dict[int, int] = {}
         self._inventory_coords: Optional[list[list[np.ndarray]]] = None

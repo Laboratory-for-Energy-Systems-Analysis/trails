@@ -267,7 +267,7 @@ def lca_static(
             inv_data = sparse.COO.from_numpy(np.asarray(inv_data))
         flow_coords = inv_data.coords[1]
         vals = inv_data.data
-        scores: dict[str, float] = {}
+        scores_list: list[float] = []
         for m in methods:
             cf = get_cf_vector(
                 trails=trails,
@@ -277,8 +277,8 @@ def lca_static(
                 ei_version=ei_version,
             )
             score = float(np.dot(vals, cf[flow_coords]))
-            scores[str(m)] = score
-        trails.static_score = scores
+            scores_list.append(score)
+        trails.static_score = scores_list
     else:
         trails.static_score = float(characterized_inventory.data.sum())
 

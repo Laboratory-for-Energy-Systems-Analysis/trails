@@ -2109,7 +2109,7 @@ def plot_temporal_scores(
     y2_headroom: float = 0.05,
     show_cumulative_in_legend: bool = False,
     flow_groupby_name: bool = False,
-    static_score: Optional[float] | dict[str, float] = None,
+    static_score: Optional[float] | dict[str, float] | list[float] = None,
     static_score_label: str = "Static score",
     static_score_dash: str = "dash",
     static_score_color: str = "black",
@@ -2134,7 +2134,13 @@ def plot_temporal_scores(
             for idx, m in enumerate(methods):
                 selected = results_by_year.isel(method=idx, drop=True)
                 score_for_method: Optional[float] = None
-                if isinstance(static_score, dict):
+                if isinstance(static_score, list):
+                    if idx >= len(static_score):
+                        raise ValueError(
+                            "Static score list length does not match methods."
+                        )
+                    score_for_method = float(static_score[idx])
+                elif isinstance(static_score, dict):
                     if str(m) not in static_score:
                         raise ValueError(
                             f"Static score missing for method '{m}'. "
@@ -2186,7 +2192,23 @@ def plot_temporal_scores(
             raise ValueError(
                 f"Requested method '{method}' not found. Available: {methods}"
             )
-        if isinstance(static_score, dict):
+        if isinstance(static_score, list):
+            if method is None:
+                raise ValueError(
+                    "Static score list provided but no method was selected."
+                )
+            methods_list = results_by_year.coords["method"].values.tolist()
+            if method not in methods_list:
+                raise ValueError(
+                    f"Method '{method}' not found in characterized inventory."
+                )
+            idx = methods_list.index(method)
+            if idx >= len(static_score):
+                raise ValueError(
+                    "Static score list length does not match methods."
+                )
+            static_score = float(static_score[idx])
+        elif isinstance(static_score, dict):
             if method not in static_score:
                 raise ValueError(
                     f"Static score missing for method '{method}'. "
@@ -2198,6 +2220,9 @@ def plot_temporal_scores(
     elif isinstance(static_score, dict):
         if len(static_score) == 1:
             static_score = float(next(iter(static_score.values())))
+    elif isinstance(static_score, list):
+        if len(static_score) == 1:
+            static_score = float(static_score[0])
         else:
             raise ValueError(
                 "Multiple static scores provided; pass method=... to select one."
@@ -2674,7 +2699,8 @@ def _build_link_arrays(
 
 
 def plot_temporal_sankey(
-    provenance: Dict[tuple[int, int], Dict[tuple[tuple[int, int], ...], float]],
+    provenance: Dict[tuple[int, int], Dict[tuple[tuple[int, int], ...], float]]
+    | dict[str, Any],
     trails: Trails,
     start_year: int,
     start_act_idx: int,
@@ -2687,6 +2713,7 @@ def plot_temporal_sankey(
     node_thickness: int = 20,
     node_pad: int = 15,
     font_size: int = 11,
+    filename: str | None = None,
 ) -> go.Figure:
     """Build an impact-weighted temporal Sankey plot.
 
@@ -2694,8 +2721,9 @@ def plot_temporal_sankey(
     sums between those nodes, preserving activity-level contributions in
     hover text.
 
-    :param provenance: Provenance mapping from traversal.
-    :type provenance: dict[tuple[int, int], dict[tuple[tuple[int, int], ...], float]]
+    :param provenance: Provenance mapping from traversal or a Sankey tree from
+        ``build_temporal_sankey_tree``.
+    :type provenance: dict
     :param trails: Trails instance for metadata.
     :type trails: Trails
     :param start_year: Root demand year.
@@ -2720,17 +2748,49 @@ def plot_temporal_sankey(
     :type node_pad: int
     :param font_size: Font size for labels.
     :type font_size: int
+    :param filename: Optional HTML filename to write the figure to disk.
+    :type filename: str | None
     :returns: Plotly figure.
     :rtype: plotly.graph_objects.Figure
     """
+
+    # If given a Sankey tree (from build_temporal_sankey_tree), use the tree path.
+    if isinstance(provenance, dict) and "node" in provenance and "children" in provenance:
+        sankey_arrays = build_sankey_arrays_from_tree(
+            provenance,
+            trails=trails,
+            edge_weight="score",
+        )
+        sankey = go.Sankey(
+            domain=dict(x=[0.0, 1.0], y=[0.0, 1.0]),
+            arrangement="snap",
+            node=dict(
+                pad=node_pad,
+                thickness=node_thickness,
+                label=sankey_arrays["labels"],
+            ),
+            link=dict(
+                source=sankey_arrays["sources"],
+                target=sankey_arrays["targets"],
+                value=sankey_arrays["values"],
+            ),
+        )
+        fig = go.Figure(sankey)
+        fig.update_layout(
+            title=title,
+            width=fig_width,
+            height=fig_height,
+            font=dict(size=font_size),
+        )
+        if filename:
+            fig.write_html(filename)
+        return fig
 
     full_path_amounts = _build_full_path_amounts(provenance, start_year, start_act_idx)
     selected_paths = _select_paths(full_path_amounts, top_n_paths)
     node_keys, depth_map = _build_depth_map(selected_paths)
     if node_intensity is None:
-        raise ValueError(
-            "node_intensity is required; provide impact intensities keyed by (year, act_idx)."
-        )
+        node_intensity = _node_scores_from_trails(trails)
 
     act_meta = _collect_activity_meta(trails)
     activity_label = lambda act_idx: _activity_label_from_meta(act_meta, act_idx)
@@ -2788,6 +2848,8 @@ def plot_temporal_sankey(
         margin=dict(l=40, r=40, t=60, b=60),
         font=dict(size=font_size),
     )
+    if filename:
+        fig.write_html(filename)
 
     return fig
 

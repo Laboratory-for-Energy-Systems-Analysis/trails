@@ -446,6 +446,15 @@ def run_fair_delta_rf(
         if scale_factor is None:
             scale_factor = 1.0
 
+    # Determine if the emissions baseline uses half-year columns (e.g., 1750.5)
+    base_year_cols, base_year_vals = _extract_year_columns(df)
+    has_half_years = any(abs(v - round(v)) > 1e-9 for v in base_year_vals)
+
+    def _year_col_name(year: int) -> str:
+        if has_half_years:
+            return f"{year + 0.5:.1f}"
+        return str(int(year))
+
     if scale_factor is None and not delta_by_species.empty:
         df_base = df[
             (df["scenario"] == scenario) & (df["region"].str.lower() == "world")
@@ -459,7 +468,7 @@ def run_fair_delta_rf(
             unit = rows["unit"].iloc[0]
             base_row = rows.iloc[0]
             for year, val in delta_by_species[specie].items():
-                ycol = str(int(year))
+                ycol = _year_col_name(int(year))
                 if ycol not in df_base.columns:
                     continue
                 base_val = base_row[ycol]
@@ -497,7 +506,7 @@ def run_fair_delta_rf(
                 unit = rows["unit"].iloc[0]
                 series = delta_by_species[specie_name]
                 for year, val in series.items():
-                    ycol = str(int(year))
+                    ycol = _year_col_name(int(year))
                     if ycol not in df_pert_local.columns:
                         continue
                     idx = rows.index[0]
@@ -510,7 +519,7 @@ def run_fair_delta_rf(
         unit = rows["unit"].iloc[0]
         series = delta_series if delta_series is not None else delta_by_species[specie]
         for year, val in series.items():
-            ycol = str(int(year))
+            ycol = _year_col_name(int(year))
             if ycol not in df_pert_local.columns:
                 continue
             idx = rows.index[0]
@@ -543,7 +552,10 @@ def run_fair_delta_rf(
                 except ValueError:
                     issues.append(f"{specie}: unsupported unit '{unit}'")
                     continue
-                expected = delta_by_species[specie].reindex(year_vals, fill_value=0.0)
+                expected = delta_by_species[specie].copy()
+                if has_half_years:
+                    expected.index = expected.index + 0.5
+                expected = expected.reindex(year_vals, fill_value=0.0)
                 expected_kg = expected.to_numpy(dtype=float)
                 abs_diff = np.abs(diff_kg - expected_kg)
                 denom = np.maximum(np.abs(expected_kg), 1e-12)
@@ -586,7 +598,7 @@ def run_fair_delta_rf(
     else:
         forcing_base = f_base.forcing.sel(scenario=scenario, config=f_base.configs[0])
         temp_base = f_base.temperature.sel(scenario=scenario, config=f_base.configs[0])
-    fair_years = [int(y) for y in forcing_base.coords["timebounds"].values.tolist()]
+    fair_years = [float(y) for y in forcing_base.coords["timebounds"].values.tolist()]
     year_to_fair_idx = {y: i for i, y in enumerate(fair_years)}
 
     inv = trails.inventory
@@ -695,7 +707,8 @@ def run_fair_delta_rf(
         fair_idx = []
         for yi in y_idx:
             y = inv_years[int(yi)]
-            fi = year_to_fair_idx.get(int(y))
+            y_key = float(y) + (0.5 if has_half_years else 0.0)
+            fi = year_to_fair_idx.get(y_key)
             if fi is None:
                 fair_idx.append(-1)
             else:
@@ -794,7 +807,8 @@ def run_fair_delta_rf(
         fair_idx = []
         for yi in y_idx:
             y = inv_years[int(yi)]
-            fi = year_to_fair_idx.get(int(y))
+            y_key = float(y) + (0.5 if has_half_years else 0.0)
+            fi = year_to_fair_idx.get(y_key)
             if fi is None:
                 fair_idx.append(-1)
             else:
@@ -890,6 +904,17 @@ def run_fair_delta_rf(
                     )
                 delta_forcing = forcing_pert - forcing_base
                 delta_temp = temp_pert - temp_base
+                if debug:
+                    try:
+                        arr = np.asarray(delta_temp.values, dtype=float)
+                        print(
+                            "FAIR debug: delta_temp min/max/finite",
+                            float(np.nanmin(arr)),
+                            float(np.nanmax(arr)),
+                            int(np.isfinite(arr).sum()),
+                        )
+                    except Exception:
+                        pass
                 if scale_factor is None:
                     scale_factor = 1.0
                 if scale_factor != 1.0:
@@ -952,6 +977,17 @@ def run_fair_delta_rf(
                     )
                 delta_forcing = forcing_pert - forcing_base
                 delta_temp = temp_pert - temp_base
+                if debug:
+                    try:
+                        arr = np.asarray(delta_temp.values, dtype=float)
+                        print(
+                            "FAIR debug: delta_temp min/max/finite",
+                            float(np.nanmin(arr)),
+                            float(np.nanmax(arr)),
+                            int(np.isfinite(arr).sum()),
+                        )
+                    except Exception:
+                        pass
                 if scale_factor is None:
                     scale_factor = 1.0
                 if scale_factor != 1.0:
@@ -1012,6 +1048,17 @@ def run_fair_delta_rf(
             )
         delta_forcing = forcing_pert - forcing_base
         delta_temp = temp_pert - temp_base
+        if debug:
+            try:
+                arr = np.asarray(delta_temp.values, dtype=float)
+                print(
+                    "FAIR debug: delta_temp min/max/finite",
+                    float(np.nanmin(arr)),
+                    float(np.nanmax(arr)),
+                    int(np.isfinite(arr).sum()),
+                )
+            except Exception:
+                pass
         if scale_factor is None:
             scale_factor = 1.0
         if scale_factor != 1.0:
@@ -1059,12 +1106,13 @@ def run_fair_delta_rf(
             shape=(n_quant, len(fair_years), n_flow, n_root),
         )
 
+    year_coord = np.array(fair_years, dtype=float)
     trails.instant_radiative_forcing = xr.DataArray(
         rf_sparse,
         dims=("quantile", "year", "flow", "root activity"),
         coords={
             "quantile": np.array(quantiles, dtype=float),
-            "year": np.array(fair_years, dtype=int),
+            "year": year_coord,
             "flow": inv_sum.coords["flow"],
             "root activity": inv_sum.coords["root activity"],
         },
@@ -1088,7 +1136,7 @@ def run_fair_delta_rf(
         dims=("quantile", "year", "flow", "root activity"),
         coords={
             "quantile": np.array(quantiles, dtype=float),
-            "year": np.array(fair_years, dtype=int),
+            "year": year_coord,
             "flow": inv_sum.coords["flow"],
             "root activity": inv_sum.coords["root activity"],
         },
