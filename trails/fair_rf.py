@@ -554,6 +554,25 @@ def run_fair_delta_rf(
                     issues.append(
                         f"{specie}: max_abs={max_abs:.3e} kg/yr max_rel={max_rel:.3e}"
                     )
+                    if debug:
+                        idx = int(np.nanargmax(abs_diff))
+                        year = int(year_vals[idx]) if idx < len(year_vals) else idx
+                        exp_val = float(expected_kg[idx])
+                        got_val = float(diff_kg[idx])
+                        print(
+                            "FAIR debug: worst mismatch",
+                            specie,
+                            "year",
+                            year,
+                            "expected",
+                            f"{exp_val:.3e}",
+                            "got",
+                            f"{got_val:.3e}",
+                            "abs",
+                            f"{abs_diff[idx]:.3e}",
+                            "rel",
+                            f"{rel_diff[idx]:.3e}",
+                        )
             if issues:
                 msg = "FAIR emissions delta check failed: " + "; ".join(issues)
                 if validate_raise:

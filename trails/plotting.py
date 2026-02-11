@@ -3430,6 +3430,11 @@ def plot_rf(
         yanchor="top",
         showarrow=False,
     )
+    fig.update_yaxes(
+        tickformat=".2e",
+        exponentformat="e",
+        showexponent="all",
+    )
     return fig
 
 
