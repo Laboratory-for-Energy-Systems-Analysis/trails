@@ -3478,9 +3478,7 @@ def plot_temp(
 
     if hasattr(delta_t.data, "nnz") and int(delta_t.data.nnz) == 0:
         if getattr(trails, "debug", False):
-            print(
-                "FAIR debug: delta_temperature is all zeros; proceeding with plot."
-            )
+            print("FAIR debug: delta_temperature is all zeros; proceeding with plot.")
 
     delta_t_all = delta_t
     if "quantile" in delta_t.dims:
@@ -3583,7 +3581,9 @@ def plot_temp(
         )
 
         if "quantile" in delta_t_all.dims and show_total_quantile_band:
-            quantiles = [float(q) for q in delta_t_all.coords["quantile"].values.tolist()]
+            quantiles = [
+                float(q) for q in delta_t_all.coords["quantile"].values.tolist()
+            ]
             q_low, q_high = 2.5, 97.5
             if q_low in quantiles and q_high in quantiles:
                 q_low_data = delta_t_all.sel(quantile=float(q_low), drop=True)
