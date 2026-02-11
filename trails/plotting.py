@@ -1752,29 +1752,28 @@ def _scores_to_results(
 
     # Pick what we attribute to
     if by_flow:
-        if "flow" in scores.dims:
-            attrib_dim = "flow"
-        else:
-            # If user asked by_flow but there is no flow dim, fall back to totals
-            attrib_dim = None
+        attrib_dim = "flow" if "flow" in scores.dims else None
         score_key = "scores_by_flow"
     else:
-        attrib_dim = "root activity" if "root activity" in scores.dims else "activity"
+        if "root activity" in scores.dims:
+            attrib_dim = "root activity"
+        elif "activity" in scores.dims:
+            attrib_dim = "activity"
+        elif "flow" in scores.dims:
+            attrib_dim = "flow"
+        else:
+            attrib_dim = None
         score_key = "scores_by_first_level_child"
 
-    # Start from input
     data = scores
 
-    # Collapse to (attrib_dim, year) if possible
+    # Totals only: sum everything except year
     if attrib_dim is None:
-        # totals only: sum everything except year
         extra_dims = [d for d in data.dims if d != "year"]
         if extra_dims:
             data = data.sum(dim=extra_dims)
-        # ensure ("year",) ordering
         if data.dims != ("year",):
             data = data.transpose("year")
-        # build results
         results: Dict[int, Dict[str, Any]] = {}
         arr = data.data
         if hasattr(arr, "todense"):
@@ -1785,25 +1784,19 @@ def _scores_to_results(
             results[int(year)] = {"scores": float(v[yi]), score_key: {}}
         return results
 
-    # If we have exchange-attributed tensor activity x year x root activity,
-    # and we're plotting by root activity, reduce over activity.
     if attrib_dim == "root activity" and "activity" in data.dims:
         data = data.sum(dim="activity")
 
-    # If we are plotting by activity but root activity exists, reduce it away.
     if attrib_dim == "activity" and "root activity" in data.dims:
         data = data.sum(dim="root activity")
 
-    # If any leftover dims exist, collapse them too (e.g. "method", "scenario")
     extra_dims = [d for d in data.dims if d not in (attrib_dim, "year")]
     if extra_dims:
         data = data.sum(dim=extra_dims)
 
-    # Ensure (attrib_dim, year) order
     if data.dims != (attrib_dim, "year"):
         data = data.transpose(attrib_dim, "year")
 
-    # Safely densify (compatible with sparse.AUTO_DENSIFY=False)
     arr = data.data
     if hasattr(arr, "todense"):
         vals = np.asarray(arr.todense(), dtype=float)
@@ -1816,7 +1809,6 @@ def _scores_to_results(
         int(y): {"scores": 0.0, score_key: {}} for y in years
     }
 
-    # vals shape: (attrib, year)
     for yi, year in enumerate(years):
         col = vals[:, yi]
         per: Dict[int, float] = {}
@@ -1927,9 +1919,22 @@ def _plot_results_by_year(
     if year_tick < 1:
         raise ValueError("year_tick must be >= 1")
 
-    score_key = (
-        "scores_by_flow" if show_flow_contributions else "scores_by_first_level_child"
-    )
+    if show_flow_contributions:
+        score_key = "scores_by_flow"
+    else:
+        if isinstance(results_by_year, dict):
+            # If caller used a non-root data source that falls back to flow attribution
+            # in _scores_to_results, detect that and switch the expected key.
+            if any(
+                isinstance(results_by_year.get(year), dict)
+                and "scores_by_flow" in results_by_year.get(year, {})
+                for year in results_by_year
+            ):
+                score_key = "scores_by_flow"
+            else:
+                score_key = "scores_by_first_level_child"
+        else:
+            score_key = "scores_by_first_level_child"
     if show_flow_contributions and flow_groupby_name:
         results_by_year = _aggregate_flow_results_by_name(results_by_year, trails)
     years = _select_years_from_results(results_by_year, year_range)
@@ -3220,8 +3225,11 @@ def plot_rf(
     by: Literal["flow", "root activity"] = "root activity",
     title: str = "Radiative forcing by gas/flow",
     method_label: str = "W/m²",
+    quantile: float | None = 50.0,
+    show_cumulative_quantile_band: bool = False,
+    band_quantiles: tuple[float, float] = (5.0, 95.0),
     cumulative: bool = False,
-    stacked: bool = False,
+    stacked: bool = True,
     legend_top_n: int = 5,
     width: Optional[int] = 550,
     height: Optional[int] = 450,
@@ -3250,6 +3258,21 @@ def plot_rf(
 
     if "year" not in rf.dims:
         raise ValueError("RF data must include a 'year' dimension.")
+
+    rf_all = rf
+    if "quantile" in rf.dims:
+        quantiles = [float(q) for q in rf.coords["quantile"].values.tolist()]
+        if quantile is None:
+            quantile = 50.0 if 50.0 in quantiles else quantiles[0]
+        if float(quantile) not in quantiles:
+            raise ValueError(
+                f"Requested quantile {quantile} not in available {quantiles}."
+            )
+        rf = rf.sel(quantile=float(quantile), drop=True)
+    elif show_cumulative_quantile_band:
+        raise ValueError(
+            "show_cumulative_quantile_band=True but instant_radiative_forcing has no quantile dimension."
+        )
 
     if by == "flow":
         if "flow" not in rf.dims:
@@ -3306,6 +3329,85 @@ def plot_rf(
         y_max=y_max,
         y2_max=y2_max,
     )
+
+    if show_cumulative_axis and show_cumulative_quantile_band:
+        q_low, q_high = band_quantiles
+        quantiles = [float(q) for q in rf_all.coords["quantile"].values.tolist()]
+        if q_low not in quantiles or q_high not in quantiles:
+            raise ValueError(
+                f"band_quantiles {band_quantiles} not in available {quantiles}."
+            )
+        q_low_data = rf_all.sel(quantile=float(q_low), drop=True)
+        q_high_data = rf_all.sel(quantile=float(q_high), drop=True)
+
+        def _results_for(data: xr.DataArray) -> dict[int, dict[str, Any]]:
+            if by == "flow":
+                if "root activity" in data.dims:
+                    data = data.sum(dim="root activity")
+                if "activity" in data.dims:
+                    data = data.sum(dim="activity")
+                return _scores_to_results(data, by_flow=True)
+            if "root activity" in data.dims:
+                data = data.sum(dim="flow")
+            if "activity" in data.dims:
+                data = data.sum(dim="activity")
+            return _scores_to_results(data, by_flow=False)
+
+        results_low = _results_for(q_low_data)
+        results_high = _results_for(q_high_data)
+        years = _select_years_from_results(results_by_year, year_range)
+
+        def _totals(res: dict[int, dict[str, Any]], years_seq: list[int]) -> np.ndarray:
+            out = np.zeros(len(years_seq), dtype=float)
+            for i, y in enumerate(years_seq):
+                payload = res.get(int(y), {})
+                out[i] = float(payload.get("scores", 0.0))
+            return out
+
+        total_low = _totals(results_low, years)
+        total_high = _totals(results_high, years)
+        if cumulative:
+            total_low = np.cumsum(total_low)
+            total_high = np.cumsum(total_high)
+        if yaxis_type == "log":
+            total_low = np.where(total_low > 0, total_low, log_eps)
+            total_high = np.where(total_high > 0, total_high, log_eps)
+        if not np.any(total_low) and not np.any(total_high):
+            fig.update_layout(title=dict(text=""))
+            fig.add_annotation(
+                text=title,
+                x=0.5,
+                y=-0.2,
+                xref="paper",
+                yref="paper",
+                xanchor="center",
+                yanchor="top",
+                showarrow=False,
+            )
+            return fig
+        fig.add_trace(
+            go.Scatter(
+                x=years,
+                y=total_low,
+                mode="lines",
+                line=dict(width=0),
+                showlegend=False,
+                hoverinfo="skip",
+                yaxis="y2",
+            )
+        )
+        fig.add_trace(
+            go.Scatter(
+                x=years,
+                y=total_high,
+                mode="lines",
+                fill="tonexty",
+                fillcolor="rgba(0,0,0,0.25)",
+                line=dict(width=0),
+                name=f"{q_low:g}-{q_high:g}th percentile",
+                yaxis="y2",
+            )
+        )
     fig.update_layout(title=dict(text=""))
     fig.add_annotation(
         text=title,
@@ -3318,6 +3420,222 @@ def plot_rf(
         showarrow=False,
     )
     return fig
+
+
+def plot_temp(
+    trails: Trails,
+    *,
+    by: Literal["flow", "root activity"] = "root activity",
+    title: str = "Temperature change by gas/flow",
+    method_label: str = "°C",
+    quantile: float | None = 50.0,
+    show_cumulative_quantile_band: bool = False,
+    band_quantiles: tuple[float, float] = (5.0, 95.0),
+    cumulative: bool = False,
+    stacked: bool = True,
+    legend_top_n: int = 5,
+    width: Optional[int] = 550,
+    height: Optional[int] = 450,
+    year_tick: int = 5,
+    year_range: Optional[Tuple[int, int]] = None,
+    show_year_grid: bool = True,
+    yaxis_type: Literal["linear", "log"] = "linear",
+    log_eps: float = 1e-30,
+    reference_year: Optional[int] = None,
+    show_cumulative_axis: bool = True,
+    cumulative_axis_label: str = "Cumulative temperature change",
+    legend_entrywidth: int = 260,
+    legend_row_height: int = 18,
+    legend_y: float = 1.0,
+    y2_headroom: float = 0.05,
+    show_cumulative_in_legend: bool = False,
+    flow_groupby_name: bool = False,
+    y_min: Optional[float] = None,
+    y_max: Optional[float] = None,
+    y2_max: Optional[float] = None,
+) -> go.Figure:
+    """Plot delta temperature time series by flow or root activity."""
+    delta_t = getattr(trails, "delta_temperature", None)
+    if delta_t is None:
+        raise ValueError("No delta temperature data stored on Trails.")
+
+    if "year" not in delta_t.dims:
+        raise ValueError("Delta temperature data must include a 'year' dimension.")
+
+    if hasattr(delta_t.data, "nnz") and int(delta_t.data.nnz) == 0:
+        if getattr(trails, "debug", False):
+            print(
+                "FAIR debug: delta_temperature is all zeros; proceeding with plot."
+            )
+
+    delta_t_all = delta_t
+    if "quantile" in delta_t.dims:
+        quantiles = [float(q) for q in delta_t.coords["quantile"].values.tolist()]
+        if quantile is None:
+            quantile = 50.0 if 50.0 in quantiles else quantiles[0]
+        if float(quantile) not in quantiles:
+            raise ValueError(
+                f"Requested quantile {quantile} not in available {quantiles}."
+            )
+        delta_t = delta_t.sel(quantile=float(quantile), drop=True)
+    elif show_cumulative_quantile_band:
+        raise ValueError(
+            "show_cumulative_quantile_band=True but delta_temperature has no quantile dimension."
+        )
+
+    if by == "flow":
+        if "flow" not in delta_t.dims:
+            raise ValueError(
+                "Delta temperature data must include a 'flow' dimension for by='flow'."
+            )
+        if "root activity" in delta_t.dims:
+            delta_t = delta_t.sum(dim="root activity")
+        if "activity" in delta_t.dims:
+            delta_t = delta_t.sum(dim="activity")
+        results_by_year = _scores_to_results(delta_t, by_flow=True)
+    elif by == "root activity":
+        if "root activity" not in delta_t.dims:
+            raise ValueError(
+                "Delta temperature data must include 'root activity' for by='root activity'."
+            )
+        data = delta_t
+        if "flow" in data.dims:
+            data = data.sum(dim="flow")
+        if "activity" in data.dims:
+            data = data.sum(dim="activity")
+        results_by_year = _scores_to_results(data, by_flow=False)
+    else:
+        raise ValueError("by must be 'flow' or 'root activity'.")
+
+    fig = _plot_results_by_year(
+        results_by_year=results_by_year,
+        trails=trails,
+        title=title,
+        method_label=method_label,
+        cumulative=cumulative,
+        stacked=stacked,
+        legend_top_n=legend_top_n,
+        show_flow_contributions=(by == "flow"),
+        width=width,
+        height=height,
+        year_tick=year_tick,
+        year_range=year_range,
+        show_year_grid=show_year_grid,
+        yaxis_type=yaxis_type,
+        log_eps=log_eps,
+        reference_year=reference_year,
+        show_cumulative_axis=show_cumulative_axis,
+        cumulative_axis_label=cumulative_axis_label,
+        legend_entrywidth=legend_entrywidth,
+        legend_row_height=legend_row_height,
+        legend_y=legend_y,
+        y2_headroom=y2_headroom,
+        show_cumulative_in_legend=show_cumulative_in_legend,
+        flow_groupby_name=flow_groupby_name,
+        static_score=None,
+        static_score_label="Static score",
+        static_score_dash="dash",
+        static_score_color="black",
+        y_min=y_min,
+        y_max=y_max,
+        y2_max=y2_max,
+    )
+
+    if show_cumulative_axis and show_cumulative_quantile_band:
+        q_low, q_high = band_quantiles
+        quantiles = [float(q) for q in delta_t_all.coords["quantile"].values.tolist()]
+        if q_low not in quantiles or q_high not in quantiles:
+            raise ValueError(
+                f"band_quantiles {band_quantiles} not in available {quantiles}."
+            )
+        q_low_data = delta_t_all.sel(quantile=float(q_low), drop=True)
+        q_high_data = delta_t_all.sel(quantile=float(q_high), drop=True)
+
+        def _results_for(data: xr.DataArray) -> dict[int, dict[str, Any]]:
+            if by == "flow":
+                if "root activity" in data.dims:
+                    data = data.sum(dim="root activity")
+                if "activity" in data.dims:
+                    data = data.sum(dim="activity")
+                return _scores_to_results(data, by_flow=True)
+            if "root activity" in data.dims:
+                data = data.sum(dim="flow")
+            if "activity" in data.dims:
+                data = data.sum(dim="activity")
+            return _scores_to_results(data, by_flow=False)
+
+        results_low = _results_for(q_low_data)
+        results_high = _results_for(q_high_data)
+        years = _select_years_from_results(results_by_year, year_range)
+
+        def _totals(res: dict[int, dict[str, Any]], years_seq: list[int]) -> np.ndarray:
+            out = np.zeros(len(years_seq), dtype=float)
+            for i, y in enumerate(years_seq):
+                payload = res.get(int(y), {})
+                out[i] = float(payload.get("scores", 0.0))
+            return out
+
+        total_low = _totals(results_low, years)
+        total_high = _totals(results_high, years)
+        if cumulative:
+            total_low = np.cumsum(total_low)
+            total_high = np.cumsum(total_high)
+        if yaxis_type == "log":
+            total_low = np.where(total_low > 0, total_low, log_eps)
+            total_high = np.where(total_high > 0, total_high, log_eps)
+        if not np.any(total_low) and not np.any(total_high):
+            fig.update_layout(title=dict(text=""))
+            fig.add_annotation(
+                text=title,
+                x=0.5,
+                y=-0.2,
+                xref="paper",
+                yref="paper",
+                xanchor="center",
+                yanchor="top",
+                showarrow=False,
+            )
+            return fig
+        fig.add_trace(
+            go.Scatter(
+                x=years,
+                y=total_low,
+                mode="lines",
+                line=dict(width=0),
+                showlegend=False,
+                hoverinfo="skip",
+                yaxis="y2",
+            )
+        )
+        fig.add_trace(
+            go.Scatter(
+                x=years,
+                y=total_high,
+                mode="lines",
+                fill="tonexty",
+                fillcolor="rgba(0,0,0,0.25)",
+                line=dict(width=0),
+                name=f"{q_low:g}-{q_high:g}th percentile",
+                yaxis="y2",
+            )
+        )
+    fig.update_layout(title=dict(text=""))
+    fig.add_annotation(
+        text=title,
+        x=0.5,
+        y=-0.2,
+        xref="paper",
+        yref="paper",
+        xanchor="center",
+        yanchor="top",
+        showarrow=False,
+    )
+    return fig
+
+
+def plot_delta_temperature(*args, **kwargs) -> go.Figure:
+    """Backward-compatible alias for plot_temp."""
+    return plot_temp(*args, **kwargs)
 
 
 def _configure_flow_axes(

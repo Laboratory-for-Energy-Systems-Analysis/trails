@@ -14,6 +14,7 @@ from tqdm import tqdm
 
 import fair  # hard dependency
 from fair.io import read_properties
+from fair.interface import initialise
 
 from .fair_io import (
     DEFAULT_CONFIGS_CSV,
@@ -117,6 +118,8 @@ def _run_fair_emissions(
     properties_csv: str | Path | None = DEFAULT_PROPERTIES_CSV,
     config_name: str | None = None,
     ghg_method: str | None = "myhre1998",
+    temperature_prescribed: bool | None = None,
+    debug: bool = False,
     progress: bool = False,
 ) -> fair.FAIR:
     df = _normalize_emissions_columns(emissions_df)
@@ -178,7 +181,10 @@ def _run_fair_emissions(
         config_name = cfg.index[0]
     configs = [config_name]
 
-    f = fair.FAIR()
+    if temperature_prescribed is None:
+        f = fair.FAIR()
+    else:
+        f = fair.FAIR(temperature_prescribed=bool(temperature_prescribed))
     if ghg_method is not None:
         f.ghg_method = ghg_method
     f.define_time(start_year, end_year, 1)
@@ -188,8 +194,24 @@ def _run_fair_emissions(
     f.allocate()
     f.fill_species_configs(filename=str(properties_csv))
     f.override_defaults(str(config_csv))
+    # Initialize temperature and forcing arrays to avoid NaNs in FaIR outputs.
+
+
+    initialise(f.temperature, 0)
+    initialise(f.forcing, 0)
     f.fill_from_pandas(mode="emissions", df=df)
     f.run(progress=progress)
+    if debug:
+        try:
+            tvals = np.asarray(f.temperature.values, dtype=float)
+            print(
+                "FAIR debug: temperature min/max/finite",
+                float(np.nanmin(tvals)),
+                float(np.nanmax(tvals)),
+                int(np.isfinite(tvals).sum()),
+            )
+        except Exception as exc:
+            print("FAIR debug: temperature stats failed:", exc)
     if not np.isfinite(f.forcing.values).any():
         forcing = _compute_ghg_forcing_from_concentration(f)
         if forcing is not None:
@@ -278,6 +300,38 @@ def _compute_ghg_forcing_from_concentration(f: fair.FAIR) -> np.ndarray | None:
     return None
 
 
+def _extract_fair_timeseries(da: xr.DataArray) -> np.ndarray:
+    """Extract a 1D time series from a FaIR DataArray."""
+    if "timebounds" in da.dims:
+        time_dim = "timebounds"
+    elif "time" in da.dims:
+        time_dim = "time"
+    else:
+        time_dim = da.dims[0]
+
+    if "layer" in da.dims and da.dims != (time_dim,):
+        layer_vals = da.coords.get("layer", None)
+        if layer_vals is not None:
+            layers = [str(x) for x in layer_vals.values.tolist()]
+            if "surface" in layers:
+                da = da.sel(layer="surface")
+            else:
+                da = da.isel(layer=0)
+        else:
+            da = da.isel(layer=0)
+
+    # Drop any remaining non-time dims by selecting first index
+    for d in list(da.dims):
+        if d == time_dim:
+            continue
+        da = da.isel({d: 0})
+
+    if da.dims != (time_dim,):
+        da = da.transpose(time_dim)
+
+    return np.asarray(da.values, dtype=float)
+
+
 def run_fair_delta_rf(
     trails: Any,
     *,
@@ -288,6 +342,7 @@ def run_fair_delta_rf(
     properties_csv: str | Path | None = DEFAULT_PROPERTIES_CSV,
     config_name: str | None = None,
     ghg_method: str | None = "myhre1998",
+    temperature_prescribed: bool | None = False,
     scale_factor: float | None = None,
     scale_target_fraction: float = 0.01,
     scaling_factor: float | None = None,
@@ -317,6 +372,8 @@ def run_fair_delta_rf(
         properties_csv=properties_csv,
         config_name=config_name,
         ghg_method=ghg_method,
+        temperature_prescribed=temperature_prescribed,
+        debug=debug,
         progress=False,
     )
 
@@ -449,6 +506,7 @@ def run_fair_delta_rf(
                     print(msg)
 
     forcing_base = f_base.forcing.sel(scenario=scenario, config=f_base.configs[0])
+    temp_base = f_base.temperature.sel(scenario=scenario, config=f_base.configs[0])
     fair_years = [int(y) for y in forcing_base.coords["timebounds"].values.tolist()]
     year_to_fair_idx = {y: i for i, y in enumerate(fair_years)}
 
@@ -500,6 +558,8 @@ def run_fair_delta_rf(
 
     coords_out = []
     data_out = []
+    temp_coords_out = []
+    temp_data_out = []
 
     species_to_positions: Dict[str, list[int]] = {}
     for pos, flow_key in flow_pos_to_key.items():
@@ -511,6 +571,24 @@ def run_fair_delta_rf(
         species_to_positions.setdefault(specie, []).append(pos)
 
     rf_alias = {"CO2 FFI": "CO2", "CO2 AFOLU": "CO2"}
+
+    def _debug_rf_series(label: str, series: np.ndarray) -> None:
+        if not debug:
+            return
+        s = np.asarray(series, dtype=float)
+        zeros = int(np.sum(s == 0))
+        print(
+            "FAIR debug: rf_series",
+            label,
+            "len",
+            s.size,
+            "min",
+            float(np.nanmin(s)),
+            "max",
+            float(np.nanmax(s)),
+            "zeros",
+            zeros,
+        )
 
     def _append_allocated_rf(
         specie: str, rf_series: np.ndarray, sign_mode: str
@@ -607,6 +685,98 @@ def run_fair_delta_rf(
         y_out = col_idx.astype(int)
         coords_out.append(np.vstack([y_out, f_out, r_out]))
         data_out.append(RF_alloc[row_idx, col_idx].astype(float, copy=False))
+
+    def _append_allocated_temp(
+        specie: str, temp_series: np.ndarray, sign_mode: str
+    ) -> None:
+        positions = species_to_positions.get(specie, [])
+        if not positions:
+            return
+        positions = [int(p) for p in positions]
+        pos_set = set(positions)
+        mask = np.isin(flow_idx, list(pos_set))
+        if not np.any(mask):
+            return
+
+        f_idx = flow_idx[mask]
+        y_idx = year_idx[mask]
+        r_idx = root_idx[mask]
+        vals = data[mask]
+
+        if signs:
+            sign_arr = np.ones_like(vals)
+            for i, p in enumerate(f_idx):
+                flow_key = flow_pos_to_key.get(int(p))
+                sign_val = float(
+                    signs.get(
+                        flow_key,
+                        signs.get(
+                            flow_key[0] if isinstance(flow_key, tuple) else flow_key,
+                            1.0,
+                        ),
+                    )
+                )
+                if sign_val != 1.0:
+                    sign_arr[i] = sign_val
+            vals = np.abs(vals) * sign_arr
+
+        fair_idx = []
+        for yi in y_idx:
+            y = inv_years[int(yi)]
+            fi = year_to_fair_idx.get(int(y))
+            if fi is None:
+                fair_idx.append(-1)
+            else:
+                fair_idx.append(fi)
+        fair_idx = np.asarray(fair_idx, dtype=int)
+        valid = fair_idx >= 0
+        if not np.any(valid):
+            return
+
+        f_idx = f_idx[valid]
+        r_idx = r_idx[valid]
+        vals = vals[valid]
+        fair_idx = fair_idx[valid]
+
+        pair_keys = list({(int(f), int(r)) for f, r in zip(f_idx, r_idx)})
+        pair_index = {p: i for i, p in enumerate(pair_keys)}
+        n_pairs = len(pair_keys)
+        E = np.zeros((n_pairs, len(fair_years)), dtype=float)
+        for f, r, fi, v in zip(f_idx, r_idx, fair_idx, vals):
+            E[pair_index[(int(f), int(r))], int(fi)] += float(v)
+
+        if sign_mode == "pos":
+            E_use = np.maximum(E, 0.0)
+        elif sign_mode == "neg":
+            E_use = np.minimum(E, 0.0)
+        else:
+            raise ValueError("sign_mode must be 'pos' or 'neg'.")
+
+        cumE = np.cumsum(E_use, axis=1)
+        total = np.sum(cumE, axis=0)
+        if not np.any(np.isfinite(total)):
+            return
+        per_kg = np.zeros_like(total, dtype=float)
+        prev = None
+        eps = 1e-12
+        for yi, denom in enumerate(total):
+            if not np.isfinite(denom) or abs(denom) <= eps:
+                if prev is not None:
+                    per_kg[yi] = prev
+                continue
+            per_kg[yi] = temp_series[yi] / denom
+            prev = per_kg[yi]
+        TEMP_alloc = cumE * per_kg[None, :]
+
+        row_idx, col_idx = np.nonzero(TEMP_alloc)
+        if row_idx.size == 0:
+            return
+        pairs_arr = np.asarray(pair_keys, dtype=int)
+        f_out = pairs_arr[row_idx, 0]
+        r_out = pairs_arr[row_idx, 1]
+        y_out = col_idx.astype(int)
+        temp_coords_out.append(np.vstack([y_out, f_out, r_out]))
+        temp_data_out.append(TEMP_alloc[row_idx, col_idx].astype(float, copy=False))
 
     def _debug_nan_forcing_check(forcing_pert: xr.DataArray) -> None:
         if not debug:
@@ -715,17 +885,24 @@ def run_fair_delta_rf(
                     properties_csv=properties_csv,
                     config_name=config_name,
                     ghg_method=ghg_method,
+                    temperature_prescribed=temperature_prescribed,
+                    debug=debug,
                     progress=False,
                 )
                 forcing_pert = f_pert.forcing.sel(
                     scenario=scenario, config=f_pert.configs[0]
                 )
+                temp_pert = f_pert.temperature.sel(
+                    scenario=scenario, config=f_pert.configs[0]
+                )
                 _debug_nan_forcing_check(forcing_pert)
                 delta_forcing = forcing_pert - forcing_base
+                delta_temp = temp_pert - temp_base
                 if scale_factor is None:
                     scale_factor = 1.0
                 if scale_factor != 1.0:
                     delta_forcing = delta_forcing / float(scale_factor)
+                    delta_temp = delta_temp / float(scale_factor)
 
                 alias = rf_alias.get(specie, specie)
                 if alias in delta_forcing.coords["specie"].values:
@@ -733,7 +910,11 @@ def run_fair_delta_rf(
                         delta_forcing.sel(specie=alias).values, dtype=float
                     )
                     rf_series = np.nan_to_num(rf_series, nan=0.0)
+                    _debug_rf_series(f"{specie}:{alias}:pos", rf_series)
                     _append_allocated_rf(specie, rf_series, "pos")
+                    temp_series = _extract_fair_timeseries(delta_temp)
+                    temp_series = np.nan_to_num(temp_series, nan=0.0)
+                    _append_allocated_temp(specie, temp_series, "pos")
 
             series_neg = delta_by_species_neg[specie]
             if np.any(series_neg.values != 0):
@@ -745,17 +926,24 @@ def run_fair_delta_rf(
                     properties_csv=properties_csv,
                     config_name=config_name,
                     ghg_method=ghg_method,
+                    temperature_prescribed=temperature_prescribed,
+                    debug=debug,
                     progress=False,
                 )
                 forcing_pert = f_pert.forcing.sel(
                     scenario=scenario, config=f_pert.configs[0]
                 )
+                temp_pert = f_pert.temperature.sel(
+                    scenario=scenario, config=f_pert.configs[0]
+                )
                 _debug_nan_forcing_check(forcing_pert)
                 delta_forcing = forcing_pert - forcing_base
+                delta_temp = temp_pert - temp_base
                 if scale_factor is None:
                     scale_factor = 1.0
                 if scale_factor != 1.0:
                     delta_forcing = delta_forcing / float(scale_factor)
+                    delta_temp = delta_temp / float(scale_factor)
 
                 alias = rf_alias.get(specie, specie)
                 if alias in delta_forcing.coords["specie"].values:
@@ -763,7 +951,11 @@ def run_fair_delta_rf(
                         delta_forcing.sel(specie=alias).values, dtype=float
                     )
                     rf_series = np.nan_to_num(rf_series, nan=0.0)
+                    _debug_rf_series(f"{specie}:{alias}:neg", rf_series)
                     _append_allocated_rf(specie, rf_series, "neg")
+                    temp_series = _extract_fair_timeseries(delta_temp)
+                    temp_series = np.nan_to_num(temp_series, nan=0.0)
+                    _append_allocated_temp(specie, temp_series, "neg")
     else:
         df_pert = _build_perturbed_df(df, None)
         f_pert = _run_fair_emissions(
@@ -773,20 +965,29 @@ def run_fair_delta_rf(
             properties_csv=properties_csv,
             config_name=config_name,
             ghg_method=ghg_method,
+            temperature_prescribed=temperature_prescribed,
+            debug=debug,
             progress=False,
         )
         forcing_pert = f_pert.forcing.sel(scenario=scenario, config=f_pert.configs[0])
+        temp_pert = f_pert.temperature.sel(scenario=scenario, config=f_pert.configs[0])
         _debug_nan_forcing_check(forcing_pert)
         delta_forcing = forcing_pert - forcing_base
+        delta_temp = temp_pert - temp_base
         if scale_factor is None:
             scale_factor = 1.0
         if scale_factor != 1.0:
             delta_forcing = delta_forcing / float(scale_factor)
+            delta_temp = delta_temp / float(scale_factor)
 
         for specie in delta_forcing.coords["specie"].values:
             rf_series = np.asarray(delta_forcing.sel(specie=specie).values, dtype=float)
             rf_series = np.nan_to_num(rf_series, nan=0.0)
+            _debug_rf_series(f"{specie}:all", rf_series)
             _append_allocated_rf(str(specie), rf_series, "pos")
+            temp_series = _extract_fair_timeseries(delta_temp)
+            temp_series = np.nan_to_num(temp_series, nan=0.0)
+            _append_allocated_temp(str(specie), temp_series, "pos")
 
     if coords_out:
         coords = np.hstack(coords_out)
@@ -805,6 +1006,29 @@ def run_fair_delta_rf(
 
     trails.instant_radiative_forcing = xr.DataArray(
         rf_sparse,
+        dims=("year", "flow", "root activity"),
+        coords={
+            "year": np.array(fair_years, dtype=int),
+            "flow": inv_sum.coords["flow"],
+            "root activity": inv_sum.coords["root activity"],
+        },
+    )
+    if temp_coords_out:
+        tcoords = np.hstack(temp_coords_out)
+        tdata = np.concatenate(temp_data_out)
+        temp_sparse = sparse.COO(
+            coords=tcoords,
+            data=tdata,
+            shape=(len(fair_years), n_flow, n_root),
+        )
+    else:
+        temp_sparse = sparse.COO(
+            coords=np.zeros((3, 0), dtype=int),
+            data=np.array([], dtype=float),
+            shape=(len(fair_years), n_flow, n_root),
+        )
+    trails.delta_temperature = xr.DataArray(
+        temp_sparse,
         dims=("year", "flow", "root activity"),
         coords={
             "year": np.array(fair_years, dtype=int),
