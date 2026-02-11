@@ -239,7 +239,7 @@ class Trails:
 
             if cache_interpolation:
                 try:
-                    print("Building cache                               [4/4]")
+                    print("Building cache                              [4/4]")
                     cache_dir = save_cached_interpolation(
                         self.package,
                         value_dtype=str(self.value_dtype),
