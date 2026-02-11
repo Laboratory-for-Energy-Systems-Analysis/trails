@@ -59,7 +59,8 @@ def cache_dir_for_package(package: Any, *, value_dtype: str, index_dtype: str) -
         index_dtype=index_dtype,
         interpolate_annual=True,
     )
-    return cache_base / "cache" / f"interp_{key}"
+    short_key = key[:12]
+    return cache_base / "cache" / f"interp_{short_key}"
 
 
 def load_cached_interpolation(
