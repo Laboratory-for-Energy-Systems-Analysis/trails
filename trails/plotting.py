@@ -1349,6 +1349,7 @@ def _apply_linear_yaxis_alignment(
     y_max: float | None,
     y2_max: float | None,
     y2_headroom: float,
+    stacked: bool,
 ) -> None:
     """Align linear y-axes for primary and cumulative traces.
 
@@ -1368,9 +1369,17 @@ def _apply_linear_yaxis_alignment(
     :type y2_max: float | None
     :param y2_headroom: Headroom multiplier for secondary axis.
     :type y2_headroom: float
+    :param stacked: Whether traces are stacked (affects y-range).
+    :type stacked: bool
     """
-    y1_min = float(np.nanmin(Y))
-    y1_max_data = float(np.nanmax(Y))
+    if stacked:
+        pos_sum = np.sum(np.where(Y > 0, Y, 0.0), axis=1)
+        neg_sum = np.sum(np.where(Y < 0, Y, 0.0), axis=1)
+        y1_min = float(np.nanmin(neg_sum))
+        y1_max_data = float(np.nanmax(pos_sum))
+    else:
+        y1_min = float(np.nanmin(Y))
+        y1_max_data = float(np.nanmax(Y))
     y1_min = min(y1_min, 0.0)
     y1_max_data = max(y1_max_data, 0.0)
     if y1_max_data == y1_min:
@@ -2048,6 +2057,7 @@ def _plot_results_by_year(
             y_max=y_max,
             y2_max=y2_max,
             y2_headroom=y2_headroom,
+            stacked=stacked,
         )
 
     if yaxis_type != "linear" and (y_min is not None or y_max is not None):
