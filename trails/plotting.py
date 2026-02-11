@@ -3377,7 +3377,7 @@ def plot_rf(
 
         total_low = _totals(results_low, years)
         total_high = _totals(results_high, years)
-        if cumulative:
+        if show_cumulative_axis:
             total_low = np.cumsum(total_low)
             total_high = np.cumsum(total_high)
         if yaxis_type == "log":
@@ -3450,6 +3450,9 @@ def plot_temp(
     yaxis_type: Literal["linear", "log"] = "linear",
     log_eps: float = 1e-30,
     reference_year: Optional[int] = None,
+    show_total_axis: bool = True,
+    show_total_quantile_band: bool = True,
+    total_axis_label: str = "Total temperature change",
     legend_entrywidth: int = 260,
     legend_row_height: int = 18,
     legend_y: float = 1.0,
@@ -3527,7 +3530,7 @@ def plot_temp(
         log_eps=log_eps,
         reference_year=reference_year,
         show_cumulative_axis=False,
-        cumulative_axis_label="Cumulative temperature change",
+        cumulative_axis_label=total_axis_label,
         legend_entrywidth=legend_entrywidth,
         legend_row_height=legend_row_height,
         legend_y=legend_y,
@@ -3542,6 +3545,88 @@ def plot_temp(
         y_max=y_max,
         y2_max=y2_max,
     )
+
+    if show_total_axis:
+
+        years = _select_years_from_results(results_by_year, year_range)
+
+        def _totals(res: dict[int, dict[str, Any]], years_seq: list[int]) -> np.ndarray:
+            out = np.zeros(len(years_seq), dtype=float)
+            for i, y in enumerate(years_seq):
+                payload = res.get(int(y), {})
+                out[i] = float(payload.get("scores", 0.0))
+            return out
+
+        total_vals = _totals(results_by_year, years)
+        if yaxis_type == "log":
+            total_vals = np.where(total_vals > 0, total_vals, log_eps)
+        fig.add_trace(
+            go.Scatter(
+                x=years,
+                y=total_vals,
+                name="Total",
+                showlegend=True,
+                mode="lines",
+                line=dict(width=2, color="black"),
+                yaxis="y",
+                hovertemplate=(
+                    "<b>Total</b><br>"
+                    "Year: %{x}<br>"
+                    f"{total_axis_label}: %{{y:.6g}}<extra></extra>"
+                ),
+            )
+        )
+
+        if "quantile" in delta_t_all.dims and show_total_quantile_band:
+            quantiles = [float(q) for q in delta_t_all.coords["quantile"].values.tolist()]
+            q_low, q_high = 2.5, 97.5
+            if q_low in quantiles and q_high in quantiles:
+                q_low_data = delta_t_all.sel(quantile=float(q_low), drop=True)
+                q_high_data = delta_t_all.sel(quantile=float(q_high), drop=True)
+
+                def _results_for(data: xr.DataArray) -> dict[int, dict[str, Any]]:
+                    if by == "flow":
+                        if "root activity" in data.dims:
+                            data = data.sum(dim="root activity")
+                        if "activity" in data.dims:
+                            data = data.sum(dim="activity")
+                        return _scores_to_results(data, by_flow=True)
+                    if "root activity" in data.dims:
+                        data = data.sum(dim="flow")
+                    if "activity" in data.dims:
+                        data = data.sum(dim="activity")
+                    return _scores_to_results(data, by_flow=False)
+
+                results_low = _results_for(q_low_data)
+                results_high = _results_for(q_high_data)
+                total_low = _totals(results_low, years)
+                total_high = _totals(results_high, years)
+                if yaxis_type == "log":
+                    total_low = np.where(total_low > 0, total_low, log_eps)
+                    total_high = np.where(total_high > 0, total_high, log_eps)
+                fig.add_trace(
+                    go.Scatter(
+                        x=years,
+                        y=total_low,
+                        mode="lines",
+                        line=dict(width=0),
+                        showlegend=False,
+                        hoverinfo="skip",
+                        yaxis="y",
+                    )
+                )
+                fig.add_trace(
+                    go.Scatter(
+                        x=years,
+                        y=total_high,
+                        mode="lines",
+                        fill="tonexty",
+                        fillcolor="rgba(60,60,60,0.35)",
+                        line=dict(width=0),
+                        name="2.5-97.5th percentile",
+                        yaxis="y",
+                    )
+                )
 
     fig.update_layout(title=dict(text=""))
     fig.add_annotation(
