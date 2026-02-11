@@ -123,7 +123,7 @@ def test_build_datapackage_for_year_from_trails(example_trails: Trails) -> None:
 def test_lca_static_mode(example_trails: Trails) -> None:
     """Verify static LCA behavior without temporal distributions.
 
-    :param example_trails: Trails fixture initialized from example datapackage.
+    :param example_trails: Trails fixture initialized from example data package datapackage.
     :type example_trails: trails.trails.Trails
     :returns: None.
     :rtype: None

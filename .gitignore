@@ -70,5 +70,5 @@ Thumbs.db
 
 # Dev artifacts
 dev/example/*.html
-dev/example/lib/
+dev/example data package/lib/
 dev/trails/

@@ -11,7 +11,7 @@ methods = [
     "IPCC 2021 - climate change: total (excl. biogenic CO2) - global warming potential (GWP100)",
 ]
 
-trails.import_excel_inventory("../example/lci-pass_cars.xlsx")
+trails.import_excel_inventory("../example data package/lci-pass_cars.xlsx")
 
 ref_year = 2050
 idx = 39210

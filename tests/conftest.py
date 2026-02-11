@@ -67,13 +67,13 @@ def test_debug_dir(request: pytest.FixtureRequest, debug_base: Path) -> Path:
 
 @pytest.fixture(scope="session")
 def example_package() -> Package:
-    """Load the example datapackage for tests.
+    """Load the example data package datapackage for tests.
 
     :returns: Example datapackage instance.
     :rtype: datapackage.Package
     """
     package_path = (
-        Path(__file__).resolve().parents[1] / "dev" / "example" / "datapackage.json"
+        Path(__file__).resolve().parents[1] / "dev" / "example data package" / "datapackage.json"
     )
     return Package(str(package_path))
 
