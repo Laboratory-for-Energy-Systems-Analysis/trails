@@ -173,12 +173,13 @@ FaIR radiative forcing
 ----------------------
 
 TRAILS integrates with the FaIR climate model to convert time-resolved
-inventories into radiative forcing. The workflow runs a baseline FaIR scenario
-from the bundled REMIND/FAIR emissions data, then performs per-species
-perturbation runs derived from the Trails inventory. Positive and negative
-emissions are treated separately to preserve long-lived CO2 tails for both
-uptake and release. Results are allocated to root activities using cumulative
-signed emissions for each (flow, root) pair.
+inventories into radiative forcing and temperature anomalies. The workflow runs
+a baseline FaIR scenario from the bundled REMIND/FAIR emissions data, then
+performs per-species perturbation runs derived from the Trails inventory.
+Positive and negative emissions are treated separately to preserve long-lived
+CO2 tails for both uptake and release. Results are allocated to root activities
+using cumulative signed emissions for each (flow, root) pair, and summarized
+across all FaIR configurations as quantiles (2.5, 25, 50, 75, 97.5).
 
 .. code-block:: python
 
@@ -189,5 +190,16 @@ signed emissions for each (flow, root) pair.
         scenario="high-extension",
     )
 
-The output is stored on ``trails.instant_radiative_forcing`` with dims
-``(year, flow, root activity)``.
+The outputs are stored on:
+
+* ``trails.instant_radiative_forcing`` with dims ``(quantile, year, flow, root activity)``
+* ``trails.delta_temperature`` with dims ``(quantile, year, flow, root activity)``
+
+Visualization helpers default to the 50th quantile:
+
+.. code-block:: python
+
+    from trails import plot_rf, plot_temp
+
+    plot_rf(trails, year_range=(2000, 2100))
+    plot_temp(trails, year_range=(2000, 2100))

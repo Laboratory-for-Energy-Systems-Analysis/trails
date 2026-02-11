@@ -71,11 +71,13 @@ questions such as:
 FaIR climate model integration
 ------------------------------
 
-TRAILS can translate time-resolved inventories into radiative forcing using the
-FaIR climate model. The method runs a baseline FaIR scenario from the bundled
-IAMC emissions data, then applies per-species perturbations derived from the
-Trails inventory. Positive and negative emissions are treated separately to
-preserve long-lived CO2 tails for both uptake and release. Results are
-allocated to root activities using cumulative signed emissions for each
-(flow, root) pair and stored as ``trails.instant_radiative_forcing`` with
-units of ``W/m2``.
+TRAILS can translate time-resolved inventories into radiative forcing and
+temperature anomalies using the FaIR climate model. The method runs a baseline
+FaIR scenario from the bundled IAMC emissions data, then applies per-species
+perturbations derived from the Trails inventory. Positive and negative
+emissions are treated separately to preserve long-lived CO2 tails for both
+uptake and release. Results are allocated to root activities using cumulative
+signed emissions for each (flow, root) pair and stored as
+``trails.instant_radiative_forcing`` and ``trails.delta_temperature``. Both
+arrays are stored across FaIR configurations as quantiles (2.5, 25, 50, 75,
+97.5) with dims ``(quantile, year, flow, root activity)``.

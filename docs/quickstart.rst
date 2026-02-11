@@ -85,8 +85,10 @@ FaIR radiative forcing
 ----------------------
 
 After running a temporal LCA, you can translate the inventory into radiative
-forcing using the FaIR climate model. This uses a baseline IAMC scenario and
-per-species perturbations derived from the Trails inventory.
+forcing and temperature anomalies using the FaIR climate model. This uses a
+baseline IAMC scenario and per-species perturbations derived from the Trails
+inventory. Outputs are aggregated across all FaIR configurations and stored as
+quantiles (2.5, 25, 50, 75, 97.5).
 
 .. code-block:: python
 
@@ -97,5 +99,17 @@ per-species perturbations derived from the Trails inventory.
         scenario="high-extension",
     )
 
-The resulting ``rf`` is stored on ``trails.instant_radiative_forcing`` with
-coords (year, flow, root activity).
+The resulting outputs are stored on the Trails instance:
+
+* ``trails.instant_radiative_forcing`` with dims ``(quantile, year, flow, root activity)``
+* ``trails.delta_temperature`` with dims ``(quantile, year, flow, root activity)``
+
+You can visualize these with the built-in plotting helpers (defaults to the 50th
+quantile):
+
+.. code-block:: python
+
+    from trails import plot_rf, plot_temp
+
+    plot_rf(trails, year_range=(2000, 2100))
+    plot_temp(trails, year_range=(2000, 2100))

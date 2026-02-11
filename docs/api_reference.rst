@@ -16,8 +16,6 @@ Core workflows
 
 .. autofunction:: trails.lca
 
-.. autofunction:: trails.lca_static_simple
-
 LCIA utilities
 --------------
 
@@ -42,6 +40,8 @@ Plotting
 --------
 
 .. autofunction:: trails.plot_temporal_scores
+.. autofunction:: trails.plot_rf
+.. autofunction:: trails.plot_temp
 
 
 FaIR integration

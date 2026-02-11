@@ -87,30 +87,41 @@ trails.import_excel_inventory("path/to/inventory.xlsx", year=2020)
 
 ## FaIR Climate Model Integration
 
-TRAILS can translate time-resolved inventories into radiative forcing using the
-FaIR climate model. The workflow runs a baseline FaIR scenario, then performs
-per-species perturbations derived from the Trails inventory. For each species,
-positive and negative emissions are treated separately to preserve long-lived
-CO2 tails for both uptake and release. Results are allocated to root activities
-using cumulative signed emissions for each (flow, root) pair and stored as
-``trails.instant_radiative_forcing``.
+TRAILS can translate time-resolved inventories into radiative forcing and
+temperature anomalies using the FaIR climate model. The workflow runs a baseline
+FaIR scenario and performs per-species perturbations derived from the Trails
+inventory. Positive and negative emissions are treated separately to preserve
+long-lived CO2 tails for both uptake and release. Results are allocated to root
+activities using cumulative signed emissions for each (flow, root) pair and
+stored as ``trails.instant_radiative_forcing`` and ``trails.delta_temperature``.
 
 Key components:
 
 * Emissions baseline from the bundled REMIND/FAIR IAMC CSV
 * Flow-to-species mapping via ``data/scenarios/fair_species_map.yaml``
 * Per-species FaIR runs with optional auto-scaling
-* Output in ``W/m2`` by year, flow, and root activity
+* All FaIR configs are evaluated; quantiles (2.5, 25, 50, 75, 97.5) are stored
+* Output dims: ``(quantile, year, flow, root activity)``
+* Units: ``W/m²`` for radiative forcing and ``°C`` for temperature anomaly
 
 Example:
 
 ```python
 from trails.fair_rf import run_fair_delta_rf
+from trails import plot_rf, plot_temp
 
 rf = run_fair_delta_rf(
     trails,
     scenario="high-extension",
 )
+
+# Quantile outputs are stored on the Trails instance
+rf = trails.instant_radiative_forcing  # (quantile, year, flow, root activity)
+temp = trails.delta_temperature        # (quantile, year, flow, root activity)
+
+# Plotting defaults to the 50th quantile
+plot_rf(trails, year_range=(2000, 2100))
+plot_temp(trails, year_range=(2000, 2100))
 ```
 
 ## Method Overview
