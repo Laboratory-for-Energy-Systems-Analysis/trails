@@ -1336,6 +1336,9 @@ def _apply_base_layout(
                 overlaying="y",
                 side="right",
                 showgrid=False,
+                tickformat=".2e",
+                exponentformat="e",
+                showexponent="all",
             )
         )
 
@@ -3236,7 +3239,7 @@ def plot_rf(
     title: str = "Radiative forcing by gas/flow",
     method_label: str = "W/m²",
     quantile: float | None = 50.0,
-    show_cumulative_quantile_band: bool = False,
+    show_cumulative_quantile_band: bool = True,
     band_quantiles: tuple[float, float] = (2.5, 97.5),
     cumulative: bool = False,
     stacked: bool = True,
@@ -3280,9 +3283,7 @@ def plot_rf(
             )
         rf = rf.sel(quantile=float(quantile), drop=True)
     elif show_cumulative_quantile_band:
-        raise ValueError(
-            "show_cumulative_quantile_band=True but instant_radiative_forcing has no quantile dimension."
-        )
+        show_cumulative_quantile_band = False
 
     if by == "flow":
         if "flow" not in rf.dims:
@@ -3412,7 +3413,7 @@ def plot_rf(
                 y=total_high,
                 mode="lines",
                 fill="tonexty",
-                fillcolor="rgba(0,0,0,0.25)",
+                fillcolor="rgba(60,60,60,0.35)",
                 line=dict(width=0),
                 name=f"{q_low:g}-{q_high:g}th percentile",
                 yaxis="y2",
