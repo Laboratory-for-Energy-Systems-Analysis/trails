@@ -3253,7 +3253,7 @@ def plot_rf(
     log_eps: float = 1e-30,
     reference_year: Optional[int] = None,
     show_cumulative_axis: bool = True,
-    cumulative_axis_label: str = "Cumulative impacts",
+    cumulative_axis_label: str = "W·m⁻²·yr",
     legend_entrywidth: int = 260,
     legend_row_height: int = 18,
     legend_y: float = 1.0,
