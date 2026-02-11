@@ -73,7 +73,10 @@ def example_package() -> Package:
     :rtype: datapackage.Package
     """
     package_path = (
-        Path(__file__).resolve().parents[1] / "dev" / "example data package" / "datapackage.json"
+        Path(__file__).resolve().parents[1]
+        / "dev"
+        / "example data package"
+        / "datapackage.json"
     )
     return Package(str(package_path))
 
