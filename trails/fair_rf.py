@@ -201,17 +201,6 @@ def _run_fair_emissions(
     initialise(f.forcing, 0)
     f.fill_from_pandas(mode="emissions", df=df)
     f.run(progress=progress)
-    if debug:
-        try:
-            tvals = np.asarray(f.temperature.values, dtype=float)
-            print(
-                "FAIR debug: temperature min/max/finite",
-                float(np.nanmin(tvals)),
-                float(np.nanmax(tvals)),
-                int(np.isfinite(tvals).sum()),
-            )
-        except Exception as exc:
-            print("FAIR debug: temperature stats failed:", exc)
     if not np.isfinite(f.forcing.values).any():
         forcing = _compute_ghg_forcing_from_concentration(f)
         if forcing is not None:
@@ -381,10 +370,6 @@ def run_fair_delta_rf(
     delta_by_species = _inventory_emissions_by_fair_species(trails, species_map, signs)
     no_perturbation = delta_by_species.empty
     if no_perturbation:
-        if debug:
-            print(
-                "FAIR debug: no inventory emissions matched; returning zero delta RF."
-            )
         if scale_factor is None:
             scale_factor = 1.0
 
@@ -417,8 +402,6 @@ def run_fair_delta_rf(
             scale_factor = float(min(candidates))
         else:
             scale_factor = 1.0
-        if debug:
-            print("FAIR debug: auto scale_factor", scale_factor)
 
     if scale_factor != 1.0 and not delta_by_species.empty:
         delta_by_species = delta_by_species * float(scale_factor)
@@ -571,24 +554,6 @@ def run_fair_delta_rf(
         species_to_positions.setdefault(specie, []).append(pos)
 
     rf_alias = {"CO2 FFI": "CO2", "CO2 AFOLU": "CO2"}
-
-    def _debug_rf_series(label: str, series: np.ndarray) -> None:
-        if not debug:
-            return
-        s = np.asarray(series, dtype=float)
-        zeros = int(np.sum(s == 0))
-        print(
-            "FAIR debug: rf_series",
-            label,
-            "len",
-            s.size,
-            "min",
-            float(np.nanmin(s)),
-            "max",
-            float(np.nanmax(s)),
-            "zeros",
-            zeros,
-        )
 
     def _append_allocated_rf(
         specie: str, rf_series: np.ndarray, sign_mode: str
@@ -778,90 +743,6 @@ def run_fair_delta_rf(
         temp_coords_out.append(np.vstack([y_out, f_out, r_out]))
         temp_data_out.append(TEMP_alloc[row_idx, col_idx].astype(float, copy=False))
 
-    def _debug_nan_forcing_check(forcing_pert: xr.DataArray) -> None:
-        if not debug:
-            return
-        if (
-            np.isfinite(forcing_base.values).any()
-            and np.isfinite(forcing_pert.values).any()
-        ):
-            return
-        print("FAIR debug: forcing all-NaN detected.")
-        print("FAIR debug: ghg_method", getattr(f_base, "ghg_method", None))
-        try:
-            print(
-                "FAIR debug: ghg flag",
-                bool(getattr(f_base, "_routine_flags", {}).get("ghg", False)),
-            )
-        except Exception:
-            print("FAIR debug: ghg flag unavailable")
-        print("FAIR debug: species count", len(f_base.species))
-        print(
-            "FAIR debug: co2/ch4/n2o indices",
-            int(np.sum(getattr(f_base, "_co2_indices", []))),
-            int(np.sum(getattr(f_base, "_ch4_indices", []))),
-            int(np.sum(getattr(f_base, "_n2o_indices", []))),
-        )
-        for s in ["CO2", "CH4", "N2O"]:
-            if s in f_base.concentration.coords["specie"].values:
-                arr = f_base.concentration.sel(specie=s).values
-                print(
-                    f"FAIR debug: {s} conc min/max/finite",
-                    float(np.nanmin(arr)),
-                    float(np.nanmax(arr)),
-                    int(np.isfinite(arr).sum()),
-                )
-            if s in f_base.forcing.coords["specie"].values:
-                farr = f_base.forcing.sel(specie=s).values
-                print(
-                    f"FAIR debug: {s} forcing finite",
-                    int(np.isfinite(farr).sum()),
-                )
-        try:
-            scale = f_base.species_configs["forcing_scale"].values
-            basec = f_base.species_configs["baseline_concentration"].values
-            print(
-                "FAIR debug: forcing_scale nan count",
-                int(np.isnan(scale).sum()),
-            )
-            print(
-                "FAIR debug: baseline_concentration nan count",
-                int(np.isnan(basec).sum()),
-            )
-            import fair.forcing.ghg as _ghg
-
-            conc = f_base.concentration.values
-            base_arr = f_base.species_configs["baseline_concentration"].values
-            scale_arr = f_base.species_configs["forcing_scale"].values
-            rad_eff = f_base.species_configs[
-                "greenhouse_gas_radiative_efficiency"
-            ].values
-            base_full = base_arr[None, None, ...] * np.ones(
-                (1, f_base._n_scenarios, f_base._n_configs, f_base._n_species)
-            )
-            scale_full = scale_arr[None, None, ...] * np.ones(
-                (1, f_base._n_scenarios, f_base._n_configs, f_base._n_species)
-            )
-            rad_full = rad_eff[None, None, ...] * np.ones(
-                (1, f_base._n_scenarios, f_base._n_configs, f_base._n_species)
-            )
-            test = _ghg.myhre1998(
-                conc,
-                base_full,
-                scale_full,
-                rad_full,
-                f_base._co2_indices,
-                f_base._ch4_indices,
-                f_base._n2o_indices,
-                f_base._minor_ghg_indices,
-            )
-            print(
-                "FAIR debug: myhre1998 finite",
-                int(np.isfinite(test).sum()),
-            )
-        except Exception as exc:
-            print("FAIR debug: species_configs check failed:", exc)
-
     if no_perturbation:
         if debug:
             print("FAIR debug: no perturbations; delta RF will be zero.")
@@ -895,7 +776,6 @@ def run_fair_delta_rf(
                 temp_pert = f_pert.temperature.sel(
                     scenario=scenario, config=f_pert.configs[0]
                 )
-                _debug_nan_forcing_check(forcing_pert)
                 delta_forcing = forcing_pert - forcing_base
                 delta_temp = temp_pert - temp_base
                 if scale_factor is None:
@@ -910,7 +790,6 @@ def run_fair_delta_rf(
                         delta_forcing.sel(specie=alias).values, dtype=float
                     )
                     rf_series = np.nan_to_num(rf_series, nan=0.0)
-                    _debug_rf_series(f"{specie}:{alias}:pos", rf_series)
                     _append_allocated_rf(specie, rf_series, "pos")
                     temp_series = _extract_fair_timeseries(delta_temp)
                     temp_series = np.nan_to_num(temp_series, nan=0.0)
@@ -936,7 +815,6 @@ def run_fair_delta_rf(
                 temp_pert = f_pert.temperature.sel(
                     scenario=scenario, config=f_pert.configs[0]
                 )
-                _debug_nan_forcing_check(forcing_pert)
                 delta_forcing = forcing_pert - forcing_base
                 delta_temp = temp_pert - temp_base
                 if scale_factor is None:
@@ -951,7 +829,6 @@ def run_fair_delta_rf(
                         delta_forcing.sel(specie=alias).values, dtype=float
                     )
                     rf_series = np.nan_to_num(rf_series, nan=0.0)
-                    _debug_rf_series(f"{specie}:{alias}:neg", rf_series)
                     _append_allocated_rf(specie, rf_series, "neg")
                     temp_series = _extract_fair_timeseries(delta_temp)
                     temp_series = np.nan_to_num(temp_series, nan=0.0)
@@ -971,7 +848,6 @@ def run_fair_delta_rf(
         )
         forcing_pert = f_pert.forcing.sel(scenario=scenario, config=f_pert.configs[0])
         temp_pert = f_pert.temperature.sel(scenario=scenario, config=f_pert.configs[0])
-        _debug_nan_forcing_check(forcing_pert)
         delta_forcing = forcing_pert - forcing_base
         delta_temp = temp_pert - temp_base
         if scale_factor is None:
@@ -983,7 +859,6 @@ def run_fair_delta_rf(
         for specie in delta_forcing.coords["specie"].values:
             rf_series = np.asarray(delta_forcing.sel(specie=specie).values, dtype=float)
             rf_series = np.nan_to_num(rf_series, nan=0.0)
-            _debug_rf_series(f"{specie}:all", rf_series)
             _append_allocated_rf(str(specie), rf_series, "pos")
             temp_series = _extract_fair_timeseries(delta_temp)
             temp_series = np.nan_to_num(temp_series, nan=0.0)
