@@ -19,6 +19,12 @@ data/logs/
 tests/*.env
 
 *.pyc
+__pycache__/
+**/__pycache__/
+*.prof
+.pytest-debug/
+tests/.pytest-debug/
+**/.ipynb_checkpoints/
 
 *.xml
 *.iml
@@ -61,3 +67,8 @@ tests/*.env
 ehthumbs.db
 Thumbs.db
 /.idea/.gitignore
+
+# Dev artifacts
+dev/example/*.html
+dev/example/lib/
+dev/trails/
