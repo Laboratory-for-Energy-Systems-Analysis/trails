@@ -3236,9 +3236,6 @@ def plot_rf(
     title: str = "Radiative forcing by gas/flow",
     method_label: str = "W/m²",
     quantile: float | None = 50.0,
-    show_cumulative_quantile_band: bool = False,
-    band_quantiles: tuple[float, float] = (5.0, 95.0),
-    cumulative: bool = False,
     stacked: bool = True,
     legend_top_n: int = 5,
     width: Optional[int] = 550,
@@ -3439,9 +3436,6 @@ def plot_temp(
     title: str = "Temperature change by gas/flow",
     method_label: str = "°C",
     quantile: float | None = 50.0,
-    show_cumulative_quantile_band: bool = False,
-    band_quantiles: tuple[float, float] = (5.0, 95.0),
-    cumulative: bool = False,
     stacked: bool = True,
     legend_top_n: int = 5,
     width: Optional[int] = 550,
@@ -3452,8 +3446,6 @@ def plot_temp(
     yaxis_type: Literal["linear", "log"] = "linear",
     log_eps: float = 1e-30,
     reference_year: Optional[int] = None,
-    show_cumulative_axis: bool = True,
-    cumulative_axis_label: str = "Cumulative temperature change",
     legend_entrywidth: int = 260,
     legend_row_height: int = 18,
     legend_y: float = 1.0,
@@ -3488,10 +3480,6 @@ def plot_temp(
                 f"Requested quantile {quantile} not in available {quantiles}."
             )
         delta_t = delta_t.sel(quantile=float(quantile), drop=True)
-    elif show_cumulative_quantile_band:
-        raise ValueError(
-            "show_cumulative_quantile_band=True but delta_temperature has no quantile dimension."
-        )
 
     if by == "flow":
         if "flow" not in delta_t.dims:
@@ -3522,7 +3510,7 @@ def plot_temp(
         trails=trails,
         title=title,
         method_label=method_label,
-        cumulative=cumulative,
+        cumulative=False,
         stacked=stacked,
         legend_top_n=legend_top_n,
         show_flow_contributions=(by == "flow"),
@@ -3534,8 +3522,8 @@ def plot_temp(
         yaxis_type=yaxis_type,
         log_eps=log_eps,
         reference_year=reference_year,
-        show_cumulative_axis=show_cumulative_axis,
-        cumulative_axis_label=cumulative_axis_label,
+        show_cumulative_axis=False,
+        cumulative_axis_label="Cumulative temperature change",
         legend_entrywidth=legend_entrywidth,
         legend_row_height=legend_row_height,
         legend_y=legend_y,
@@ -3551,84 +3539,6 @@ def plot_temp(
         y2_max=y2_max,
     )
 
-    if show_cumulative_axis and show_cumulative_quantile_band:
-        q_low, q_high = band_quantiles
-        quantiles = [float(q) for q in delta_t_all.coords["quantile"].values.tolist()]
-        if q_low not in quantiles or q_high not in quantiles:
-            raise ValueError(
-                f"band_quantiles {band_quantiles} not in available {quantiles}."
-            )
-        q_low_data = delta_t_all.sel(quantile=float(q_low), drop=True)
-        q_high_data = delta_t_all.sel(quantile=float(q_high), drop=True)
-
-        def _results_for(data: xr.DataArray) -> dict[int, dict[str, Any]]:
-            if by == "flow":
-                if "root activity" in data.dims:
-                    data = data.sum(dim="root activity")
-                if "activity" in data.dims:
-                    data = data.sum(dim="activity")
-                return _scores_to_results(data, by_flow=True)
-            if "root activity" in data.dims:
-                data = data.sum(dim="flow")
-            if "activity" in data.dims:
-                data = data.sum(dim="activity")
-            return _scores_to_results(data, by_flow=False)
-
-        results_low = _results_for(q_low_data)
-        results_high = _results_for(q_high_data)
-        years = _select_years_from_results(results_by_year, year_range)
-
-        def _totals(res: dict[int, dict[str, Any]], years_seq: list[int]) -> np.ndarray:
-            out = np.zeros(len(years_seq), dtype=float)
-            for i, y in enumerate(years_seq):
-                payload = res.get(int(y), {})
-                out[i] = float(payload.get("scores", 0.0))
-            return out
-
-        total_low = _totals(results_low, years)
-        total_high = _totals(results_high, years)
-        if cumulative:
-            total_low = np.cumsum(total_low)
-            total_high = np.cumsum(total_high)
-        if yaxis_type == "log":
-            total_low = np.where(total_low > 0, total_low, log_eps)
-            total_high = np.where(total_high > 0, total_high, log_eps)
-        if not np.any(total_low) and not np.any(total_high):
-            fig.update_layout(title=dict(text=""))
-            fig.add_annotation(
-                text=title,
-                x=0.5,
-                y=-0.2,
-                xref="paper",
-                yref="paper",
-                xanchor="center",
-                yanchor="top",
-                showarrow=False,
-            )
-            return fig
-        fig.add_trace(
-            go.Scatter(
-                x=years,
-                y=total_low,
-                mode="lines",
-                line=dict(width=0),
-                showlegend=False,
-                hoverinfo="skip",
-                yaxis="y2",
-            )
-        )
-        fig.add_trace(
-            go.Scatter(
-                x=years,
-                y=total_high,
-                mode="lines",
-                fill="tonexty",
-                fillcolor="rgba(0,0,0,0.25)",
-                line=dict(width=0),
-                name=f"{q_low:g}-{q_high:g}th percentile",
-                yaxis="y2",
-            )
-        )
     fig.update_layout(title=dict(text=""))
     fig.add_annotation(
         text=title,
