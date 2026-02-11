@@ -178,6 +178,7 @@ def _run_fair_emissions(
     cfg = pd.read_csv(config_csv, index_col=0)
     if cfg.empty:
         raise ValueError(f"No configs found in {config_csv}.")
+
     def _normalize_config_name(name: object) -> object:
         if name in cfg.index:
             return name
@@ -216,7 +217,6 @@ def _run_fair_emissions(
     f.fill_species_configs(filename=str(properties_csv))
     f.override_defaults(str(config_csv))
     # Initialize temperature and forcing arrays to avoid NaNs in FaIR outputs.
-
 
     initialise(f.temperature, 0)
     initialise(f.forcing, 0)
@@ -883,14 +883,10 @@ def run_fair_delta_rf(
                         rf_series = _extract_fair_timeseries_by_config(
                             delta_forcing.sel(specie=alias)
                         )
-                        rf_quant = np.nanpercentile(
-                            rf_series, quantiles, axis=0
-                        )
+                        rf_quant = np.nanpercentile(rf_series, quantiles, axis=0)
                         rf_quant = np.nan_to_num(rf_quant, nan=0.0)
                         temp_series = _extract_fair_timeseries_by_config(delta_temp)
-                        temp_quant = np.nanpercentile(
-                            temp_series, quantiles, axis=0
-                        )
+                        temp_quant = np.nanpercentile(temp_series, quantiles, axis=0)
                         temp_quant = np.nan_to_num(temp_quant, nan=0.0)
                     else:
                         rf_series = np.asarray(
@@ -949,14 +945,10 @@ def run_fair_delta_rf(
                         rf_series = _extract_fair_timeseries_by_config(
                             delta_forcing.sel(specie=alias)
                         )
-                        rf_quant = np.nanpercentile(
-                            rf_series, quantiles, axis=0
-                        )
+                        rf_quant = np.nanpercentile(rf_series, quantiles, axis=0)
                         rf_quant = np.nan_to_num(rf_quant, nan=0.0)
                         temp_series = _extract_fair_timeseries_by_config(delta_temp)
-                        temp_quant = np.nanpercentile(
-                            temp_series, quantiles, axis=0
-                        )
+                        temp_quant = np.nanpercentile(temp_series, quantiles, axis=0)
                         temp_quant = np.nan_to_num(temp_quant, nan=0.0)
                     else:
                         rf_series = np.asarray(
@@ -1028,9 +1020,7 @@ def run_fair_delta_rf(
                 temp_series = np.nan_to_num(temp_series, nan=0.0)
                 temp_quant = np.tile(temp_series[None, :], (n_quant, 1))
             for qi in range(n_quant):
-                _append_allocated_rf(
-                    str(specie), rf_quant[qi], "pos", quantile_idx=qi
-                )
+                _append_allocated_rf(str(specie), rf_quant[qi], "pos", quantile_idx=qi)
                 _append_allocated_temp(
                     str(specie), temp_quant[qi], "pos", quantile_idx=qi
                 )
