@@ -117,6 +117,7 @@ def _run_fair_emissions(
     config_csv: str | Path | None = DEFAULT_CONFIGS_CSV,
     properties_csv: str | Path | None = DEFAULT_PROPERTIES_CSV,
     config_name: str | None = None,
+    config_names: list[str] | None = None,
     ghg_method: str | None = "myhre1998",
     temperature_prescribed: bool | None = None,
     debug: bool = False,
@@ -177,9 +178,29 @@ def _run_fair_emissions(
     cfg = pd.read_csv(config_csv, index_col=0)
     if cfg.empty:
         raise ValueError(f"No configs found in {config_csv}.")
-    if config_name is None:
-        config_name = cfg.index[0]
-    configs = [config_name]
+    def _normalize_config_name(name: object) -> object:
+        if name in cfg.index:
+            return name
+        try:
+            name_str = str(name)
+            if name_str in cfg.index:
+                return name_str
+        except Exception:
+            pass
+        try:
+            name_int = int(name)
+            if name_int in cfg.index:
+                return name_int
+        except Exception:
+            pass
+        return name
+
+    if config_names is not None:
+        configs = [_normalize_config_name(c) for c in config_names]
+    else:
+        if config_name is None:
+            config_name = cfg.index[0]
+        configs = [_normalize_config_name(config_name)]
 
     if temperature_prescribed is None:
         f = fair.FAIR()
@@ -321,6 +342,40 @@ def _extract_fair_timeseries(da: xr.DataArray) -> np.ndarray:
     return np.asarray(da.values, dtype=float)
 
 
+def _extract_fair_timeseries_by_config(da: xr.DataArray) -> np.ndarray:
+    """Extract a (config, time) array from a FaIR DataArray."""
+    if "timebounds" in da.dims:
+        time_dim = "timebounds"
+    elif "time" in da.dims:
+        time_dim = "time"
+    else:
+        time_dim = da.dims[0]
+
+    if "layer" in da.dims and da.dims != (time_dim,):
+        layer_vals = da.coords.get("layer", None)
+        if layer_vals is not None:
+            layers = [str(x) for x in layer_vals.values.tolist()]
+            if "surface" in layers:
+                da = da.sel(layer="surface")
+            else:
+                da = da.isel(layer=0)
+        else:
+            da = da.isel(layer=0)
+
+    for d in list(da.dims):
+        if d in (time_dim, "config"):
+            continue
+        da = da.isel({d: 0})
+
+    if "config" not in da.dims:
+        da = da.expand_dims({"config": [0]})
+
+    if da.dims != ("config", time_dim):
+        da = da.transpose("config", time_dim)
+
+    return np.asarray(da.values, dtype=float)
+
+
 def run_fair_delta_rf(
     trails: Any,
     *,
@@ -330,6 +385,7 @@ def run_fair_delta_rf(
     config_csv: str | Path | None = DEFAULT_CONFIGS_CSV,
     properties_csv: str | Path | None = DEFAULT_PROPERTIES_CSV,
     config_name: str | None = None,
+    config_names: list[str] | None = None,
     ghg_method: str | None = "myhre1998",
     temperature_prescribed: bool | None = False,
     scale_factor: float | None = None,
@@ -340,6 +396,7 @@ def run_fair_delta_rf(
     validate_rtol: float = 1e-6,
     validate_raise: bool = False,
     per_species_runs: bool = True,
+    quantiles: list[float] | None = None,
 ) -> xr.DataArray:
     """Run FaIR baseline/perturbed and store delta RF on trails."""
     debug = bool(getattr(trails, "debug", False))
@@ -352,6 +409,21 @@ def run_fair_delta_rf(
         raise ValueError("scale_factor must be > 0.")
     df = load_emissions_csv(emissions_csv)
     species_map, signs = load_species_mapping(mapping_yaml)
+    if quantiles is None:
+        quantiles = [2.5, 25, 50, 75, 97.5]
+    quantiles = [float(q) for q in quantiles]
+    if config_names is None and config_name is None:
+        cfg_path = Path(config_csv) if config_csv is not None else None
+        if cfg_path is None:
+            cfg_path = _find_any_fair_repo_file(
+                [
+                    "calibrated_constrained_parameters_calibration1.4.1.csv",
+                    "calibrated_constrained_parameters.csv",
+                ]
+            )
+        if cfg_path is not None:
+            cfg = pd.read_csv(cfg_path, index_col=0)
+            config_names = [str(x) for x in cfg.index.tolist()]
 
     # Baseline run
     f_base = _run_fair_emissions(
@@ -360,6 +432,7 @@ def run_fair_delta_rf(
         config_csv=config_csv,
         properties_csv=properties_csv,
         config_name=config_name,
+        config_names=config_names,
         ghg_method=ghg_method,
         temperature_prescribed=temperature_prescribed,
         debug=debug,
@@ -488,8 +561,12 @@ def run_fair_delta_rf(
                 if debug:
                     print(msg)
 
-    forcing_base = f_base.forcing.sel(scenario=scenario, config=f_base.configs[0])
-    temp_base = f_base.temperature.sel(scenario=scenario, config=f_base.configs[0])
+    if config_names is not None and len(config_names) > 1:
+        forcing_base = f_base.forcing.sel(scenario=scenario)
+        temp_base = f_base.temperature.sel(scenario=scenario)
+    else:
+        forcing_base = f_base.forcing.sel(scenario=scenario, config=f_base.configs[0])
+        temp_base = f_base.temperature.sel(scenario=scenario, config=f_base.configs[0])
     fair_years = [int(y) for y in forcing_base.coords["timebounds"].values.tolist()]
     year_to_fair_idx = {y: i for i, y in enumerate(fair_years)}
 
@@ -543,6 +620,7 @@ def run_fair_delta_rf(
     data_out = []
     temp_coords_out = []
     temp_data_out = []
+    n_quant = len(quantiles)
 
     species_to_positions: Dict[str, list[int]] = {}
     for pos, flow_key in flow_pos_to_key.items():
@@ -556,7 +634,11 @@ def run_fair_delta_rf(
     rf_alias = {"CO2 FFI": "CO2", "CO2 AFOLU": "CO2"}
 
     def _append_allocated_rf(
-        specie: str, rf_series: np.ndarray, sign_mode: str
+        specie: str,
+        rf_series: np.ndarray,
+        sign_mode: str,
+        *,
+        quantile_idx: int,
     ) -> None:
         positions = species_to_positions.get(specie, [])
         if not positions:
@@ -648,11 +730,16 @@ def run_fair_delta_rf(
         f_out = pairs_arr[row_idx, 0]
         r_out = pairs_arr[row_idx, 1]
         y_out = col_idx.astype(int)
-        coords_out.append(np.vstack([y_out, f_out, r_out]))
+        q_out = np.full_like(y_out, int(quantile_idx))
+        coords_out.append(np.vstack([q_out, y_out, f_out, r_out]))
         data_out.append(RF_alloc[row_idx, col_idx].astype(float, copy=False))
 
     def _append_allocated_temp(
-        specie: str, temp_series: np.ndarray, sign_mode: str
+        specie: str,
+        temp_series: np.ndarray,
+        sign_mode: str,
+        *,
+        quantile_idx: int,
     ) -> None:
         positions = species_to_positions.get(specie, [])
         if not positions:
@@ -740,7 +827,8 @@ def run_fair_delta_rf(
         f_out = pairs_arr[row_idx, 0]
         r_out = pairs_arr[row_idx, 1]
         y_out = col_idx.astype(int)
-        temp_coords_out.append(np.vstack([y_out, f_out, r_out]))
+        q_out = np.full_like(y_out, int(quantile_idx))
+        temp_coords_out.append(np.vstack([q_out, y_out, f_out, r_out]))
         temp_data_out.append(TEMP_alloc[row_idx, col_idx].astype(float, copy=False))
 
     if no_perturbation:
@@ -765,17 +853,22 @@ def run_fair_delta_rf(
                     config_csv=config_csv,
                     properties_csv=properties_csv,
                     config_name=config_name,
+                    config_names=config_names,
                     ghg_method=ghg_method,
                     temperature_prescribed=temperature_prescribed,
                     debug=debug,
                     progress=False,
                 )
-                forcing_pert = f_pert.forcing.sel(
-                    scenario=scenario, config=f_pert.configs[0]
-                )
-                temp_pert = f_pert.temperature.sel(
-                    scenario=scenario, config=f_pert.configs[0]
-                )
+                if config_names is not None and len(config_names) > 1:
+                    forcing_pert = f_pert.forcing.sel(scenario=scenario)
+                    temp_pert = f_pert.temperature.sel(scenario=scenario)
+                else:
+                    forcing_pert = f_pert.forcing.sel(
+                        scenario=scenario, config=f_pert.configs[0]
+                    )
+                    temp_pert = f_pert.temperature.sel(
+                        scenario=scenario, config=f_pert.configs[0]
+                    )
                 delta_forcing = forcing_pert - forcing_base
                 delta_temp = temp_pert - temp_base
                 if scale_factor is None:
@@ -786,14 +879,36 @@ def run_fair_delta_rf(
 
                 alias = rf_alias.get(specie, specie)
                 if alias in delta_forcing.coords["specie"].values:
-                    rf_series = np.asarray(
-                        delta_forcing.sel(specie=alias).values, dtype=float
-                    )
-                    rf_series = np.nan_to_num(rf_series, nan=0.0)
-                    _append_allocated_rf(specie, rf_series, "pos")
-                    temp_series = _extract_fair_timeseries(delta_temp)
-                    temp_series = np.nan_to_num(temp_series, nan=0.0)
-                    _append_allocated_temp(specie, temp_series, "pos")
+                    if config_names is not None and len(config_names) > 1:
+                        rf_series = _extract_fair_timeseries_by_config(
+                            delta_forcing.sel(specie=alias)
+                        )
+                        rf_quant = np.nanpercentile(
+                            rf_series, quantiles, axis=0
+                        )
+                        rf_quant = np.nan_to_num(rf_quant, nan=0.0)
+                        temp_series = _extract_fair_timeseries_by_config(delta_temp)
+                        temp_quant = np.nanpercentile(
+                            temp_series, quantiles, axis=0
+                        )
+                        temp_quant = np.nan_to_num(temp_quant, nan=0.0)
+                    else:
+                        rf_series = np.asarray(
+                            delta_forcing.sel(specie=alias).values, dtype=float
+                        )
+                        rf_series = np.nan_to_num(rf_series, nan=0.0)
+                        rf_series = np.ravel(rf_series)
+                        rf_quant = np.tile(rf_series[None, :], (n_quant, 1))
+                        temp_series = _extract_fair_timeseries(delta_temp)
+                        temp_series = np.nan_to_num(temp_series, nan=0.0)
+                        temp_quant = np.tile(temp_series[None, :], (n_quant, 1))
+                    for qi in range(n_quant):
+                        _append_allocated_rf(
+                            specie, rf_quant[qi], "pos", quantile_idx=qi
+                        )
+                        _append_allocated_temp(
+                            specie, temp_quant[qi], "pos", quantile_idx=qi
+                        )
 
             series_neg = delta_by_species_neg[specie]
             if np.any(series_neg.values != 0):
@@ -804,17 +919,22 @@ def run_fair_delta_rf(
                     config_csv=config_csv,
                     properties_csv=properties_csv,
                     config_name=config_name,
+                    config_names=config_names,
                     ghg_method=ghg_method,
                     temperature_prescribed=temperature_prescribed,
                     debug=debug,
                     progress=False,
                 )
-                forcing_pert = f_pert.forcing.sel(
-                    scenario=scenario, config=f_pert.configs[0]
-                )
-                temp_pert = f_pert.temperature.sel(
-                    scenario=scenario, config=f_pert.configs[0]
-                )
+                if config_names is not None and len(config_names) > 1:
+                    forcing_pert = f_pert.forcing.sel(scenario=scenario)
+                    temp_pert = f_pert.temperature.sel(scenario=scenario)
+                else:
+                    forcing_pert = f_pert.forcing.sel(
+                        scenario=scenario, config=f_pert.configs[0]
+                    )
+                    temp_pert = f_pert.temperature.sel(
+                        scenario=scenario, config=f_pert.configs[0]
+                    )
                 delta_forcing = forcing_pert - forcing_base
                 delta_temp = temp_pert - temp_base
                 if scale_factor is None:
@@ -825,14 +945,36 @@ def run_fair_delta_rf(
 
                 alias = rf_alias.get(specie, specie)
                 if alias in delta_forcing.coords["specie"].values:
-                    rf_series = np.asarray(
-                        delta_forcing.sel(specie=alias).values, dtype=float
-                    )
-                    rf_series = np.nan_to_num(rf_series, nan=0.0)
-                    _append_allocated_rf(specie, rf_series, "neg")
-                    temp_series = _extract_fair_timeseries(delta_temp)
-                    temp_series = np.nan_to_num(temp_series, nan=0.0)
-                    _append_allocated_temp(specie, temp_series, "neg")
+                    if config_names is not None and len(config_names) > 1:
+                        rf_series = _extract_fair_timeseries_by_config(
+                            delta_forcing.sel(specie=alias)
+                        )
+                        rf_quant = np.nanpercentile(
+                            rf_series, quantiles, axis=0
+                        )
+                        rf_quant = np.nan_to_num(rf_quant, nan=0.0)
+                        temp_series = _extract_fair_timeseries_by_config(delta_temp)
+                        temp_quant = np.nanpercentile(
+                            temp_series, quantiles, axis=0
+                        )
+                        temp_quant = np.nan_to_num(temp_quant, nan=0.0)
+                    else:
+                        rf_series = np.asarray(
+                            delta_forcing.sel(specie=alias).values, dtype=float
+                        )
+                        rf_series = np.nan_to_num(rf_series, nan=0.0)
+                        rf_series = np.ravel(rf_series)
+                        rf_quant = np.tile(rf_series[None, :], (n_quant, 1))
+                        temp_series = _extract_fair_timeseries(delta_temp)
+                        temp_series = np.nan_to_num(temp_series, nan=0.0)
+                        temp_quant = np.tile(temp_series[None, :], (n_quant, 1))
+                    for qi in range(n_quant):
+                        _append_allocated_rf(
+                            specie, rf_quant[qi], "neg", quantile_idx=qi
+                        )
+                        _append_allocated_temp(
+                            specie, temp_quant[qi], "neg", quantile_idx=qi
+                        )
     else:
         df_pert = _build_perturbed_df(df, None)
         f_pert = _run_fair_emissions(
@@ -841,13 +983,22 @@ def run_fair_delta_rf(
             config_csv=config_csv,
             properties_csv=properties_csv,
             config_name=config_name,
+            config_names=config_names,
             ghg_method=ghg_method,
             temperature_prescribed=temperature_prescribed,
             debug=debug,
             progress=False,
         )
-        forcing_pert = f_pert.forcing.sel(scenario=scenario, config=f_pert.configs[0])
-        temp_pert = f_pert.temperature.sel(scenario=scenario, config=f_pert.configs[0])
+        if config_names is not None and len(config_names) > 1:
+            forcing_pert = f_pert.forcing.sel(scenario=scenario)
+            temp_pert = f_pert.temperature.sel(scenario=scenario)
+        else:
+            forcing_pert = f_pert.forcing.sel(
+                scenario=scenario, config=f_pert.configs[0]
+            )
+            temp_pert = f_pert.temperature.sel(
+                scenario=scenario, config=f_pert.configs[0]
+            )
         delta_forcing = forcing_pert - forcing_base
         delta_temp = temp_pert - temp_base
         if scale_factor is None:
@@ -857,12 +1008,32 @@ def run_fair_delta_rf(
             delta_temp = delta_temp / float(scale_factor)
 
         for specie in delta_forcing.coords["specie"].values:
-            rf_series = np.asarray(delta_forcing.sel(specie=specie).values, dtype=float)
-            rf_series = np.nan_to_num(rf_series, nan=0.0)
-            _append_allocated_rf(str(specie), rf_series, "pos")
-            temp_series = _extract_fair_timeseries(delta_temp)
-            temp_series = np.nan_to_num(temp_series, nan=0.0)
-            _append_allocated_temp(str(specie), temp_series, "pos")
+            if config_names is not None and len(config_names) > 1:
+                rf_series = _extract_fair_timeseries_by_config(
+                    delta_forcing.sel(specie=specie)
+                )
+                rf_quant = np.nanpercentile(rf_series, quantiles, axis=0)
+                rf_quant = np.nan_to_num(rf_quant, nan=0.0)
+                temp_series = _extract_fair_timeseries_by_config(delta_temp)
+                temp_quant = np.nanpercentile(temp_series, quantiles, axis=0)
+                temp_quant = np.nan_to_num(temp_quant, nan=0.0)
+            else:
+                rf_series = np.asarray(
+                    delta_forcing.sel(specie=specie).values, dtype=float
+                )
+                rf_series = np.nan_to_num(rf_series, nan=0.0)
+                rf_series = np.ravel(rf_series)
+                rf_quant = np.tile(rf_series[None, :], (n_quant, 1))
+                temp_series = _extract_fair_timeseries(delta_temp)
+                temp_series = np.nan_to_num(temp_series, nan=0.0)
+                temp_quant = np.tile(temp_series[None, :], (n_quant, 1))
+            for qi in range(n_quant):
+                _append_allocated_rf(
+                    str(specie), rf_quant[qi], "pos", quantile_idx=qi
+                )
+                _append_allocated_temp(
+                    str(specie), temp_quant[qi], "pos", quantile_idx=qi
+                )
 
     if coords_out:
         coords = np.hstack(coords_out)
@@ -870,19 +1041,20 @@ def run_fair_delta_rf(
         rf_sparse = sparse.COO(
             coords=coords,
             data=data,
-            shape=(len(fair_years), n_flow, n_root),
+            shape=(n_quant, len(fair_years), n_flow, n_root),
         )
     else:
         rf_sparse = sparse.COO(
-            coords=np.zeros((3, 0), dtype=int),
+            coords=np.zeros((4, 0), dtype=int),
             data=np.array([], dtype=float),
-            shape=(len(fair_years), n_flow, n_root),
+            shape=(n_quant, len(fair_years), n_flow, n_root),
         )
 
     trails.instant_radiative_forcing = xr.DataArray(
         rf_sparse,
-        dims=("year", "flow", "root activity"),
+        dims=("quantile", "year", "flow", "root activity"),
         coords={
+            "quantile": np.array(quantiles, dtype=float),
             "year": np.array(fair_years, dtype=int),
             "flow": inv_sum.coords["flow"],
             "root activity": inv_sum.coords["root activity"],
@@ -894,18 +1066,19 @@ def run_fair_delta_rf(
         temp_sparse = sparse.COO(
             coords=tcoords,
             data=tdata,
-            shape=(len(fair_years), n_flow, n_root),
+            shape=(n_quant, len(fair_years), n_flow, n_root),
         )
     else:
         temp_sparse = sparse.COO(
-            coords=np.zeros((3, 0), dtype=int),
+            coords=np.zeros((4, 0), dtype=int),
             data=np.array([], dtype=float),
-            shape=(len(fair_years), n_flow, n_root),
+            shape=(n_quant, len(fair_years), n_flow, n_root),
         )
     trails.delta_temperature = xr.DataArray(
         temp_sparse,
-        dims=("year", "flow", "root activity"),
+        dims=("quantile", "year", "flow", "root activity"),
         coords={
+            "quantile": np.array(quantiles, dtype=float),
             "year": np.array(fair_years, dtype=int),
             "flow": inv_sum.coords["flow"],
             "root activity": inv_sum.coords["root activity"],
