@@ -41,6 +41,12 @@ elif UmfpackContext is not None:
     SOLVER = "umfpack"
 else:
     SOLVER = "scipy"
+    warnings.warn(
+        "No accelerated sparse solver detected (pypardiso or scikits.umfpack). "
+        "Falling back to SciPy's solver, which can be significantly slower.",
+        RuntimeWarning,
+        stacklevel=2,
+    )
 
 if TYPE_CHECKING:
     from .trails import Trails
