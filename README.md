@@ -1,7 +1,11 @@
 # `TRAILS`: Temporal Routing and Aggregation of Impacts across Life-cycle Systems
 
 
-[Temporal GWP example](assets/permanent/trails_logo_grey_on_white.png)
+<td align="center">
+  <img src="assets/permanent/trails_logo_grey_on_white.png" width="300"/>
+  <br/>
+  Temporal GWP example
+</td>
 
 [![PyPI version](https://badge.fury.io/py/trails.svg)](https://badge.fury.io/py/trails)
 
