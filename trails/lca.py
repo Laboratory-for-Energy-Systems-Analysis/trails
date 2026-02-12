@@ -389,7 +389,9 @@ def lca(
 
     trails.reset_inventory(attribute_to_roots=attribute_to_roots)
 
-    umfpack_cache: dict | None = {} if (attribute_to_roots and SOLVER == "umfpack") else None
+    umfpack_cache: dict | None = (
+        {} if (attribute_to_roots and SOLVER == "umfpack") else None
+    )
 
     cf = None
     if compute_score:
