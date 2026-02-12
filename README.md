@@ -46,9 +46,10 @@ flowchart TD
   D --> F[Apply temporal distributions<br>shift exchange years with offsets]
   F --> G[Create child nodes in their target years]
   G --> H[Accumulate frontier amounts and optional root attribution]
-  D --> I[Check direct biosphere for this node-year]
-  I -->|Yes| J[Apply temporal distribution to direct emissions<br>and route them across years]
-  I -->|No| C
+  D --> I[Check direct biosphere exchanges for this node-year<br>Are they temporally distributed?]
+  I -->|Yes| J[Apply temporal distribution to direct biosphere exchanges<br>and route them across years]
+  I -->|No| K[Assign direct biosphere exchanges at the node-year]
+  K --> G
   G --> C
   E --> K[Routing complete<br>frontier demands + direct emissions]
 
