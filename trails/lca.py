@@ -4,10 +4,8 @@ from typing import Any, Dict, List, TYPE_CHECKING
 
 import bw2calc as bc
 import numpy as np
-from scikits.umfpack import UmfpackWarning
 from tqdm import tqdm
 
-from scikits.umfpack import UmfpackContext, UMFPACK_A
 from scipy import sparse as sp
 import sparse
 import xarray as xr
@@ -22,11 +20,34 @@ from .bw_interface import (
 from .characterization import build_characterized_inventory
 from .characterization import get_cf_vector
 
+try:
+    from scikits.umfpack import UmfpackContext, UmfpackWarning, UMFPACK_A
+except ImportError:  # pragma: no cover - optional dependency
+    UmfpackContext = None  # type: ignore[assignment]
+    UMFPACK_A = None  # type: ignore[assignment]
+    UmfpackWarning = None  # type: ignore[assignment]
+
+# Solver selection: prefer pypardiso (if available), then UMFPACK, else SciPy.
+try:
+    import pypardiso  # noqa: F401
+except Exception:  # pragma: no cover - optional dependency
+    _HAS_PYPARDISO = False
+else:
+    _HAS_PYPARDISO = True
+
+if _HAS_PYPARDISO:
+    SOLVER = "pypardiso"
+elif UmfpackContext is not None:
+    SOLVER = "umfpack"
+else:
+    SOLVER = "scipy"
+
 if TYPE_CHECKING:
     from .trails import Trails
 
-warnings.filterwarnings("ignore", category=UmfpackWarning)
-warnings.filterwarnings("ignore", module="scikits")
+if UmfpackWarning is not None:
+    warnings.filterwarnings("ignore", category=UmfpackWarning)
+    warnings.filterwarnings("ignore", module="scikits")
 
 _CHAR_CACHE: dict = {}
 
@@ -170,6 +191,14 @@ def solve_many_rhs_umfpack_factorized(
     n, k = B.shape
     if A_csc.shape != (n, n):
         raise ValueError(f"Shape mismatch: A {A_csc.shape}, B {B.shape}")
+
+    if UmfpackContext is None:
+        # Fallback to SciPy when UMFPACK is unavailable.
+        lu = sp.linalg.splu(A_csc)
+        X = np.empty((n, k), dtype=np.float64)
+        for j in range(k):
+            X[:, j] = lu.solve(B[:, j])
+        return X
 
     ctx = None
     symbolic = None
@@ -360,9 +389,7 @@ def lca(
 
     trails.reset_inventory(attribute_to_roots=attribute_to_roots)
 
-    umfpack_cache: dict | None = (
-        {} if (attribute_to_roots and not bc.PYPARDISO) else None
-    )
+    umfpack_cache: dict | None = {} if (attribute_to_roots and SOLVER == "umfpack") else None
 
     cf = None
     if compute_score:
@@ -581,7 +608,7 @@ def lca(
             )
 
             if roots:
-                if bc.PYPARDISO:
+                if SOLVER == "pypardiso":
                     # Keep the PARDISO path for environments that rely on it.
                     for root_act in roots:
                         root_demand = per_root_demands[root_act]
@@ -596,7 +623,7 @@ def lca(
                         if supply_total:
                             supplies.append((supply_total, int(root_act)))
                 else:
-                    # UMFPACK: factorize once and solve all RHS vectors.
+                    # UMFPACK/SciPy: factorize once and solve all RHS vectors.
                     root_supply_matrix = solve_many_rhs_umfpack_factorized(
                         A_csc, rhs_matrix, cache=umfpack_cache
                     )
@@ -620,7 +647,7 @@ def lca(
         else:
             # Original single-demand path (no per-root attribution)
             lca_obj.build_demand_array(functional_unit_demand)
-            if not bc.PYPARDISO:
+            if SOLVER != "pypardiso":
                 lca_obj.decompose_technosphere()
             lca_obj.supply_array = lca_obj.solve_linear_system()
 
