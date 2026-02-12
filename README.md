@@ -68,6 +68,18 @@ fig.show()
 
 ---
 
+## Example Notebooks
+
+Tutorial notebooks are available under `examples/`:
+
+- `examples/1. simple numerical example.ipynb`
+- `examples/2. premise and imported lci example.ipynb`
+
+These walk through a full workflow (data loading, routing, LCA, plotting, and
+FaIR-based climate metrics).
+
+---
+
 ## Importing Excel Inventories
 
 You can import user-provided inventories from Excel using ``bw2io``. When you
