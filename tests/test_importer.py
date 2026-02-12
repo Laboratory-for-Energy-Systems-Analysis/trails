@@ -6,7 +6,19 @@ import numpy as np
 import sparse
 
 from trails.importer import import_excel_inventory
-from tests.helpers import DummyTrails, _install_fake_bw2io, _sample_importer_data
+
+from pathlib import Path as _Path
+import importlib.util as _importlib_util
+
+_helpers_path = _Path(__file__).resolve().parent / "helpers.py"
+_spec = _importlib_util.spec_from_file_location("tests_helpers", _helpers_path)
+_mod = _importlib_util.module_from_spec(_spec)  # type: ignore[arg-type]
+assert _spec and _spec.loader
+_spec.loader.exec_module(_mod)
+
+DummyTrails = _mod.DummyTrails
+_install_fake_bw2io = _mod._install_fake_bw2io
+_sample_importer_data = _mod._sample_importer_data
 
 
 def test_import_excel_inventory_all_template_years(tmp_path: Path) -> None:
