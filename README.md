@@ -39,35 +39,33 @@ deeply-temporalized, technosphere representation.
 
 ```mermaid
 flowchart TD
-  A[Start: trails.temporal_routing<br>start_year, start_act_idx, amount] --> B[Initialize graph, frontier, and per-node metadata]
-  B --> C{Expand node?}
-  C -->|Depth < max_depth AND amount >= min_amount| D[Expand technosphere exchanges<br>A row for node-year]
-  C -->|Else| E[Mark as frontier node<br>frontier amount]
-  D --> F[Read temporal distribution metadata<br>temporal_distribution, loc, scale, min max, source]
-  F --> G[Map offsets to years<br>anchor_year plus offset to target_year<br>Clamp to scenario years if needed]
-  G --> H[Create child nodes<br>target_year, activity<br>with shifted years]
-  H --> I[Accumulate frontier amounts<br>and provenance for root attribution]
-  D --> J[Direct biosphere?<br>Check B row for this node-year]
-  J -->|Yes| K[Store direct_bio_amount<br>and root attribution if enabled]
-  J -->|No| C
-  H --> C
-  E --> L[Temporal routing complete<br>Graph, frontier, direct biosphere]
+  A[Start with a functional unit<br>year, activity, amount] --> B[Create a routing graph and frontier buckets]
+  B --> C{Should this node be expanded?}
+  C -->|Yes: depth limit and min amount allow it| D[Read technosphere exchanges for this node-year]
+  C -->|No| E[Stop expanding and record a frontier demand]
+  D --> F[Apply temporal distributions<br>shift exchange years with offsets]
+  F --> G[Create child nodes in their target years]
+  G --> H[Accumulate frontier amounts and optional root attribution]
+  D --> I[Check direct biosphere for this node-year]
+  I -->|Yes| J[Record direct emissions at this node-year]
+  I -->|No| C
+  G --> C
+  E --> K[Routing complete<br>frontier demands + direct emissions]
 
-  L --> M[trails.lca<br>methods, compute_score, store_inventory]
-  M --> N[For each solve year<br>frontier years<br>Build demand vector]
-  N --> O[Build datapackage for year<br>technosphere and mappings]
-  O --> P{attribute_to_roots?}
-  P -->|Yes| Q[Build RHS matrix per root]
-  P -->|No| R[Single RHS demand vector]
-  Q --> S[Solve A x = b<br>PARDISO, UMFPACK, or SciPy<br>Reuse factorization per year]
-  R --> S
-  S --> T[Supply arrays per root or total]
-  T --> U[Accumulate inventory<br>technosphere-driven biosphere<br>add direct_bio_amount]
-  U --> V{compute_score?}
-  V -->|Yes| W[Apply CFs and aggregate<br>scores by year and root]
-  V -->|No| X[Return inventory only]
-  W --> Y[Results stored on Trails<br>trails.inventory or trails.scores]
-  X --> Y
+  K --> L[For each frontier year, build a demand vector]
+  L --> M[Build the year-specific technosphere]
+  M --> N{Root attribution enabled?}
+  N -->|Yes| O[Assemble one RHS per root activity]
+  N -->|No| P[Use a single RHS vector]
+  O --> Q[Solve the linear system<br>reusing factorization per year]
+  P --> Q
+  Q --> R[Get supply arrays per root or total]
+  R --> S[Accumulate inventory<br>and add direct emissions]
+  S --> T{Compute impact scores?}
+  T -->|Yes| U[Apply CFs and aggregate by year and root]
+  T -->|No| V[Return inventory only]
+  U --> W[Results stored on the Trails instance]
+  V --> W
 ```
 
 **Caption:** Temporal distributions shift the **anchor year** by integer offsets to produce
