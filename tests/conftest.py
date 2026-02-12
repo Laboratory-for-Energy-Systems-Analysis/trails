@@ -13,10 +13,30 @@ import trails.trails as trails_module
 
 BASE = Path(os.environ.get("PYTEST_DEBUG_DIR", ".pytest-debug"))
 
-# Ensure tests directory is on sys.path for helper imports
+# Ensure repo root is on sys.path for helper imports
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
+
+# Register tests.helpers module for CI imports
+try:
+    import importlib.util
+    import types
+
+    tests_pkg = sys.modules.get("tests")
+    if tests_pkg is None:
+        tests_pkg = types.ModuleType("tests")
+        sys.modules["tests"] = tests_pkg
+    helpers_path = Path(__file__).resolve().parent / "helpers.py"
+    if helpers_path.exists() and "tests.helpers" not in sys.modules:
+        spec = importlib.util.spec_from_file_location("tests.helpers", helpers_path)
+        if spec and spec.loader:
+            module = importlib.util.module_from_spec(spec)
+            sys.modules["tests.helpers"] = module
+            spec.loader.exec_module(module)
+            setattr(tests_pkg, "helpers", module)
+except Exception:
+    pass
 
 
 def _slug(s: str) -> str:
