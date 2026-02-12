@@ -6,6 +6,9 @@
 </p>
 
 [![PyPI version](https://badge.fury.io/py/trails.svg)](https://badge.fury.io/py/trails)
+[![Conda version](https://anaconda.org/romainsacchi/trails/badges/version.svg)](https://anaconda.org/romainsacchi/trails)
+[![License](https://img.shields.io/github/license/Laboratory-for-Energy-Systems-Analysis/trails)](LICENSE.md)
+[![Tests](https://github.com/Laboratory-for-Energy-Systems-Analysis/trails/actions/workflows/main.yml/badge.svg)](https://github.com/Laboratory-for-Energy-Systems-Analysis/trails/actions/workflows/main.yml)
 
 `TRAILS` is a Python library for **temporal Life Cycle Assessment (LCA)**. It
 models **time-resolved supply chains** where technosphere and biosphere exchanges can occur at
@@ -39,17 +42,17 @@ using a prospective background scenario.
     <td align="center">
       <img src="assets/permanent/example_gwp.png" width="300"/>
       <br/>
-      Temporal GWP example
+      Temporal GWP100
     </td>
     <td align="center">
       <img src="assets/permanent/example_rf.png" width="300"/>
       <br/>
-      Radiative forcing example
+      Radiative forcing
     </td>
     <td align="center">
       <img src="assets/permanent/example_temp.png" width="300"/>
       <br/>
-      Temperature anomaly example
+      Temperature anomaly
     </td>
   </tr>
 </table>
