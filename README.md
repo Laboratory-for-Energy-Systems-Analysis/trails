@@ -79,9 +79,25 @@ FaIR-based climate metrics).
 
 ## Example Outputs
 
-![Temporal GWP example](assets/permanent/example_gwp.png)
-![Radiative forcing example](assets/permanent/example_rf.png)
-![Temperature anomaly example](assets/permanent/example_temp.png)
+<table>
+  <tr>
+    <td align="center">
+      <img src="assets/permanent/example_gwp.png" width="300"/>
+      <br/>
+      Temporal GWP example
+    </td>
+    <td align="center">
+      <img src="assets/permanent/example_rf.png" width="300"/>
+      <br/>
+      Radiative forcing example
+    </td>
+    <td align="center">
+      <img src="assets/permanent/example_temp.png" width="300"/>
+      <br/>
+      Temperature anomaly example
+    </td>
+  </tr>
+</table>
 
 ---
 
