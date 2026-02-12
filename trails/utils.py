@@ -5,7 +5,7 @@ from typing import Iterable, Mapping
 
 
 def _parse_float_or_none(value: object) -> float | None:
-    """ parse float or none.
+    """parse float or none.
 
     :param value: Value for `value`.
     :type value: object
@@ -20,7 +20,7 @@ def _parse_float_or_none(value: object) -> float | None:
 
 
 def _parse_int_or_none(value: object) -> int | None:
-    """ parse int or none.
+    """parse int or none.
 
     :param value: Value for `value`.
     :type value: object
@@ -35,7 +35,7 @@ def _parse_int_or_none(value: object) -> int | None:
 
 
 def _format_path_label(path: Iterable[int], idx_to_label: Mapping[int, str]) -> str:
-    """ format path label.
+    """format path label.
 
     :param path: Value for `path`.
     :type path: Iterable[int]
@@ -50,7 +50,7 @@ def _format_path_label(path: Iterable[int], idx_to_label: Mapping[int, str]) -> 
 def _format_path_label_with_years(
     path: Iterable[tuple[int, int]], idx_to_label: Mapping[int, str]
 ) -> str:
-    """ format path label with years.
+    """format path label with years.
 
     :param path: Value for `path`.
     :type path: Iterable[tuple[int, int]]
@@ -66,7 +66,7 @@ def _format_path_label_with_years(
 
 
 def _parse_intish_or_none(v: object) -> int | None:
-    """ parse intish or none.
+    """parse intish or none.
 
     :param v: Value for `v`.
     :type v: object

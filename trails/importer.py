@@ -109,22 +109,22 @@ def import_excel_inventory(
             trails.biosphere_indices.setdefault(label, biosphere_mapping)
 
     def _norm(value: object) -> str:
-        """ norm.
+        """norm.
 
-    :param value: Value for `value`.
-    :type value: object
-    :returns: Return value.
-    :rtype: str"""
+        :param value: Value for `value`.
+        :type value: object
+        :returns: Return value.
+        :rtype: str"""
         return "" if value is None else str(value).strip()
 
     def _parse_amount_source(value: object) -> str:
-        """ parse amount source.
+        """parse amount source.
 
-    :param value: Value for `value`.
-    :type value: object
-    :returns: Return value.
-    :rtype: str
-    :raises ValueError: If an error occurs."""
+        :param value: Value for `value`.
+        :type value: object
+        :returns: Return value.
+        :rtype: str
+        :raises ValueError: If an error occurs."""
         if value is None:
             return "port"
         s = str(value).strip().lower()
@@ -135,12 +135,12 @@ def import_excel_inventory(
         raise ValueError(f"Invalid temporal_amount_source: {value!r}")
 
     def _parse_temporal_exchange(exchange: dict) -> TemporalExchange | None:
-        """ parse temporal exchange.
+        """parse temporal exchange.
 
-    :param exchange: Value for `exchange`.
-    :type exchange: dict
-    :returns: Return value.
-    :rtype: TemporalExchange | None"""
+        :param exchange: Value for `exchange`.
+        :type exchange: dict
+        :returns: Return value.
+        :rtype: TemporalExchange | None"""
         dist_code = _parse_intish_or_none(exchange.get("temporal_distribution"))
         if dist_code in (None, 0):
             return None
@@ -165,16 +165,16 @@ def import_excel_inventory(
         ref_product: object,
         location: object,
     ) -> tuple[str, str, str]:
-        """ activity key.
+        """activity key.
 
-    :param name: Value for `name`.
-    :type name: object
-    :param ref_product: Value for `ref_product`.
-    :type ref_product: object
-    :param location: Value for `location`.
-    :type location: object
-    :returns: Return value.
-    :rtype: tuple[str, str, str]"""
+        :param name: Value for `name`.
+        :type name: object
+        :param ref_product: Value for `ref_product`.
+        :type ref_product: object
+        :param location: Value for `location`.
+        :type location: object
+        :returns: Return value.
+        :rtype: tuple[str, str, str]"""
         return (
             _norm(name),
             _norm(ref_product),
@@ -186,16 +186,16 @@ def import_excel_inventory(
         compartment: object,
         subcompartment: object,
     ) -> tuple[str, str, str]:
-        """ biosphere key.
+        """biosphere key.
 
-    :param name: Value for `name`.
-    :type name: object
-    :param compartment: Value for `compartment`.
-    :type compartment: object
-    :param subcompartment: Value for `subcompartment`.
-    :type subcompartment: object
-    :returns: Return value.
-    :rtype: tuple[str, str, str]"""
+        :param name: Value for `name`.
+        :type name: object
+        :param compartment: Value for `compartment`.
+        :type compartment: object
+        :param subcompartment: Value for `subcompartment`.
+        :type subcompartment: object
+        :returns: Return value.
+        :rtype: tuple[str, str, str]"""
         return (
             _norm(name),
             _norm(compartment),
@@ -231,9 +231,9 @@ def import_excel_inventory(
         biosphere_lookup[key] = int(idx)
 
     def _sync_indices_across_labels() -> None:
-        """ sync indices across labels.
+        """sync indices across labels.
 
-    :raises ValueError: If an error occurs."""
+        :raises ValueError: If an error occurs."""
         for label, mapping in trails.activity_indices.items():
             if mapping is activity_mapping:
                 continue
@@ -275,12 +275,12 @@ def import_excel_inventory(
                     mapping[idx] = biosphere_mapping[idx]
 
     def _next_index(mapping: dict[int, dict]) -> int:
-        """ next index.
+        """next index.
 
-    :param mapping: Value for `mapping`.
-    :type mapping: dict[int, dict]
-    :returns: Return value.
-    :rtype: int"""
+        :param mapping: Value for `mapping`.
+        :type mapping: dict[int, dict]
+        :returns: Return value.
+        :rtype: int"""
         return (max(mapping) + 1) if mapping else 0
 
     new_activity_count = 0
@@ -297,18 +297,18 @@ def import_excel_inventory(
         *,
         unit: object | None = None,
     ) -> tuple[int, bool]:
-        """ ensure activity index.
+        """ensure activity index.
 
-    :param name: Value for `name`.
-    :type name: object
-    :param ref_product: Value for `ref_product`.
-    :type ref_product: object
-    :param location: Value for `location`.
-    :type location: object
-    :param unit: Value for `unit`.
-    :type unit: object | None
-    :returns: Return value.
-    :rtype: tuple[int, bool]"""
+        :param name: Value for `name`.
+        :type name: object
+        :param ref_product: Value for `ref_product`.
+        :type ref_product: object
+        :param location: Value for `location`.
+        :type location: object
+        :param unit: Value for `unit`.
+        :type unit: object | None
+        :returns: Return value.
+        :rtype: tuple[int, bool]"""
         nonlocal new_activity_count
         key = _activity_key(name, ref_product, location)
         idx = activity_lookup.get(key)
@@ -343,18 +343,18 @@ def import_excel_inventory(
         *,
         unit: object | None = None,
     ) -> tuple[int, bool]:
-        """ ensure biosphere index.
+        """ensure biosphere index.
 
-    :param name: Value for `name`.
-    :type name: object
-    :param compartment: Value for `compartment`.
-    :type compartment: object
-    :param subcompartment: Value for `subcompartment`.
-    :type subcompartment: object
-    :param unit: Value for `unit`.
-    :type unit: object | None
-    :returns: Return value.
-    :rtype: tuple[int, bool]"""
+        :param name: Value for `name`.
+        :type name: object
+        :param compartment: Value for `compartment`.
+        :type compartment: object
+        :param subcompartment: Value for `subcompartment`.
+        :type subcompartment: object
+        :param unit: Value for `unit`.
+        :type unit: object | None
+        :returns: Return value.
+        :rtype: tuple[int, bool]"""
         nonlocal new_biosphere_count
         key = _biosphere_key(name, compartment, subcompartment)
         idx = biosphere_lookup.get(key)
@@ -374,12 +374,12 @@ def import_excel_inventory(
         return int(idx), True
 
     def _activity_index_for_dataset(dataset: dict) -> int:
-        """ activity index for dataset.
+        """activity index for dataset.
 
-    :param dataset: Value for `dataset`.
-    :type dataset: dict
-    :returns: Return value.
-    :rtype: int"""
+        :param dataset: Value for `dataset`.
+        :type dataset: dict
+        :returns: Return value.
+        :rtype: int"""
         idx, created = _ensure_activity_index(
             dataset.get("name"),
             dataset.get("reference product") or dataset.get("product"),
@@ -391,12 +391,12 @@ def import_excel_inventory(
         return idx
 
     def _biosphere_index_for_exchange(exchange: dict) -> int:
-        """ biosphere index for exchange.
+        """biosphere index for exchange.
 
-    :param exchange: Value for `exchange`.
-    :type exchange: dict
-    :returns: Return value.
-    :rtype: int"""
+        :param exchange: Value for `exchange`.
+        :type exchange: dict
+        :returns: Return value.
+        :rtype: int"""
         categories = exchange.get("categories")
         compartment = exchange.get("compartment")
         subcompartment = exchange.get("subcompartment")
@@ -620,14 +620,14 @@ def import_excel_inventory(
     def _resize_sparse(
         matrix: sparse.COO, new_shape: tuple[int, int, int]
     ) -> sparse.COO:
-        """ resize sparse.
+        """resize sparse.
 
-    :param matrix: Value for `matrix`.
-    :type matrix: sparse.COO
-    :param new_shape: Value for `new_shape`.
-    :type new_shape: tuple[int, int, int]
-    :returns: Return value.
-    :rtype: sparse.COO"""
+        :param matrix: Value for `matrix`.
+        :type matrix: sparse.COO
+        :param new_shape: Value for `new_shape`.
+        :type new_shape: tuple[int, int, int]
+        :returns: Return value.
+        :rtype: sparse.COO"""
         if matrix.shape == new_shape:
             return matrix
         return sparse.COO(coords=matrix.coords, data=matrix.data, shape=new_shape)
@@ -637,16 +637,16 @@ def import_excel_inventory(
         coords: list[tuple[int, int, int]],
         data: list[float],
     ) -> sparse.COO:
-        """ append sparse entries.
+        """append sparse entries.
 
-    :param matrix: Value for `matrix`.
-    :type matrix: sparse.COO
-    :param coords: Value for `coords`.
-    :type coords: list[tuple[int, int, int]]
-    :param data: Value for `data`.
-    :type data: list[float]
-    :returns: Return value.
-    :rtype: sparse.COO"""
+        :param matrix: Value for `matrix`.
+        :type matrix: sparse.COO
+        :param coords: Value for `coords`.
+        :type coords: list[tuple[int, int, int]]
+        :param data: Value for `data`.
+        :type data: list[float]
+        :returns: Return value.
+        :rtype: sparse.COO"""
         if not coords:
             return matrix
 
@@ -681,16 +681,16 @@ def import_excel_inventory(
         add_coords: list[tuple[int, int, int]],
         add_data: list[float],
     ) -> None:
-        """ apply interpolation.
+        """apply interpolation.
 
-    :param values_by_coord: Value for `values_by_coord`.
-    :type values_by_coord: dict[tuple[int, int], dict[int, float]]
-    :param years_all: Value for `years_all`.
-    :type years_all: np.ndarray
-    :param add_coords: Value for `add_coords`.
-    :type add_coords: list[tuple[int, int, int]]
-    :param add_data: Value for `add_data`.
-    :type add_data: list[float]"""
+        :param values_by_coord: Value for `values_by_coord`.
+        :type values_by_coord: dict[tuple[int, int], dict[int, float]]
+        :param years_all: Value for `years_all`.
+        :type years_all: np.ndarray
+        :param add_coords: Value for `add_coords`.
+        :type add_coords: list[tuple[int, int, int]]
+        :param add_data: Value for `add_data`.
+        :type add_data: list[float]"""
         if not values_by_coord:
             return
         years_sorted = np.array(sorted(set(int(y) for y in years_all)), dtype=int)
@@ -710,10 +710,10 @@ def import_excel_inventory(
                 add_data.append(float(value))
 
     def _print_unlinked(rows: list[dict[str, str]]) -> None:
-        """ print unlinked.
+        """print unlinked.
 
-    :param rows: Value for `rows`.
-    :type rows: list[dict[str, str]]"""
+        :param rows: Value for `rows`.
+        :type rows: list[dict[str, str]]"""
         try:
             from prettytable import PrettyTable
 
@@ -755,16 +755,16 @@ def import_excel_inventory(
     def _drop_rows(
         matrix: sparse.COO, t_indices: set[int], act_indices: set[int]
     ) -> sparse.COO:
-        """ drop rows.
+        """drop rows.
 
-    :param matrix: Value for `matrix`.
-    :type matrix: sparse.COO
-    :param t_indices: Value for `t_indices`.
-    :type t_indices: set[int]
-    :param act_indices: Value for `act_indices`.
-    :type act_indices: set[int]
-    :returns: Return value.
-    :rtype: sparse.COO"""
+        :param matrix: Value for `matrix`.
+        :type matrix: sparse.COO
+        :param t_indices: Value for `t_indices`.
+        :type t_indices: set[int]
+        :param act_indices: Value for `act_indices`.
+        :type act_indices: set[int]
+        :returns: Return value.
+        :rtype: sparse.COO"""
         if not act_indices:
             return matrix
         t_coords = matrix.coords[0]

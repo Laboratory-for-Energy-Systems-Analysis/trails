@@ -27,7 +27,7 @@ import os
 
 
 def _resource_abspath(package: Any, res: Any) -> Path:
-    """ resource abspath.
+    """resource abspath.
 
     :param package: Value for `package`.
     :type package: Any
@@ -130,8 +130,8 @@ BASE_COLS_B = [
 ]
 
 
-def _read_matrix_csv_fast(csv_path: Any, kind: Any="A") -> Any:
-    """ read matrix csv fast.
+def _read_matrix_csv_fast(csv_path: Any, kind: Any = "A") -> Any:
+    """read matrix csv fast.
 
     :param csv_path: Value for `csv_path`.
     :type csv_path: Any
@@ -258,7 +258,7 @@ def _read_matrix_csv_fast(csv_path: Any, kind: Any="A") -> Any:
 
 
 def _parse_intish_or_none(value: object) -> int | None:
-    """ parse intish or none.
+    """parse intish or none.
 
     :param value: Value for `value`.
     :type value: object
@@ -271,7 +271,7 @@ def _parse_intish_or_none(value: object) -> int | None:
 # Internal helpers
 # ----------------------------------------------------------------------
 def _iter_inventory_resources(package: Any, filename: str) -> Iterator[tuple[str, Any]]:
-    """ iter inventory resources.
+    """iter inventory resources.
 
     :param package: Value for `package`.
     :type package: Any
@@ -300,7 +300,7 @@ def _iter_inventory_resources(package: Any, filename: str) -> Iterator[tuple[str
 def _parse_temporal_exchange_row(
     row: Mapping[str, Any],
 ) -> TemporalExchange | None:
-    """ parse temporal exchange row.
+    """parse temporal exchange row.
 
     :param row: Value for `row`.
     :type row: Mapping[str, Any]
@@ -334,7 +334,7 @@ def _build_sparse_matrix(
     idx_dtype: np.dtype,
     val_dtype: np.dtype,
 ) -> sparse.COO:
-    """ build sparse matrix.
+    """build sparse matrix.
 
     :param coords: Value for `coords`.
     :type coords: Sequence[Sequence[int]]
@@ -372,7 +372,7 @@ def _parse_a_exchange_row(
     A_coords: Dict[str, List[int]],
     max_indices: Dict[str, int],
 ) -> None:
-    """ parse a exchange row.
+    """parse a exchange row.
 
     :param row: Value for `row`.
     :type row: Mapping[str, Any]
@@ -417,7 +417,7 @@ def _parse_b_exchange_row(
     B_coords: Dict[str, List[int]],
     max_indices: Dict[str, int],
 ) -> None:
-    """ parse b exchange row.
+    """parse b exchange row.
 
     :param row: Value for `row`.
     :type row: Mapping[str, Any]
@@ -451,7 +451,7 @@ def _parse_b_exchange_row(
 
 
 def _label_to_year(label: str) -> int:
-    """ label to year.
+    """label to year.
 
     :param label: Value for `label`.
     :type label: str
@@ -464,7 +464,7 @@ def _label_to_year(label: str) -> int:
 def _years_and_sorted_indices(
     scenario_labels: Sequence[str],
 ) -> tuple[np.ndarray, np.ndarray]:
-    """ years and sorted indices.
+    """years and sorted indices.
 
     :param scenario_labels: Value for `scenario_labels`.
     :type scenario_labels: Sequence[str]
@@ -502,17 +502,18 @@ def load_matrices_from_package(
     :param debug: Value for `debug`.
     :type debug: bool
     :returns: Return value.
-    :rtype: tuple[sparse.COO, sparse.COO, list[str], dict[str, int], dict[tuple[str, int, int], TemporalExchange], dict[tuple[str, int, int], TemporalExchange]]"""
+    :rtype: tuple[sparse.COO, sparse.COO, list[str], dict[str, int], dict[tuple[str, int, int], TemporalExchange], dict[tuple[str, int, int], TemporalExchange]]
+    """
     scenario_labels: list[str] = []
     scenario_index: dict[str, int] = {}
 
     def get_scenario_idx(label: str) -> int:
         """Get scenario idx.
 
-    :param label: Value for `label`.
-    :type label: str
-    :returns: Return value.
-    :rtype: int"""
+        :param label: Value for `label`.
+        :type label: str
+        :returns: Return value.
+        :rtype: int"""
         idx = scenario_index.get(label)
         if idx is None:
             idx = len(scenario_labels)
@@ -548,23 +549,23 @@ def load_matrices_from_package(
         off_max: Any,
         amount_source: Any,
     ) -> TemporalExchange | None:
-        """ parse td fields.
+        """parse td fields.
 
-    :param dist: Value for `dist`.
-    :type dist: Any
-    :param loc: Value for `loc`.
-    :type loc: Any
-    :param scale: Value for `scale`.
-    :type scale: Any
-    :param off_min: Value for `off_min`.
-    :type off_min: Any
-    :param off_max: Value for `off_max`.
-    :type off_max: Any
-    :param amount_source: Value for `amount_source`.
-    :type amount_source: Any
-    :returns: Return value.
-    :rtype: TemporalExchange | None
-    :raises ValueError: If an error occurs."""
+        :param dist: Value for `dist`.
+        :type dist: Any
+        :param loc: Value for `loc`.
+        :type loc: Any
+        :param scale: Value for `scale`.
+        :type scale: Any
+        :param off_min: Value for `off_min`.
+        :type off_min: Any
+        :param off_max: Value for `off_max`.
+        :type off_max: Any
+        :param amount_source: Value for `amount_source`.
+        :type amount_source: Any
+        :returns: Return value.
+        :rtype: TemporalExchange | None
+        :raises ValueError: If an error occurs."""
         # distribution required
         if dist is None:
             return None
@@ -607,15 +608,15 @@ def load_matrices_from_package(
                     raise ValueError(f"Unknown temporal_amount_source: {ssrc}")
                 src = ssrc
 
-        def _to_int(x: Any, default: Any=0) -> int:
-            """ to int.
+        def _to_int(x: Any, default: Any = 0) -> int:
+            """to int.
 
-    :param x: Value for `x`.
-    :type x: Any
-    :param default: Value for `default`.
-    :type default: Any
-    :returns: Return value.
-    :rtype: int"""
+            :param x: Value for `x`.
+            :type x: Any
+            :param default: Value for `default`.
+            :type default: Any
+            :returns: Return value.
+            :rtype: int"""
             if x is None:
                 return default
             if isinstance(x, str):
@@ -641,12 +642,12 @@ def load_matrices_from_package(
 
         # loc/scale can be NaN
         def _to_float_or_none(x: Any) -> Any:
-            """ to float or none.
+            """to float or none.
 
-    :param x: Value for `x`.
-    :type x: Any
-    :returns: Return value.
-    :rtype: Any"""
+            :param x: Value for `x`.
+            :type x: Any
+            :returns: Return value.
+            :rtype: Any"""
             if x is None:
                 return None
             if isinstance(x, str):
@@ -852,14 +853,14 @@ def load_matrices_from_package(
 
     # ---------- Concatenate blocks ----------
     def _cat(blocks: list[np.ndarray], dtype: np.dtype) -> np.ndarray:
-        """ cat.
+        """cat.
 
-    :param blocks: Value for `blocks`.
-    :type blocks: list[np.ndarray]
-    :param dtype: Value for `dtype`.
-    :type dtype: np.dtype
-    :returns: Return value.
-    :rtype: np.ndarray"""
+        :param blocks: Value for `blocks`.
+        :type blocks: list[np.ndarray]
+        :param dtype: Value for `dtype`.
+        :type dtype: np.dtype
+        :returns: Return value.
+        :rtype: np.ndarray"""
         if not blocks:
             return np.array([], dtype=dtype)
         out = np.concatenate(blocks)
@@ -910,8 +911,8 @@ def load_matrices_from_package(
     )
 
 
-def _read_matrix_csv_faster(csv_path: str, kind: Any="A") -> pd.DataFrame:
-    """ read matrix csv faster.
+def _read_matrix_csv_faster(csv_path: str, kind: Any = "A") -> pd.DataFrame:
+    """read matrix csv faster.
 
     :param csv_path: Value for `csv_path`.
     :type csv_path: str
@@ -1048,7 +1049,7 @@ def interpolate_to_annual(
 
 
 def _concat_or_empty(arrs: list[np.ndarray], dtype: np.dtype) -> np.ndarray:
-    """ concat or empty.
+    """concat or empty.
 
     :param arrs: Value for `arrs`.
     :type arrs: list[np.ndarray]
@@ -1067,7 +1068,7 @@ def _interpolate_annual_slices(
     B_sorted: sparse.COO,
     val_dtype: np.dtype,
 ) -> tuple[list[sparse.COO], list[sparse.COO], list[str]]:
-    """ interpolate annual slices.
+    """interpolate annual slices.
 
     :param years_sorted: Value for `years_sorted`.
     :type years_sorted: np.ndarray
@@ -1124,7 +1125,7 @@ def _interp_slice_union_vectorized(
     idx_dtype: np.dtype,
     val_dtype: np.dtype,
 ) -> sparse.COO:
-    """ interp slice union vectorized.
+    """interp slice union vectorized.
 
     :param M0: Value for `M0`.
     :type M0: sparse.COO
@@ -1190,7 +1191,7 @@ def _interp_slice_union_vectorized(
 
 
 def _load_activity_indices(package: Any) -> Dict[str, Dict[int, dict]]:
-    """ load activity indices.
+    """load activity indices.
 
     :param package: Value for `package`.
     :type package: Any
@@ -1221,7 +1222,7 @@ def _load_activity_indices(package: Any) -> Dict[str, Dict[int, dict]]:
 
 
 def _load_biosphere_indices(package: Any) -> Dict[str, Dict[int, dict]]:
-    """ load biosphere indices.
+    """load biosphere indices.
 
     :param package: Value for `package`.
     :type package: Any
@@ -1263,7 +1264,7 @@ def load_indices_from_package(
 
 
 def _parse_amount_source(value: object) -> str:
-    """ parse amount source.
+    """parse amount source.
 
     :param value: Value for `value`.
     :type value: object

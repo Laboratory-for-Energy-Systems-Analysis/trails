@@ -37,7 +37,7 @@ def _inventory_emissions_by_fair_species(
     species_map: dict[object, str],
     signs: dict[object, float],
 ) -> pd.DataFrame:
-    """ inventory emissions by fair species.
+    """inventory emissions by fair species.
 
     :param trails: Value for `trails`.
     :type trails: Any
@@ -133,7 +133,7 @@ def _run_fair_emissions(
     debug: bool = False,
     progress: bool = False,
 ) -> fair.FAIR:
-    """ run fair emissions.
+    """run fair emissions.
 
     :param emissions_df: Value for `emissions_df`.
     :type emissions_df: pd.DataFrame
@@ -215,12 +215,12 @@ def _run_fair_emissions(
         raise ValueError(f"No configs found in {config_csv}.")
 
     def _normalize_config_name(name: object) -> object:
-        """ normalize config name.
+        """normalize config name.
 
-    :param name: Value for `name`.
-    :type name: object
-    :returns: Return value.
-    :rtype: object"""
+        :param name: Value for `name`.
+        :type name: object
+        :returns: Return value.
+        :rtype: object"""
         if name in cfg.index:
             return name
         try:
@@ -273,7 +273,7 @@ def _run_fair_emissions(
 
 
 def _compute_ghg_forcing_from_concentration(f: fair.FAIR) -> np.ndarray | None:
-    """ compute ghg forcing from concentration.
+    """compute ghg forcing from concentration.
 
     :param f: Value for `f`.
     :type f: fair.FAIR
@@ -357,7 +357,7 @@ def _compute_ghg_forcing_from_concentration(f: fair.FAIR) -> np.ndarray | None:
 
 
 def _extract_fair_timeseries(da: xr.DataArray) -> np.ndarray:
-    """ extract fair timeseries.
+    """extract fair timeseries.
 
     :param da: Value for `da`.
     :type da: xr.DataArray
@@ -394,7 +394,7 @@ def _extract_fair_timeseries(da: xr.DataArray) -> np.ndarray:
 
 
 def _extract_fair_timeseries_by_config(da: xr.DataArray) -> np.ndarray:
-    """ extract fair timeseries by config.
+    """extract fair timeseries by config.
 
     :param da: Value for `da`.
     :type da: xr.DataArray
@@ -549,12 +549,12 @@ def run_fair_delta_rf(
     has_half_years = any(abs(v - round(v)) > 1e-9 for v in base_year_vals)
 
     def _year_col_name(year: int) -> str:
-        """ year col name.
+        """year col name.
 
-    :param year: Value for `year`.
-    :type year: int
-    :returns: Return value.
-    :rtype: str"""
+        :param year: Value for `year`.
+        :type year: int
+        :returns: Return value.
+        :rtype: str"""
         if has_half_years:
             return f"{year + 0.5:.1f}"
         return str(int(year))
@@ -597,16 +597,16 @@ def run_fair_delta_rf(
         specie: str | None,
         delta_series: pd.Series | None = None,
     ) -> pd.DataFrame:
-        """ build perturbed df.
+        """build perturbed df.
 
-    :param base_df: Value for `base_df`.
-    :type base_df: pd.DataFrame
-    :param specie: Value for `specie`.
-    :type specie: str | None
-    :param delta_series: Value for `delta_series`.
-    :type delta_series: pd.Series | None
-    :returns: Return value.
-    :rtype: pd.DataFrame"""
+        :param base_df: Value for `base_df`.
+        :type base_df: pd.DataFrame
+        :param specie: Value for `specie`.
+        :type specie: str | None
+        :param delta_series: Value for `delta_series`.
+        :type delta_series: pd.Series | None
+        :returns: Return value.
+        :rtype: pd.DataFrame"""
         df_pert_local = _normalize_emissions_columns(base_df)
         df_pert_local = df_pert_local[
             (df_pert_local["scenario"] == scenario)
@@ -785,17 +785,17 @@ def run_fair_delta_rf(
         *,
         quantile_idx: int,
     ) -> None:
-        """ append allocated rf.
+        """append allocated rf.
 
-    :param specie: Value for `specie`.
-    :type specie: str
-    :param rf_series: Value for `rf_series`.
-    :type rf_series: np.ndarray
-    :param sign_mode: Value for `sign_mode`.
-    :type sign_mode: str
-    :param quantile_idx: Value for `quantile_idx`.
-    :type quantile_idx: int
-    :raises ValueError: If an error occurs."""
+        :param specie: Value for `specie`.
+        :type specie: str
+        :param rf_series: Value for `rf_series`.
+        :type rf_series: np.ndarray
+        :param sign_mode: Value for `sign_mode`.
+        :type sign_mode: str
+        :param quantile_idx: Value for `quantile_idx`.
+        :type quantile_idx: int
+        :raises ValueError: If an error occurs."""
         positions = species_to_positions.get(specie, [])
         if not positions:
             return
@@ -898,17 +898,17 @@ def run_fair_delta_rf(
         *,
         quantile_idx: int,
     ) -> None:
-        """ append allocated temp.
+        """append allocated temp.
 
-    :param specie: Value for `specie`.
-    :type specie: str
-    :param temp_series: Value for `temp_series`.
-    :type temp_series: np.ndarray
-    :param sign_mode: Value for `sign_mode`.
-    :type sign_mode: str
-    :param quantile_idx: Value for `quantile_idx`.
-    :type quantile_idx: int
-    :raises ValueError: If an error occurs."""
+        :param specie: Value for `specie`.
+        :type specie: str
+        :param temp_series: Value for `temp_series`.
+        :type temp_series: np.ndarray
+        :param sign_mode: Value for `sign_mode`.
+        :type sign_mode: str
+        :param quantile_idx: Value for `quantile_idx`.
+        :type quantile_idx: int
+        :raises ValueError: If an error occurs."""
         positions = species_to_positions.get(specie, [])
         if not positions:
             return

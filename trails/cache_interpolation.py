@@ -17,7 +17,7 @@ def _cache_key(
     index_dtype: str,
     interpolate_annual: bool = True,
 ) -> str:
-    """ cache key.
+    """cache key.
 
     :param package: Value for `package`.
     :type package: Any
@@ -106,7 +106,8 @@ def load_cached_interpolation(
     :param index_dtype: Value for `index_dtype`.
     :type index_dtype: str
     :returns: Return value.
-    :rtype: tuple[Optional[sparse.COO], Optional[sparse.COO], list[str], list[str], Optional[dict], Optional[dict], Optional[dict], Path]"""
+    :rtype: tuple[Optional[sparse.COO], Optional[sparse.COO], list[str], list[str], Optional[dict], Optional[dict], Optional[dict], Path]
+    """
     cache_dir = cache_dir_for_package(
         package, value_dtype=value_dtype, index_dtype=index_dtype
     )

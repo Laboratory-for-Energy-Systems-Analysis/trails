@@ -8,7 +8,7 @@ from .trails import Trails
 
 
 def _normalize_text(value: Optional[str], case_sensitive: bool) -> str:
-    """ normalize text.
+    """normalize text.
 
     :param value: Value for `value`.
     :type value: Optional[str]
@@ -27,7 +27,7 @@ def _match_text(
     match: str,
     case_sensitive: bool,
 ) -> bool:
-    """ match text.
+    """match text.
 
     :param value: Value for `value`.
     :type value: Optional[str]
@@ -57,7 +57,7 @@ def _iter_metadata(
     kind: str,
     scenario_label: Optional[str],
 ) -> Iterable[tuple[int, dict]]:
-    """ iter metadata.
+    """iter metadata.
 
     :param trails: Value for `trails`.
     :type trails: Trails
