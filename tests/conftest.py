@@ -13,6 +13,11 @@ import trails.trails as trails_module
 
 BASE = Path(os.environ.get("PYTEST_DEBUG_DIR", ".pytest-debug"))
 
+# Ensure tests directory is on sys.path for helper imports
+TESTS_DIR = Path(__file__).resolve().parent
+if str(TESTS_DIR) not in sys.path:
+    sys.path.insert(0, str(TESTS_DIR))
+
 
 def _slug(s: str) -> str:
     """Normalize a string into a slug identifier.
