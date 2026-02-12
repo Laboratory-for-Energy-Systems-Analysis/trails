@@ -2406,9 +2406,7 @@ def plot_temporal_scores(
                 )
             idx = methods_list.index(method)
             if idx >= len(static_score):
-                raise ValueError(
-                    "Static score list length does not match methods."
-                )
+                raise ValueError("Static score list length does not match methods.")
             static_score = float(static_score[idx])
         elif isinstance(static_score, dict):
             if method not in static_score:
@@ -2891,8 +2889,9 @@ def _build_link_arrays(
 
 
 def plot_temporal_sankey(
-    provenance: Dict[tuple[int, int], Dict[tuple[tuple[int, int], ...], float]]
-    | dict[str, Any],
+    provenance: (
+        Dict[tuple[int, int], Dict[tuple[tuple[int, int], ...], float]] | dict[str, Any]
+    ),
     trails: Trails,
     start_year: int,
     start_act_idx: int,
@@ -2941,7 +2940,11 @@ def plot_temporal_sankey(
     :rtype: go.Figure"""
 
     # If given a Sankey tree (from build_temporal_sankey_tree), use the tree path.
-    if isinstance(provenance, dict) and "node" in provenance and "children" in provenance:
+    if (
+        isinstance(provenance, dict)
+        and "node" in provenance
+        and "children" in provenance
+    ):
         sankey_arrays = build_sankey_arrays_from_tree(
             provenance,
             trails=trails,
