@@ -14,5 +14,5 @@ networkx
 prettytable
 fair
 platformdirs
-scikits-umfpack
+scikit-umfpack
 pyvis
