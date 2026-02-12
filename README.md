@@ -82,6 +82,10 @@ the values stored in the year-specific matrices for the target years.
 One gasoline-fueled passenger car driven 200,000 km, with a reference year of 2050, 
 using a prospective background scenario.
 
+<p align="center">
+  <img src="assets/permanent/example_graph.png" width="900"/>
+</p>
+
 
 <table>
   <tr>
