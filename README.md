@@ -329,6 +329,10 @@ https://trails.readthedocs.io/en/latest/index.html
 
 ---
 
+## Authors
+
+- [Romain Sacchi](mailto:romain.sacchi@psi.ch)
+
 ## License
 
 MIT License.
