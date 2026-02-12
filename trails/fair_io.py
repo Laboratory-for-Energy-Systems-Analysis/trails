@@ -29,7 +29,14 @@ DEFAULT_PROPERTIES_CSV: Path | None = (
 def _extend_years_freeze_last(
     df: pd.DataFrame, *, target_year: int = 2500
 ) -> pd.DataFrame:
-    """Extend year columns to target_year by freezing last available values."""
+    """ extend years freeze last.
+
+    :param df: Value for `df`.
+    :type df: pd.DataFrame
+    :param target_year: Value for `target_year`.
+    :type target_year: int
+    :returns: Return value.
+    :rtype: pd.DataFrame"""
     year_cols, year_vals = _extract_year_columns(df)
     if not year_cols:
         return df
@@ -49,7 +56,12 @@ def _extend_years_freeze_last(
 
 
 def load_emissions_csv(path: str | Path = DEFAULT_EMISSIONS_CSV) -> pd.DataFrame:
-    """Load the merged REMIND/FAIR emissions CSV (IAMC-style)."""
+    """Load emissions csv.
+
+    :param path: Value for `path`.
+    :type path: str | Path
+    :returns: Return value.
+    :rtype: pd.DataFrame"""
     path = Path(path)
     df = pd.read_csv(path)
     df = _normalize_emissions_columns(df)
@@ -60,7 +72,12 @@ def load_emissions_csv(path: str | Path = DEFAULT_EMISSIONS_CSV) -> pd.DataFrame
 def load_species_mapping(
     path: str | Path = DEFAULT_MAPPING_YAML,
 ) -> tuple[dict[object, str], dict[object, float]]:
-    """Load biosphere flow -> FaIR species mapping and sign overrides."""
+    """Load species mapping.
+
+    :param path: Value for `path`.
+    :type path: str | Path
+    :returns: Return value.
+    :rtype: tuple[dict[object, str], dict[object, float]]"""
     data = yaml.safe_load(Path(path).read_text()) or {}
     species_map = data.get("species_map", {}) or {}
     signs = data.get("signs", {}) or {}
@@ -80,7 +97,12 @@ def load_species_mapping(
 
 
 def _candidate_paths(filename: str) -> list[Path]:
-    """Return candidate paths in the FAIR repo tree for a given filename."""
+    """ candidate paths.
+
+    :param filename: Value for `filename`.
+    :type filename: str
+    :returns: Return value.
+    :rtype: list[Path]"""
     root = Path(fair.__file__).resolve().parent
     targets = [
         Path("examples") / "data" / "importing-data" / filename,
@@ -92,7 +114,12 @@ def _candidate_paths(filename: str) -> list[Path]:
 
 
 def _find_fair_repo_file(filename: str) -> Path | None:
-    """Try to locate a file in the FAIR repo tree near the installed package."""
+    """ find fair repo file.
+
+    :param filename: Value for `filename`.
+    :type filename: str
+    :returns: Return value.
+    :rtype: Path | None"""
     for candidate in _candidate_paths(filename):
         if candidate.exists():
             return candidate
@@ -100,7 +127,12 @@ def _find_fair_repo_file(filename: str) -> Path | None:
 
 
 def _find_any_fair_repo_file(filenames: list[str]) -> Path | None:
-    """Return the first matching FAIR repo file found from a list of names."""
+    """ find any fair repo file.
+
+    :param filenames: Value for `filenames`.
+    :type filenames: list[str]
+    :returns: Return value.
+    :rtype: Path | None"""
     for name in filenames:
         path = _find_fair_repo_file(name)
         if path is not None:
@@ -109,6 +141,15 @@ def _find_any_fair_repo_file(filenames: list[str]) -> Path | None:
 
 
 def _convert_kg_to_unit(values_kg: np.ndarray, unit: str) -> np.ndarray:
+    """ convert kg to unit.
+
+    :param values_kg: Value for `values_kg`.
+    :type values_kg: np.ndarray
+    :param unit: Value for `unit`.
+    :type unit: str
+    :returns: Return value.
+    :rtype: np.ndarray
+    :raises ValueError: If an error occurs."""
     unit = unit.strip()
     if unit.startswith("Gt "):
         return values_kg / 1e12
@@ -122,7 +163,15 @@ def _convert_kg_to_unit(values_kg: np.ndarray, unit: str) -> np.ndarray:
 
 
 def _convert_unit_to_kg(values: np.ndarray, unit: str) -> np.ndarray:
-    """Convert from IAMC mass units back to kg for emissions."""
+    """ convert unit to kg.
+
+    :param values: Value for `values`.
+    :type values: np.ndarray
+    :param unit: Value for `unit`.
+    :type unit: str
+    :returns: Return value.
+    :rtype: np.ndarray
+    :raises ValueError: If an error occurs."""
     factor = _convert_kg_to_unit(np.array([1.0], dtype=float), unit)[0]
     if factor == 0:
         raise ValueError(f"Unsupported unit for emissions conversion: {unit}")
@@ -130,7 +179,12 @@ def _convert_unit_to_kg(values: np.ndarray, unit: str) -> np.ndarray:
 
 
 def _normalize_emissions_columns(df: pd.DataFrame) -> pd.DataFrame:
-    """Normalize emissions DataFrame columns for FaIR fill_from_pandas."""
+    """ normalize emissions columns.
+
+    :param df: Value for `df`.
+    :type df: pd.DataFrame
+    :returns: Return value.
+    :rtype: pd.DataFrame"""
     cols = []
     for c in df.columns:
         if isinstance(c, str):
@@ -154,7 +208,12 @@ def _normalize_emissions_columns(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _extract_year_columns(df: pd.DataFrame) -> tuple[list[str], list[float]]:
-    """Return ordered IAMC year columns and their numeric values."""
+    """ extract year columns.
+
+    :param df: Value for `df`.
+    :type df: pd.DataFrame
+    :returns: Return value.
+    :rtype: tuple[list[str], list[float]]"""
     meta_cols = {"scenario", "region", "variable", "unit"}
     year_cols: list[str] = []
     year_vals: list[float] = []
@@ -180,5 +239,8 @@ def _extract_year_columns(df: pd.DataFrame) -> tuple[list[str], list[float]]:
 
 
 def _default_properties_file() -> Path:
-    """Return the default properties file path from fair.io."""
+    """ default properties file.
+
+    :returns: Return value.
+    :rtype: Path"""
     return Path(DEFAULT_PROPERTIES_FILE)

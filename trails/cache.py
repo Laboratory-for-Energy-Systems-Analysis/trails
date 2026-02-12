@@ -6,7 +6,10 @@ import platformdirs
 
 
 def clear_cache() -> Path:
-    """Remove all cached interpolation artifacts and return the cache path."""
+    """Clear cache.
+
+    :returns: Return value.
+    :rtype: Path"""
     base = platformdirs.user_data_path(appname="trails", appauthor="pylca")
     cache_dir = base / "cache"
     if cache_dir.exists():

@@ -10,13 +10,13 @@ if TYPE_CHECKING:
 
 
 def _ij_from_coords(X_t: Any) -> tuple[np.ndarray, np.ndarray]:
-    """Extract row/column indices from a sparse COO coordinate array.
+    """ ij from coords.
 
-    :param X_t: Sparse array with ``coords`` attribute.
-    :type X_t: sparse.COO
-    :returns: Tuple of ``(row_indices, col_indices)``.
-    :rtype: tuple[numpy.ndarray, numpy.ndarray]
-    """
+    :param X_t: Value for `X_t`.
+    :type X_t: Any
+    :returns: Return value.
+    :rtype: tuple[np.ndarray, np.ndarray]
+    :raises ValueError: If an error occurs."""
     coords = X_t.coords
     if coords.shape[0] == 3:
         i_idx = np.asarray(coords[1], dtype=np.int64)
@@ -30,15 +30,14 @@ def _ij_from_coords(X_t: Any) -> tuple[np.ndarray, np.ndarray]:
 
 
 def _resolve_matrix_label(trails: Trails, year: int) -> tuple[str, int]:
-    """Resolve a calendar year to the closest available matrix label.
+    """ resolve matrix label.
 
-    :param trails: Trails instance with scenario labels and index.
+    :param trails: Value for `trails`.
     :type trails: Trails
-    :param year: Calendar year to resolve.
+    :param year: Value for `year`.
     :type year: int
-    :returns: Tuple of ``(label_for_matrix, scenario_index)``.
-    :rtype: tuple[str, int]
-    """
+    :returns: Return value.
+    :rtype: tuple[str, int]"""
     label_for_matrix = str(year)
     if label_for_matrix not in trails.scenario_index:
         years = np.array([int(lbl) for lbl in trails.scenario_labels])
@@ -50,30 +49,28 @@ def _resolve_matrix_label(trails: Trails, year: int) -> tuple[str, int]:
 
 
 def _select_metadata_label(trails: Trails, label_for_matrix: str) -> str:
-    """Select the metadata label matching or nearest to the matrix label.
+    """ select metadata label.
 
-    :param trails: Trails instance with metadata labels.
+    :param trails: Value for `trails`.
     :type trails: Trails
-    :param label_for_matrix: Scenario label used for the matrix slice.
+    :param label_for_matrix: Value for `label_for_matrix`.
     :type label_for_matrix: str
-    :returns: Metadata label to use for indices.
-    :rtype: str
-    """
+    :returns: Return value.
+    :rtype: str"""
     if label_for_matrix in trails.activity_indices:
         return label_for_matrix
     return _nearest_metadata_label_for_year(trails, int(label_for_matrix))
 
 
 def _make_bw_indices_rowcol(row_idx: np.ndarray, col_idx: np.ndarray) -> np.ndarray:
-    """Build a bw_processing indices array from row and column indices.
+    """ make bw indices rowcol.
 
-    :param row_idx: Row indices array.
-    :type row_idx: numpy.ndarray
-    :param col_idx: Column indices array.
-    :type col_idx: numpy.ndarray
-    :returns: Structured indices array compatible with bw_processing.
-    :rtype: numpy.ndarray
-    """
+    :param row_idx: Value for `row_idx`.
+    :type row_idx: np.ndarray
+    :param col_idx: Value for `col_idx`.
+    :type col_idx: np.ndarray
+    :returns: Return value.
+    :rtype: np.ndarray"""
     idx = np.empty(len(row_idx), dtype=bwp.INDICES_DTYPE)
     idx["row"] = row_idx.astype(np.uint32, copy=False)
     idx["col"] = col_idx.astype(np.uint32, copy=False)
@@ -89,23 +86,22 @@ def _warn_on_missing_metadata(
     act_meta: dict[int, dict],
     bio_meta: dict[int, dict],
 ) -> None:
-    """Emit warnings for matrix indices missing from metadata.
+    """ warn on missing metadata.
 
-    :param label_for_matrix: Scenario label for matrix slices.
-    :param meta_label: Metadata label used for indices.
-    :param A_act_idx: Activity indices from A.
-    :param A_prod_idx: Product indices from A.
-    :param B_flow_idx: Flow indices from B.
-    :param act_meta: Activity metadata mapping.
-    :param bio_meta: Biosphere metadata mapping.
+    :param label_for_matrix: Value for `label_for_matrix`.
     :type label_for_matrix: str
+    :param meta_label: Value for `meta_label`.
     :type meta_label: str
-    :type A_act_idx: numpy.ndarray
-    :type A_prod_idx: numpy.ndarray
-    :type B_flow_idx: numpy.ndarray
-    :type act_meta: dict
-    :type bio_meta: dict
-    """
+    :param A_act_idx: Value for `A_act_idx`.
+    :type A_act_idx: np.ndarray
+    :param A_prod_idx: Value for `A_prod_idx`.
+    :type A_prod_idx: np.ndarray
+    :param B_flow_idx: Value for `B_flow_idx`.
+    :type B_flow_idx: np.ndarray
+    :param act_meta: Value for `act_meta`.
+    :type act_meta: dict[int, dict]
+    :param bio_meta: Value for `bio_meta`.
+    :type bio_meta: dict[int, dict]"""
     meta_act_indices = set(act_meta.keys())
     meta_bio_indices = set(bio_meta.keys())
 
@@ -137,15 +133,14 @@ def _warn_on_missing_metadata(
 def _build_metadata_indices(
     act_meta: dict[int, dict], bio_meta: dict[int, dict]
 ) -> tuple[dict[tuple, int], dict[tuple, int]]:
-    """Build technosphere and biosphere indices from metadata dictionaries.
+    """ build metadata indices.
 
-    :param act_meta: Activity metadata mapping.
-    :type act_meta: dict
-    :param bio_meta: Biosphere metadata mapping.
-    :type bio_meta: dict
-    :returns: Tuple of ``(technosphere_indices, biosphere_indices)``.
-    :rtype: tuple[dict[tuple, int], dict[tuple, int]]
-    """
+    :param act_meta: Value for `act_meta`.
+    :type act_meta: dict[int, dict]
+    :param bio_meta: Value for `bio_meta`.
+    :type bio_meta: dict[int, dict]
+    :returns: Return value.
+    :rtype: tuple[dict[tuple, int], dict[tuple, int]]"""
     technosphere_indices: Dict[tuple, int] = {}
     for idx, meta in act_meta.items():
         key = (
@@ -170,10 +165,15 @@ def _build_metadata_indices(
 
 
 def _nearest_metadata_label_for_year(trails: Trails, year: int) -> str:
-    """
-    Pick the metadata scenario_label whose numeric year is closest to `year`.
-    Used only as a fallback if the exact label is not present.
-    """
+    """ nearest metadata label for year.
+
+    :param trails: Value for `trails`.
+    :type trails: Trails
+    :param year: Value for `year`.
+    :type year: int
+    :returns: Return value.
+    :rtype: str
+    :raises ValueError: If an error occurs."""
     if not trails.activity_indices:
         raise ValueError("Trails.activity_indices is empty – no metadata available.")
 
@@ -189,6 +189,18 @@ def build_datapackage_for_year_from_trails(
     zero_biosphere: bool = False,
     debug: bool = False,
 ) -> tuple[Any, dict[tuple, int], dict[tuple, int], list[tuple[int, int]]]:
+    """Build datapackage for year from trails.
+
+    :param trails: Value for `trails`.
+    :type trails: Trails
+    :param year: Value for `year`.
+    :type year: int
+    :param zero_biosphere: Value for `zero_biosphere`.
+    :type zero_biosphere: bool
+    :param debug: Value for `debug`.
+    :type debug: bool
+    :returns: Return value.
+    :rtype: tuple[Any, dict[tuple, int], dict[tuple, int], list[tuple[int, int]]]"""
 
     label_for_matrix, t = _resolve_matrix_label(trails, int(year))
 
@@ -268,7 +280,19 @@ def build_datapackage_for_year_from_trails(
     return dp, technosphere_indices, biosphere_indices, uncertain_parameters
 
 
-def _reference_product_from_activity_id(lca_obj, activity_id: int) -> tuple[int, float]:
+def _reference_product_from_activity_id(
+    lca_obj: Any, activity_id: int
+) -> tuple[int, float]:
+    """ reference product from activity id.
+
+    :param lca_obj: Value for `lca_obj`.
+    :type lca_obj: Any
+    :param activity_id: Value for `activity_id`.
+    :type activity_id: int
+    :returns: Return value.
+    :rtype: tuple[int, float]
+    :raises KeyError: If an error occurs.
+    :raises ValueError: If an error occurs."""
     act_map = getattr(lca_obj.dicts, "activity", None)
     prod_map = getattr(lca_obj.dicts, "product", None)
     if not act_map or not prod_map:
@@ -334,7 +358,15 @@ def _reference_product_from_activity_id(lca_obj, activity_id: int) -> tuple[int,
     return result
 
 
-def _reference_product_id_from_activity_id(lca_obj, activity_id: int) -> int:
+def _reference_product_id_from_activity_id(lca_obj: Any, activity_id: int) -> int:
+    """ reference product id from activity id.
+
+    :param lca_obj: Value for `lca_obj`.
+    :type lca_obj: Any
+    :param activity_id: Value for `activity_id`.
+    :type activity_id: int
+    :returns: Return value.
+    :rtype: int"""
     prod_id, _ = _reference_product_from_activity_id(lca_obj, activity_id)
     return prod_id
 
@@ -345,7 +377,18 @@ def _extract_supply_fast_cached(
     positions: np.ndarray,
     min_amount: float,
 ) -> Dict[int, float]:
-    """Extract supply using precomputed (act_ids, positions) mapping for this solve_year."""
+    """ extract supply fast cached.
+
+    :param supply_array: Value for `supply_array`.
+    :type supply_array: np.ndarray
+    :param act_ids: Value for `act_ids`.
+    :type act_ids: np.ndarray
+    :param positions: Value for `positions`.
+    :type positions: np.ndarray
+    :param min_amount: Value for `min_amount`.
+    :type min_amount: float
+    :returns: Return value.
+    :rtype: Dict[int, float]"""
     supply = np.asarray(supply_array, dtype=np.float64)
 
     vals = supply[positions]
@@ -359,10 +402,14 @@ def _extract_supply_fast_cached(
 
 
 def _extract_supply_fast(lca_obj: Any, min_amount: float) -> Dict[int, float]:
-    """Extract supply in Trails activity-index space using lca_obj.dicts.activity.
+    """ extract supply fast.
 
-    Uses vectorized thresholding on the BW-ordered supply array.
-    """
+    :param lca_obj: Value for `lca_obj`.
+    :type lca_obj: Any
+    :param min_amount: Value for `min_amount`.
+    :type min_amount: float
+    :returns: Return value.
+    :rtype: Dict[int, float]"""
     supply = np.asarray(lca_obj.supply_array).astype(np.float64, copy=False)
 
     # dicts.activity maps Trails act_idx -> position in supply_array
@@ -393,21 +440,20 @@ def _get_datapackage(
     zero_bio: bool,
     debug: bool,
 ) -> tuple[Any, dict[tuple, int], dict[tuple, int], list[tuple[int, int]]]:
-    """Fetch or build a datapackage for a given year and biosphere setting.
+    """ get datapackage.
 
-    :param dp_cache: Cache mapping ``(year, zero_bio)`` to datapackage tuples.
-    :type dp_cache: dict[tuple[int, bool], tuple]
-    :param trails: Trails instance to build datapackages from.
+    :param dp_cache: Value for `dp_cache`.
+    :type dp_cache: dict[tuple[int, bool], Any]
+    :param trails: Value for `trails`.
     :type trails: Trails
-    :param year: Calendar year to load.
+    :param year: Value for `year`.
     :type year: int
-    :param zero_bio: Whether to zero biosphere emissions.
+    :param zero_bio: Value for `zero_bio`.
     :type zero_bio: bool
-    :param debug: Whether to emit debug logging.
+    :param debug: Value for `debug`.
     :type debug: bool
-    :returns: Datapackage tuple ``(dp, tech_idx, bio_idx, uncertain_params)``.
-    :rtype: tuple
-    """
+    :returns: Return value.
+    :rtype: tuple[Any, dict[tuple, int], dict[tuple, int], list[tuple[int, int]]]"""
     dp_key = (year, zero_bio)
     if dp_key not in dp_cache:
         dp, tech_idx, bio_idx, uncertain_params = (

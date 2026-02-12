@@ -4,13 +4,15 @@ scipy
 pyyaml
 sparse >=0.13.0
 datapackage
-packaging
 bw2calc
 bw2io
-pyprind
+bw_processing
 plotly
 tqdm
 xarray
 networkx
 prettytable
 fair
+platformdirs
+scikits.umfpack
+pyvis

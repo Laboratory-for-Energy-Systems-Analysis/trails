@@ -5,13 +5,12 @@ from typing import Iterable, Mapping
 
 
 def _parse_float_or_none(value: object) -> float | None:
-    """Parse a value into a float or return None for empty inputs.
+    """ parse float or none.
 
-    :param value: Input value that may be convertible to a float.
+    :param value: Value for `value`.
     :type value: object
-    :returns: Parsed float value or None when input is blank.
-    :rtype: float | None
-    """
+    :returns: Return value.
+    :rtype: float | None"""
     if value is None:
         return None
     s = str(value).strip()
@@ -21,13 +20,12 @@ def _parse_float_or_none(value: object) -> float | None:
 
 
 def _parse_int_or_none(value: object) -> int | None:
-    """Parse a value into an int or return None for empty inputs.
+    """ parse int or none.
 
-    :param value: Input value that may be convertible to an integer.
+    :param value: Value for `value`.
     :type value: object
-    :returns: Parsed integer value or None when input is blank.
-    :rtype: int | None
-    """
+    :returns: Return value.
+    :rtype: int | None"""
     if value is None:
         return None
     s = str(value).strip()
@@ -37,15 +35,14 @@ def _parse_int_or_none(value: object) -> int | None:
 
 
 def _format_path_label(path: Iterable[int], idx_to_label: Mapping[int, str]) -> str:
-    """Format a path of activity indices into a label string.
+    """ format path label.
 
-    :param path: Iterable of activity indices.
+    :param path: Value for `path`.
     :type path: Iterable[int]
-    :param idx_to_label: Mapping of activity index to display label.
+    :param idx_to_label: Value for `idx_to_label`.
     :type idx_to_label: Mapping[int, str]
-    :returns: Human-readable label with arrow separators.
-    :rtype: str
-    """
+    :returns: Return value.
+    :rtype: str"""
     parts = [idx_to_label.get(idx, f"Activity {idx}") for idx in path]
     return " → ".join(parts)
 
@@ -53,15 +50,14 @@ def _format_path_label(path: Iterable[int], idx_to_label: Mapping[int, str]) -> 
 def _format_path_label_with_years(
     path: Iterable[tuple[int, int]], idx_to_label: Mapping[int, str]
 ) -> str:
-    """Format a path of (year, activity) pairs into a label string.
+    """ format path label with years.
 
-    :param path: Iterable of (year, activity index) pairs.
+    :param path: Value for `path`.
     :type path: Iterable[tuple[int, int]]
-    :param idx_to_label: Mapping of activity index to display label.
+    :param idx_to_label: Value for `idx_to_label`.
     :type idx_to_label: Mapping[int, str]
-    :returns: Human-readable label with year prefixes.
-    :rtype: str
-    """
+    :returns: Return value.
+    :rtype: str"""
     parts = []
     for year, act in path:
         base = idx_to_label.get(act, f"Activity {act}")
@@ -70,12 +66,11 @@ def _format_path_label_with_years(
 
 
 def _parse_intish_or_none(v: object) -> int | None:
-    """Parse a value into an int, allowing float-like strings.
+    """ parse intish or none.
 
-    :param v: Input value that may represent an integer.
+    :param v: Value for `v`.
     :type v: object
-    :returns: Parsed integer value or None when input is blank.
-    :rtype: int | None
-    """
+    :returns: Return value.
+    :rtype: int | None"""
     f = _parse_float_or_none(v)
     return None if f is None else int(f)

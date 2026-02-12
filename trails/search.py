@@ -8,6 +8,14 @@ from .trails import Trails
 
 
 def _normalize_text(value: Optional[str], case_sensitive: bool) -> str:
+    """ normalize text.
+
+    :param value: Value for `value`.
+    :type value: Optional[str]
+    :param case_sensitive: Value for `case_sensitive`.
+    :type case_sensitive: bool
+    :returns: Return value.
+    :rtype: str"""
     text = (value or "").strip()
     return text if case_sensitive else text.lower()
 
@@ -19,6 +27,19 @@ def _match_text(
     match: str,
     case_sensitive: bool,
 ) -> bool:
+    """ match text.
+
+    :param value: Value for `value`.
+    :type value: Optional[str]
+    :param needle: Value for `needle`.
+    :type needle: str
+    :param match: Value for `match`.
+    :type match: str
+    :param case_sensitive: Value for `case_sensitive`.
+    :type case_sensitive: bool
+    :returns: Return value.
+    :rtype: bool
+    :raises ValueError: If an error occurs."""
     if match not in {"contains", "exact"}:
         raise ValueError("match must be 'contains' or 'exact'")
 
@@ -36,6 +57,17 @@ def _iter_metadata(
     kind: str,
     scenario_label: Optional[str],
 ) -> Iterable[tuple[int, dict]]:
+    """ iter metadata.
+
+    :param trails: Value for `trails`.
+    :type trails: Trails
+    :param kind: Value for `kind`.
+    :type kind: str
+    :param scenario_label: Value for `scenario_label`.
+    :type scenario_label: Optional[str]
+    :yields: Yielded values.
+    :rtype: Iterable[tuple[int, dict]]
+    :raises ValueError: If an error occurs."""
     if kind not in {"technosphere", "biosphere"}:
         raise ValueError("kind must be 'technosphere' or 'biosphere'")
 
@@ -64,18 +96,27 @@ def search_activity(
     match: str = "contains",
     case_sensitive: bool = False,
 ) -> PrettyTable:
-    """Search activity or biosphere indices by metadata fields.
+    """Search activity.
 
-    :param trails: Trails instance with indices loaded.
-    :param query: Default text to match against the activity name.
-    :param name: Optional name string to match (overrides query if provided).
-    :param reference_product: Optional reference product filter (technosphere only).
-    :param kind: Either ``technosphere`` or ``biosphere``.
-    :param scenario_label: Optional metadata label to restrict search.
-    :param match: ``contains`` or ``exact`` string matching.
-    :param case_sensitive: Whether matching is case-sensitive.
-    :returns: PrettyTable of matching indices and metadata.
-    """
+    :param trails: Value for `trails`.
+    :type trails: Trails
+    :param query: Value for `query`.
+    :type query: Optional[str]
+    :param name: Value for `name`.
+    :type name: Optional[str]
+    :param reference_product: Value for `reference_product`.
+    :type reference_product: Optional[str]
+    :param kind: Value for `kind`.
+    :type kind: str
+    :param scenario_label: Value for `scenario_label`.
+    :type scenario_label: Optional[str]
+    :param match: Value for `match`.
+    :type match: str
+    :param case_sensitive: Value for `case_sensitive`.
+    :type case_sensitive: bool
+    :returns: Return value.
+    :rtype: PrettyTable
+    :raises ValueError: If an error occurs."""
     needle = name if name is not None else query
     if needle is None and reference_product is None:
         raise ValueError("Provide query/name and/or reference_product.")

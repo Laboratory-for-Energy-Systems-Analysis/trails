@@ -18,13 +18,12 @@ _depth: ContextVar[str] = ContextVar("depth", default="-")
 
 class TrailsContextFilter(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
-        """Inject Trails context variables into a log record.
+        """Filter.
 
-        :param record: Log record to enrich.
-        :type record: logging.LogRecord
-        :returns: True to keep the record.
-        :rtype: bool
-        """
+    :param record: Value for `record`.
+    :type record: logging.LogRecord
+    :returns: Return value.
+    :rtype: bool"""
         record.run_id = _run_id.get()
         record.case = _case.get()
         record.year = _year.get()
@@ -40,23 +39,22 @@ def configure_trails_logging(
     mode: str = "w",
     debug: bool = False,
 ) -> Path:
-    """Configure Trails logging with optional file and console handlers.
+    """Configure trails logging.
 
-    :param file_level: Logging level for the file handler.
+    :param file_level: Value for `file_level`.
     :type file_level: int
-    :param filename: Name of the log file written in the current working directory.
+    :param filename: Value for `filename`.
     :type filename: str
-    :param also_console: Whether to emit logs to the console.
+    :param also_console: Value for `also_console`.
     :type also_console: bool
-    :param console_level: Logging level for the console handler.
+    :param console_level: Value for `console_level`.
     :type console_level: int
-    :param mode: File open mode for the file handler.
+    :param mode: Value for `mode`.
     :type mode: str
-    :param debug: Whether to log a configuration summary.
+    :param debug: Value for `debug`.
     :type debug: bool
-    :returns: Path to the log file.
-    :rtype: pathlib.Path
-    """
+    :returns: Return value.
+    :rtype: Path"""
     log_path = Path(os.getcwd()) / filename
     root = logging.getLogger()
     root.setLevel(min(file_level, console_level) if also_console else file_level)
@@ -70,25 +68,23 @@ def configure_trails_logging(
 
     # Helper to detect "our" handlers
     def _is_trails_file_handler(h: logging.Handler) -> bool:
-        """Check whether a handler is the Trails file handler.
+        """ is trails file handler.
 
-        :param h: Handler to inspect.
-        :type h: logging.Handler
-        :returns: True if the handler targets the Trails log file.
-        :rtype: bool
-        """
+    :param h: Value for `h`.
+    :type h: logging.Handler
+    :returns: Return value.
+    :rtype: bool"""
         return isinstance(h, logging.FileHandler) and getattr(
             h, "baseFilename", ""
         ) == str(log_path)
 
     def _is_console_handler(h: logging.Handler) -> bool:
-        """Check whether a handler is a console handler.
+        """ is console handler.
 
-        :param h: Handler to inspect.
-        :type h: logging.Handler
-        :returns: True if the handler is a stream handler (not a file handler).
-        :rtype: bool
-        """
+    :param h: Value for `h`.
+    :type h: logging.Handler
+    :returns: Return value.
+    :rtype: bool"""
         # StreamHandler that is not a FileHandler
         return isinstance(h, logging.StreamHandler) and not isinstance(
             h, logging.FileHandler
@@ -162,19 +158,18 @@ def trails_log_context(
     year: Optional[int] = None,
     depth: Optional[int] = None,
 ) -> Iterator[None]:
-    """Temporarily set Trails logging context variables.
+    """Trails log context.
 
-    :param run_id: Run identifier to attach to log records.
-    :type run_id: str | None
-    :param case: Case identifier to attach to log records.
-    :type case: str | None
-    :param year: Year value to attach to log records.
-    :type year: int | None
-    :param depth: Depth value to attach to log records.
-    :type depth: int | None
-    :yields: Context manager that sets and resets logging context variables.
-    :rtype: Iterator[None]
-    """
+    :param run_id: Value for `run_id`.
+    :type run_id: Optional[str]
+    :param case: Value for `case`.
+    :type case: Optional[str]
+    :param year: Value for `year`.
+    :type year: Optional[int]
+    :param depth: Value for `depth`.
+    :type depth: Optional[int]
+    :yields: Yielded values.
+    :rtype: Iterator[None]"""
     tokens = []
     try:
         if run_id is not None:

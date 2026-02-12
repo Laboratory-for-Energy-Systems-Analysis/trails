@@ -5,7 +5,7 @@ from typing import Optional, Iterable, Tuple
 import numpy as np
 
 import numpy as np
-from math import erf, sqrt, exp, pi
+from math import erf, sqrt, exp
 
 import logging
 
@@ -14,21 +14,20 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class TemporalExchange:
-    """
-    Metadata for a single temporally-distributed exchange.
+    """Metadata for a single temporally-distributed exchange.
 
-    :param distribution: Integer code for the distribution shape.
-        - 1: discrete (all mass at loc)
-        - 2: lognormal
-        - 3: normal
-        - 4: uniform
-        - 5: triangular
+
+    - :param distribution: Integer code for the distribution shape.
+    - 1: discrete (all mass at loc)
+    - 2: lognormal
+    - 3: normal
+    - 4: uniform
+    - 5: triangular
     :param loc: Location parameter (mean, median, or mode depending on distribution).
     :param scale: Scale parameter (stddev for normal, sigma for lognormal).
     :param offset_min: Minimum integer offset (inclusive).
     :param offset_max: Maximum integer offset (inclusive).
-    :param amount_source: Source of the amount for each pulse year.
-    """
+    :param amount_source: Source of the amount for each pulse year."""
 
     distribution: int
     loc: Optional[float]
@@ -44,11 +43,10 @@ class TemporalDistribution:
     """Turn a TemporalExchange into discrete (offset, weight) pairs."""
 
     def __init__(self, tex: TemporalExchange) -> None:
-        """Initialize the distribution wrapper.
+        """  init  .
 
-        :param tex: Temporal exchange metadata to interpret.
-        :type tex: TemporalExchange
-        """
+    :param tex: Value for `tex`.
+    :type tex: TemporalExchange"""
         self.tex = tex
 
     # ------------------------------------------------------------------
@@ -56,15 +54,14 @@ class TemporalDistribution:
     # ------------------------------------------------------------------
     @staticmethod
     def _default_sigma(offsets: np.ndarray, scale: Optional[float]) -> float:
-        """Choose a reasonable sigma if scale is None or invalid.
+        """ default sigma.
 
-        :param offsets: Offset values to inspect.
-        :type offsets: numpy.ndarray
-        :param scale: Scale parameter if provided.
-        :type scale: float | None
-        :returns: Fallback sigma value.
-        :rtype: float
-        """
+    :param offsets: Value for `offsets`.
+    :type offsets: np.ndarray
+    :param scale: Value for `scale`.
+    :type scale: Optional[float]
+    :returns: Return value.
+    :rtype: float"""
         if scale is not None and scale > 0:
             return float(scale)
 
@@ -76,15 +73,14 @@ class TemporalDistribution:
 
     @staticmethod
     def _triangular_weights(offsets: np.ndarray, loc: Optional[float]) -> np.ndarray:
-        """Build a discrete triangular shape over given integer offsets.
+        """ triangular weights.
 
-        :param offsets: Offset values to weight.
-        :type offsets: numpy.ndarray
-        :param loc: Mode location for the distribution.
-        :type loc: float | None
-        :returns: Unnormalized triangular weights.
-        :rtype: numpy.ndarray
-        """
+    :param offsets: Value for `offsets`.
+    :type offsets: np.ndarray
+    :param loc: Value for `loc`.
+    :type loc: Optional[float]
+    :returns: Return value.
+    :rtype: np.ndarray"""
         if loc is None:
             # If no loc given, fall back to symmetric around the midpoint
             loc = 0.0
@@ -112,21 +108,20 @@ class TemporalDistribution:
         offset_min: int,
         offset_max: int,
     ) -> np.ndarray:
-        """Compute truncated normal weights over the integer offsets.
+        """ normal weights.
 
-        :param offsets: Offset values to weight.
-        :type offsets: numpy.ndarray
-        :param loc: Mean of the normal distribution.
-        :type loc: float
-        :param scale: Standard deviation for the normal distribution.
-        :type scale: float
-        :param offset_min: Minimum offset bound.
-        :type offset_min: int
-        :param offset_max: Maximum offset bound.
-        :type offset_max: int
-        :returns: Truncated normal weights over offsets.
-        :rtype: numpy.ndarray
-        """
+    :param offsets: Value for `offsets`.
+    :type offsets: np.ndarray
+    :param loc: Value for `loc`.
+    :type loc: float
+    :param scale: Value for `scale`.
+    :type scale: float
+    :param offset_min: Value for `offset_min`.
+    :type offset_min: int
+    :param offset_max: Value for `offset_max`.
+    :type offset_max: int
+    :returns: Return value.
+    :rtype: np.ndarray"""
         if scale is None or scale <= 0:
             scale = 1.0
 
@@ -139,13 +134,12 @@ class TemporalDistribution:
 
         # CDF helper
         def normal_cdf(x: float) -> float:
-            """Return the standard normal CDF at ``x`` for the local parameters.
+            """Normal cdf.
 
-            :param x: Input value.
-            :type x: float
-            :returns: CDF value for the truncated normal helper.
-            :rtype: float
-            """
+    :param x: Value for `x`.
+    :type x: float
+    :returns: Return value.
+    :rtype: float"""
             return 0.5 * (1 + erf((x - loc) / (scale * sqrt(2))))
 
         # Continuous probability mass inside the allowed range
@@ -164,20 +158,16 @@ class TemporalDistribution:
     def _lognormal_weights(
         self, offsets: np.ndarray, loc: Optional[float], scale: Optional[float]
     ) -> np.ndarray:
-        """Compute discrete lognormal weights for integer offsets.
+        """ lognormal weights.
 
-        Only positive offsets receive mass. ``loc`` is interpreted as the
-        median in offset space when provided.
-
-        :param offsets: Offset values to weight.
-        :type offsets: numpy.ndarray
-        :param loc: Median location in offset space.
-        :type loc: float | None
-        :param scale: Sigma in log-space.
-        :type scale: float | None
-        :returns: Lognormal weights over offsets.
-        :rtype: numpy.ndarray
-        """
+    :param offsets: Value for `offsets`.
+    :type offsets: np.ndarray
+    :param loc: Value for `loc`.
+    :type loc: Optional[float]
+    :param scale: Value for `scale`.
+    :type scale: Optional[float]
+    :returns: Return value.
+    :rtype: np.ndarray"""
         x = offsets.astype(float)
         mask = x > 0
         if not mask.any():
@@ -204,15 +194,14 @@ class TemporalDistribution:
 
     @staticmethod
     def _discrete_weights(offsets: np.ndarray, loc: Optional[float]) -> np.ndarray:
-        """Build a discrete (Dirac-like) distribution over offsets.
+        """ discrete weights.
 
-        :param offsets: Offset values to weight.
-        :type offsets: numpy.ndarray
-        :param loc: Location to concentrate weight around.
-        :type loc: float | None
-        :returns: Discrete weights over offsets.
-        :rtype: numpy.ndarray
-        """
+    :param offsets: Value for `offsets`.
+    :type offsets: np.ndarray
+    :param loc: Value for `loc`.
+    :type loc: Optional[float]
+    :returns: Return value.
+    :rtype: np.ndarray"""
         if loc is None:
             # try to anchor at 0 if possible
             if offsets.min() <= 0 <= offsets.max():
@@ -233,13 +222,13 @@ class TemporalDistribution:
     def iter_offsets_and_weights(
         self, debug: bool = False
     ) -> Iterable[Tuple[int, float]]:
-        """
-        Yield (offset, weight) pairs for the temporal distribution.
+        """Iter offsets and weights.
 
-        Scaling modes have been removed: weights are determined purely by the
-        selected distribution and then normalized to sum to 1 over the integer
-        offsets [offset_min, offset_max].
-        """
+    :param debug: Value for `debug`.
+    :type debug: bool
+    :yields: Yielded values.
+    :returns: Return value.
+    :rtype: Iterable[Tuple[int, float]]"""
         t = self.tex
 
         offsets = np.arange(int(t.offset_min), int(t.offset_max) + 1, dtype=int)

@@ -17,6 +17,18 @@ def _cache_key(
     index_dtype: str,
     interpolate_annual: bool = True,
 ) -> str:
+    """ cache key.
+
+    :param package: Value for `package`.
+    :type package: Any
+    :param value_dtype: Value for `value_dtype`.
+    :type value_dtype: str
+    :param index_dtype: Value for `index_dtype`.
+    :type index_dtype: str
+    :param interpolate_annual: Value for `interpolate_annual`.
+    :type interpolate_annual: bool
+    :returns: Return value.
+    :rtype: str"""
     try:
         desc = getattr(package, "descriptor", {})
     except Exception:
@@ -52,6 +64,16 @@ def _cache_key(
 
 
 def cache_dir_for_package(package: Any, *, value_dtype: str, index_dtype: str) -> Path:
+    """Cache dir for package.
+
+    :param package: Value for `package`.
+    :type package: Any
+    :param value_dtype: Value for `value_dtype`.
+    :type value_dtype: str
+    :param index_dtype: Value for `index_dtype`.
+    :type index_dtype: str
+    :returns: Return value.
+    :rtype: Path"""
     cache_base = platformdirs.user_data_path(appname="trails", appauthor="pylca")
     key = _cache_key(
         package,
@@ -75,6 +97,16 @@ def load_cached_interpolation(
     Optional[dict],
     Path,
 ]:
+    """Load cached interpolation.
+
+    :param package: Value for `package`.
+    :type package: Any
+    :param value_dtype: Value for `value_dtype`.
+    :type value_dtype: str
+    :param index_dtype: Value for `index_dtype`.
+    :type index_dtype: str
+    :returns: Return value.
+    :rtype: tuple[Optional[sparse.COO], Optional[sparse.COO], list[str], list[str], Optional[dict], Optional[dict], Optional[dict], Path]"""
     cache_dir = cache_dir_for_package(
         package, value_dtype=value_dtype, index_dtype=index_dtype
     )
@@ -137,6 +169,32 @@ def save_cached_interpolation(
     activity_indices: dict,
     biosphere_indices: dict,
 ) -> Path:
+    """Save cached interpolation.
+
+    :param package: Value for `package`.
+    :type package: Any
+    :param value_dtype: Value for `value_dtype`.
+    :type value_dtype: str
+    :param index_dtype: Value for `index_dtype`.
+    :type index_dtype: str
+    :param A: Value for `A`.
+    :type A: sparse.COO
+    :param B: Value for `B`.
+    :type B: sparse.COO
+    :param scenario_labels: Value for `scenario_labels`.
+    :type scenario_labels: list[str]
+    :param template_labels: Value for `template_labels`.
+    :type template_labels: list[str]
+    :param temporal_technosphere_exchanges: Value for `temporal_technosphere_exchanges`.
+    :type temporal_technosphere_exchanges: dict
+    :param temporal_biosphere_exchanges: Value for `temporal_biosphere_exchanges`.
+    :type temporal_biosphere_exchanges: dict
+    :param activity_indices: Value for `activity_indices`.
+    :type activity_indices: dict
+    :param biosphere_indices: Value for `biosphere_indices`.
+    :type biosphere_indices: dict
+    :returns: Return value.
+    :rtype: Path"""
     cache_dir = cache_dir_for_package(
         package, value_dtype=value_dtype, index_dtype=index_dtype
     )

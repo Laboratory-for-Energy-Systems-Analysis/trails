@@ -20,13 +20,12 @@ _LCIA_METHODS_CACHE = {}
 
 
 def get_lcia_method_names(ei_version: str = "3.11") -> list[str]:
-    """List LCIA method names bundled with the specified ecoinvent version.
+    """Get lcia method names.
 
-    :param ei_version: Ecoinvent release identifier (e.g. ``"3.11"``).
+    :param ei_version: Value for `ei_version`.
     :type ei_version: str
-    :returns: Ordered method names formatted as ``"family - method"``.
-    :rtype: list[str]
-    """
+    :returns: Return value.
+    :rtype: list[str]"""
 
     if ei_version == "3.11":
         filepath = LCIA_METHODS_EI311
@@ -42,13 +41,12 @@ def get_lcia_method_names(ei_version: str = "3.11") -> list[str]:
 def format_lcia_method_exchanges(
     method: dict,
 ) -> dict[tuple[str, str, str], float]:
-    """Map an LCIA method's exchanges to impact amounts keyed by flow identity.
+    """Format lcia method exchanges.
 
-    :param method: LCIA method object as loaded from the JSON descriptor.
+    :param method: Value for `method`.
     :type method: dict
-    :returns: Mapping from ``(flow name, category, subcategory)`` to characterization values.
-    :rtype: dict[tuple[str, str, str], float]
-    """
+    :returns: Return value.
+    :rtype: dict[tuple[str, str, str], float]"""
 
     return {
         (
@@ -63,15 +61,14 @@ def format_lcia_method_exchanges(
 def get_lcia_methods(
     methods: list[str] | None = None, ei_version: str = "3.11"
 ) -> dict[str, dict[tuple[str, str, str], float]]:
-    """Load LCIA methods and exchanges from the bundled JSON files.
+    """Get lcia methods.
 
-    :param methods: Optional list of method names to include.
+    :param methods: Value for `methods`.
     :type methods: list[str] | None
-    :param ei_version: Ecoinvent release identifier (e.g. ``"3.11"``).
+    :param ei_version: Value for `ei_version`.
     :type ei_version: str
-    :returns: Mapping of method name to exchange characterization factors.
-    :rtype: dict[str, dict[tuple[str, str, str], float]]
-    """
+    :returns: Return value.
+    :rtype: dict[str, dict[tuple[str, str, str], float]]"""
     key = (ei_version, tuple(methods) if methods else None)
     if key in _LCIA_METHODS_CACHE:
         return _LCIA_METHODS_CACHE[key]
@@ -95,19 +92,18 @@ def fill_characterization_factors_matrices(
     biosphere_dict: dict[tuple[str, str, str], int],
     debug: bool = False,
 ) -> csr_matrix:
-    """Assemble a CSR matrix with characterization factors for multiple LCIA methods.
+    """Fill characterization factors matrices.
 
-    :param methods: Ordered method names to include.
+    :param methods: Value for `methods`.
     :type methods: list[str]
-    :param biosphere_matrix_dict: Mapping of biosphere flows to rows in the bw2calc matrix.
+    :param biosphere_matrix_dict: Value for `biosphere_matrix_dict`.
     :type biosphere_matrix_dict: dict[int, int]
-    :param biosphere_dict: Mapping of flow descriptors to biosphere indices.
+    :param biosphere_dict: Value for `biosphere_dict`.
     :type biosphere_dict: dict[tuple[str, str, str], int]
-    :param debug: Flag to emit detailed logging about matched factors.
+    :param debug: Value for `debug`.
     :type debug: bool
-    :returns: CSR matrix with shape ``(len(methods), len(biosphere_matrix_dict))``.
-    :rtype: scipy.sparse.csr_matrix
-    """
+    :returns: Return value.
+    :rtype: csr_matrix"""
 
     if debug:
         logger.info(

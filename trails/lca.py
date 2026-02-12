@@ -16,7 +16,6 @@ from .bw_interface import (
     _extract_supply_fast,
     _extract_supply_fast_cached,
     _get_datapackage,
-    _reference_product_id_from_activity_id,
     _reference_product_from_activity_id,
     build_datapackage_for_year_from_trails,
 )
@@ -32,8 +31,13 @@ warnings.filterwarnings("ignore", module="scikits")
 _CHAR_CACHE: dict = {}
 
 
-def _get_mapping_arrays(mapping) -> tuple[np.ndarray, np.ndarray] | tuple[None, None]:
-    """Return (ids, positions) arrays for a bw2calc dict mapping-like object."""
+def _get_mapping_arrays(mapping: Any) -> tuple[np.ndarray, np.ndarray] | tuple[None, None]:
+    """ get mapping arrays.
+
+    :param mapping: Value for `mapping`.
+    :type mapping: Any
+    :returns: Return value.
+    :rtype: tuple[np.ndarray, np.ndarray] | tuple[None, None]"""
     if mapping:
         try:
             ids = np.fromiter(mapping.keys(), dtype=np.int64, count=len(mapping))
@@ -45,10 +49,18 @@ def _get_mapping_arrays(mapping) -> tuple[np.ndarray, np.ndarray] | tuple[None, 
 
 
 def _map_activity_demands_to_products(
-    lca_obj,
+    lca_obj: Any,
     activity_demands: dict[int, float],
 ) -> dict[int, float]:
-    """Map activity-indexed demands to product ids using LCA metadata."""
+    """ map activity demands to products.
+
+    :param lca_obj: Value for `lca_obj`.
+    :type lca_obj: Any
+    :param activity_demands: Value for `activity_demands`.
+    :type activity_demands: dict[int, float]
+    :returns: Return value.
+    :rtype: dict[int, float]
+    :raises ValueError: If an error occurs."""
     if not activity_demands:
         return {}
 
@@ -82,10 +94,19 @@ def _build_rhs_matrix_from_root_demands(
     n: int,
     min_amount: float,
 ) -> tuple[list[int], np.ndarray]:
-    """
-    Build dense RHS matrix B (n, k) for all roots in `per_root_demands`.
-    Columns correspond to roots in returned `roots` list.
-    """
+    """ build rhs matrix from root demands.
+
+    :param per_root_demands: Value for `per_root_demands`.
+    :type per_root_demands: dict[int, dict[int, float]]
+    :param product_dict: Value for `product_dict`.
+    :type product_dict: dict
+    :param n: Value for `n`.
+    :type n: int
+    :param min_amount: Value for `min_amount`.
+    :type min_amount: float
+    :returns: Return value.
+    :rtype: tuple[list[int], np.ndarray]
+    :raises KeyError: If a product id cannot be resolved."""
     roots = [int(r) for r in per_root_demands.keys()]
     k = len(roots)
     if k == 0:
@@ -117,14 +138,17 @@ def solve_many_rhs_umfpack_factorized(
     *,
     cache: dict | None = None,
 ) -> np.ndarray:
-    """
-    Solve A X = B using a single UMFPACK factorization.
+    """Solve many rhs umfpack factorized.
 
-    Notes on scikits.umfpack behavior:
-      - UmfpackContext.symbolic() and numeric() often return None on success.
-      - ctx.solve(...) may return None and write into `x`, depending on version.
-      - Therefore, rely on exceptions instead of status codes.
-    """
+    :param A_csc: Value for `A_csc`.
+    :type A_csc: sp.csc_matrix
+    :param B: Value for `B`.
+    :type B: np.ndarray
+    :param cache: Value for `cache`.
+    :type cache: dict | None
+    :returns: Return value.
+    :rtype: np.ndarray
+    :raises ValueError: If an error occurs."""
     if not sp.isspmatrix_csc(A_csc):
         A_csc = A_csc.tocsc()
 
@@ -195,7 +219,23 @@ def lca_static(
     debug: bool = False,
     ei_version: str = "3.11",
 ) -> None:
-    """Run a static LCA for a single functional unit and year."""
+    """Lca static.
+
+    :param trails: Value for `trails`.
+    :type trails: Trails
+    :param year: Value for `year`.
+    :type year: int
+    :param fu_act_idx: Value for `fu_act_idx`.
+    :type fu_act_idx: int
+    :param methods: Value for `methods`.
+    :type methods: List[str]
+    :param amount: Value for `amount`.
+    :type amount: float
+    :param debug: Value for `debug`.
+    :type debug: bool
+    :param ei_version: Value for `ei_version`.
+    :type ei_version: str
+    :raises RuntimeError: If an error occurs."""
     prev_inventory = trails.inventory
     prev_characterized = trails.characterized_inventory
 
@@ -296,12 +336,24 @@ def lca(
     compute_score: bool = True,
     ei_version: str = "3.11",
 ) -> None:
-    """Run temporal LCA for a functional unit and year.
+    """Lca.
 
-    When ``attribute_to_roots`` is enabled, biosphere impacts are accumulated under
-    the first-level root activities while stored in the Trails inventory arrays with
-    an added "root activity" dimension.
-    """
+    :param trails: Value for `trails`.
+    :type trails: Trails
+    :param methods: Value for `methods`.
+    :type methods: List[str] | None
+    :param show_progress: Value for `show_progress`.
+    :type show_progress: bool
+    :param attribute_to_roots: Value for `attribute_to_roots`.
+    :type attribute_to_roots: bool
+    :param store_inventory: Value for `store_inventory`.
+    :type store_inventory: bool
+    :param compute_score: Value for `compute_score`.
+    :type compute_score: bool
+    :param ei_version: Value for `ei_version`.
+    :type ei_version: str
+    :raises RuntimeError: If an error occurs.
+    :raises ValueError: If an error occurs."""
     debug = bool(getattr(trails, "debug", False))
 
     trails.reset_inventory(attribute_to_roots=attribute_to_roots)
@@ -686,34 +738,24 @@ def build_temporal_sankey_tree(
     min_amount: float = 0.0,
     sort_children: bool = True,
 ) -> dict[str, Any]:
-    """Build a nested dict from the temporal routing graph for Sankey-style plots.
+    """Build temporal sankey tree.
 
-    The returned structure is a recursive tree:
-        {
-          "node": {...},
-          "children": [
-              {"edge_amount": float, "node": {...}, "children": [...]},
-              ...
-          ],
-        }
-
-    Nodes are taken from ``trails.graph`` built by ``trails.temporal_routing()``.
-
-    :param trails: Trails instance with a populated temporal routing graph.
+    :param trails: Value for `trails`.
     :type trails: Trails
-    :param root_year: Optional root year override (defaults to routing params).
+    :param root_year: Value for `root_year`.
     :type root_year: int | None
-    :param root_act_idx: Optional root activity override (defaults to routing params).
+    :param root_act_idx: Value for `root_act_idx`.
     :type root_act_idx: int | None
-    :param max_depth: Optional depth cutoff (inclusive of root at depth 0).
+    :param max_depth: Value for `max_depth`.
     :type max_depth: int | None
-    :param min_amount: Filter edges with abs(amount) below this threshold.
+    :param min_amount: Value for `min_amount`.
     :type min_amount: float
-    :param sort_children: Sort children by abs(edge_amount) descending.
+    :param sort_children: Value for `sort_children`.
     :type sort_children: bool
-    :returns: Nested Sankey-ready tree dict.
-    :rtype: dict
-    """
+    :returns: Return value.
+    :rtype: dict[str, Any]
+    :raises RuntimeError: If an error occurs.
+    :raises ValueError: If an error occurs."""
     graph = getattr(trails, "graph", None)
     if graph is None:
         raise RuntimeError(
@@ -756,6 +798,12 @@ def build_temporal_sankey_tree(
         )
 
     def _node_payload(node_key: tuple) -> dict[str, Any]:
+        """ node payload.
+
+    :param node_key: Value for `node_key`.
+    :type node_key: tuple
+    :returns: Return value.
+    :rtype: dict[str, Any]"""
         data = graph.nodes[node_key]
         return {
             "key": node_key,
@@ -771,6 +819,12 @@ def build_temporal_sankey_tree(
         }
 
     def _build_tree(node_key: tuple) -> dict[str, Any]:
+        """ build tree.
+
+    :param node_key: Value for `node_key`.
+    :type node_key: tuple
+    :returns: Return value.
+    :rtype: dict[str, Any]"""
         node_data = graph.nodes[node_key]
         depth = int(node_data.get("depth"))
         if max_depth is not None and depth >= int(max_depth):
@@ -807,17 +861,21 @@ def score_temporal_graph_nodes(
     show_progress: bool = True,
     ei_version: str = "3.11",
 ) -> dict[tuple, float]:
-    """Score nodes in the temporal routing graph for Sankey-style weighting.
+    """Score temporal graph nodes.
 
-    Rules:
-      - Non-frontier nodes: score direct biosphere only.
-      - Frontier nodes: run a full LCA solve for that node-year demand.
-
-    This function does not require calling ``trails.lca()`` beforehand.
-    It only requires a populated routing graph and valid matrices in ``trails``.
-
-    Node scores are keyed by the graph node key (tuple used by networkx).
-    """
+    :param trails: Value for `trails`.
+    :type trails: Trails
+    :param methods: Value for `methods`.
+    :type methods: List[str]
+    :param min_amount: Value for `min_amount`.
+    :type min_amount: float
+    :param show_progress: Value for `show_progress`.
+    :type show_progress: bool
+    :param ei_version: Value for `ei_version`.
+    :type ei_version: str
+    :returns: Return value.
+    :rtype: dict[tuple, float]
+    :raises RuntimeError: If an error occurs."""
     graph = getattr(trails, "graph", None)
     if graph is None:
         raise RuntimeError(
@@ -844,6 +902,12 @@ def score_temporal_graph_nodes(
     supply_cache: dict[tuple[int, int], dict[int, float]] = {}
 
     def _char_row_for_year(year: int) -> np.ndarray:
+        """ char row for year.
+
+    :param year: Value for `year`.
+    :type year: int
+    :returns: Return value.
+    :rtype: np.ndarray"""
         context = trails._get_scenario_context(int(year))
         if context is None:
             return np.zeros(int(trails.A.shape[1]), dtype=np.float64)
@@ -858,6 +922,16 @@ def score_temporal_graph_nodes(
         return coeff
 
     def _score_direct_td(year: int, act: int, amount: float) -> float:
+        """ score direct td.
+
+    :param year: Value for `year`.
+    :type year: int
+    :param act: Value for `act`.
+    :type act: int
+    :param amount: Value for `amount`.
+    :type amount: float
+    :returns: Return value.
+    :rtype: float"""
         if amount == 0.0:
             return 0.0
 
@@ -868,11 +942,21 @@ def score_temporal_graph_nodes(
 
         def _capture_append(
             act_idx: int,
-            year_val: int,
+            _year_val: int,
             value: float,
             *,
             root_activity: int | None = None,
         ) -> None:
+            """ capture append.
+
+    :param act_idx: Value for `act_idx`.
+    :type act_idx: int
+    :param _year_val: Value for `_year_val`.
+    :type _year_val: int
+    :param value: Value for `value`.
+    :type value: float
+    :param root_activity: Value for `root_activity`.
+    :type root_activity: int | None"""
             nonlocal total
             total += float(value)
 
@@ -883,6 +967,16 @@ def score_temporal_graph_nodes(
             *,
             root_activity: int | None = None,
         ) -> None:
+            """ capture append bulk.
+
+    :param act_idx: Value for `act_idx`.
+    :type act_idx: int
+    :param year_idx: Value for `year_idx`.
+    :type year_idx: int
+    :param value: Value for `value`.
+    :type value: float
+    :param root_activity: Value for `root_activity`.
+    :type root_activity: int | None"""
             nonlocal total
             total += float(value)
 
@@ -908,6 +1002,16 @@ def score_temporal_graph_nodes(
         return float(total)
 
     def _solve_supply(year: int, act: int, amount: float) -> dict[int, float]:
+        """ solve supply.
+
+    :param year: Value for `year`.
+    :type year: int
+    :param act: Value for `act`.
+    :type act: int
+    :param amount: Value for `amount`.
+    :type amount: float
+    :returns: Return value.
+    :rtype: dict[int, float]"""
         key = (int(year), int(act))
         if key in supply_cache:
             if amount == 1.0:
@@ -954,6 +1058,16 @@ def score_temporal_graph_nodes(
         return {a: float(v) * float(amount) for a, v in supply_total.items()}
 
     def _score_frontier(year: int, act: int, amount: float) -> float:
+        """ score frontier.
+
+    :param year: Value for `year`.
+    :type year: int
+    :param act: Value for `act`.
+    :type act: int
+    :param amount: Value for `amount`.
+    :type amount: float
+    :returns: Return value.
+    :rtype: float"""
         if amount == 0.0:
             return 0.0
         supply = _solve_supply(year, act, amount)
@@ -969,12 +1083,24 @@ def score_temporal_graph_nodes(
         return float(total)
 
     def _is_frontier(node_data: dict) -> bool:
+        """ is frontier.
+
+    :param node_data: Value for `node_data`.
+    :type node_data: dict
+    :returns: Return value.
+    :rtype: bool"""
         frontier_amt = float(node_data.get("frontier_amount") or 0.0)
         if frontier_amt != 0.0:
             return True
         return False
 
     def _direct_amount(node_data: dict) -> float:
+        """ direct amount.
+
+    :param node_data: Value for `node_data`.
+    :type node_data: dict
+    :returns: Return value.
+    :rtype: float"""
         direct_amt = float(node_data.get("direct_bio_amount") or 0.0)
         if direct_amt != 0.0:
             return direct_amt

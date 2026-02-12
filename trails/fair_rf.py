@@ -37,7 +37,17 @@ def _inventory_emissions_by_fair_species(
     species_map: dict[object, str],
     signs: dict[object, float],
 ) -> pd.DataFrame:
-    """Aggregate trails.inventory into FaIR species emissions (kg/yr)."""
+    """ inventory emissions by fair species.
+
+    :param trails: Value for `trails`.
+    :type trails: Any
+    :param species_map: Value for `species_map`.
+    :type species_map: dict[object, str]
+    :param signs: Value for `signs`.
+    :type signs: dict[object, float]
+    :returns: Return value.
+    :rtype: pd.DataFrame
+    :raises ValueError: If an error occurs."""
     inv = trails.inventory
     if inv is None:
         raise ValueError("Trails.inventory is empty; run LCA first.")
@@ -123,6 +133,31 @@ def _run_fair_emissions(
     debug: bool = False,
     progress: bool = False,
 ) -> fair.FAIR:
+    """ run fair emissions.
+
+    :param emissions_df: Value for `emissions_df`.
+    :type emissions_df: pd.DataFrame
+    :param scenario: Value for `scenario`.
+    :type scenario: str
+    :param config_csv: Value for `config_csv`.
+    :type config_csv: str | Path | None
+    :param properties_csv: Value for `properties_csv`.
+    :type properties_csv: str | Path | None
+    :param config_name: Value for `config_name`.
+    :type config_name: str | None
+    :param config_names: Value for `config_names`.
+    :type config_names: list[str] | None
+    :param ghg_method: Value for `ghg_method`.
+    :type ghg_method: str | None
+    :param temperature_prescribed: Value for `temperature_prescribed`.
+    :type temperature_prescribed: bool | None
+    :param debug: Value for `debug`.
+    :type debug: bool
+    :param progress: Value for `progress`.
+    :type progress: bool
+    :returns: Return value.
+    :rtype: fair.FAIR
+    :raises ValueError: If an error occurs."""
     df = _normalize_emissions_columns(emissions_df)
     df = df[(df["scenario"] == scenario) & (df["region"].str.lower() == "world")].copy()
     if df.empty:
@@ -180,6 +215,12 @@ def _run_fair_emissions(
         raise ValueError(f"No configs found in {config_csv}.")
 
     def _normalize_config_name(name: object) -> object:
+        """ normalize config name.
+
+    :param name: Value for `name`.
+    :type name: object
+    :returns: Return value.
+    :rtype: object"""
         if name in cfg.index:
             return name
         try:
@@ -232,7 +273,12 @@ def _run_fair_emissions(
 
 
 def _compute_ghg_forcing_from_concentration(f: fair.FAIR) -> np.ndarray | None:
-    """Compute GHG forcing from concentration using FAIR's own forcing functions."""
+    """ compute ghg forcing from concentration.
+
+    :param f: Value for `f`.
+    :type f: fair.FAIR
+    :returns: Return value.
+    :rtype: np.ndarray | None"""
     try:
         from fair.forcing import ghg as ghg_mod
     except Exception:
@@ -311,7 +357,12 @@ def _compute_ghg_forcing_from_concentration(f: fair.FAIR) -> np.ndarray | None:
 
 
 def _extract_fair_timeseries(da: xr.DataArray) -> np.ndarray:
-    """Extract a 1D time series from a FaIR DataArray."""
+    """ extract fair timeseries.
+
+    :param da: Value for `da`.
+    :type da: xr.DataArray
+    :returns: Return value.
+    :rtype: np.ndarray"""
     if "timebounds" in da.dims:
         time_dim = "timebounds"
     elif "time" in da.dims:
@@ -343,7 +394,12 @@ def _extract_fair_timeseries(da: xr.DataArray) -> np.ndarray:
 
 
 def _extract_fair_timeseries_by_config(da: xr.DataArray) -> np.ndarray:
-    """Extract a (config, time) array from a FaIR DataArray."""
+    """ extract fair timeseries by config.
+
+    :param da: Value for `da`.
+    :type da: xr.DataArray
+    :returns: Return value.
+    :rtype: np.ndarray"""
     if "timebounds" in da.dims:
         time_dim = "timebounds"
     elif "time" in da.dims:
@@ -398,7 +454,49 @@ def run_fair_delta_rf(
     per_species_runs: bool = True,
     quantiles: list[float] | None = None,
 ) -> xr.DataArray:
-    """Run FaIR baseline/perturbed and store delta RF on trails."""
+    """Run fair delta rf.
+
+    :param trails: Value for `trails`.
+    :type trails: Any
+    :param scenario: Value for `scenario`.
+    :type scenario: str
+    :param emissions_csv: Value for `emissions_csv`.
+    :type emissions_csv: str | Path
+    :param mapping_yaml: Value for `mapping_yaml`.
+    :type mapping_yaml: str | Path
+    :param config_csv: Value for `config_csv`.
+    :type config_csv: str | Path | None
+    :param properties_csv: Value for `properties_csv`.
+    :type properties_csv: str | Path | None
+    :param config_name: Value for `config_name`.
+    :type config_name: str | None
+    :param config_names: Value for `config_names`.
+    :type config_names: list[str] | None
+    :param ghg_method: Value for `ghg_method`.
+    :type ghg_method: str | None
+    :param temperature_prescribed: Value for `temperature_prescribed`.
+    :type temperature_prescribed: bool | None
+    :param scale_factor: Value for `scale_factor`.
+    :type scale_factor: float | None
+    :param scale_target_fraction: Value for `scale_target_fraction`.
+    :type scale_target_fraction: float
+    :param scaling_factor: Value for `scaling_factor`.
+    :type scaling_factor: float | None
+    :param validate_emissions_delta: Value for `validate_emissions_delta`.
+    :type validate_emissions_delta: bool
+    :param validate_atol: Value for `validate_atol`.
+    :type validate_atol: float
+    :param validate_rtol: Value for `validate_rtol`.
+    :type validate_rtol: float
+    :param validate_raise: Value for `validate_raise`.
+    :type validate_raise: bool
+    :param per_species_runs: Value for `per_species_runs`.
+    :type per_species_runs: bool
+    :param quantiles: Value for `quantiles`.
+    :type quantiles: list[float] | None
+    :returns: Return value.
+    :rtype: xr.DataArray
+    :raises ValueError: If an error occurs."""
     debug = bool(getattr(trails, "debug", False))
     if scaling_factor is not None:
         scale_factor = float(scaling_factor)
@@ -451,6 +549,12 @@ def run_fair_delta_rf(
     has_half_years = any(abs(v - round(v)) > 1e-9 for v in base_year_vals)
 
     def _year_col_name(year: int) -> str:
+        """ year col name.
+
+    :param year: Value for `year`.
+    :type year: int
+    :returns: Return value.
+    :rtype: str"""
         if has_half_years:
             return f"{year + 0.5:.1f}"
         return str(int(year))
@@ -493,6 +597,16 @@ def run_fair_delta_rf(
         specie: str | None,
         delta_series: pd.Series | None = None,
     ) -> pd.DataFrame:
+        """ build perturbed df.
+
+    :param base_df: Value for `base_df`.
+    :type base_df: pd.DataFrame
+    :param specie: Value for `specie`.
+    :type specie: str | None
+    :param delta_series: Value for `delta_series`.
+    :type delta_series: pd.Series | None
+    :returns: Return value.
+    :rtype: pd.DataFrame"""
         df_pert_local = _normalize_emissions_columns(base_df)
         df_pert_local = df_pert_local[
             (df_pert_local["scenario"] == scenario)
@@ -671,6 +785,17 @@ def run_fair_delta_rf(
         *,
         quantile_idx: int,
     ) -> None:
+        """ append allocated rf.
+
+    :param specie: Value for `specie`.
+    :type specie: str
+    :param rf_series: Value for `rf_series`.
+    :type rf_series: np.ndarray
+    :param sign_mode: Value for `sign_mode`.
+    :type sign_mode: str
+    :param quantile_idx: Value for `quantile_idx`.
+    :type quantile_idx: int
+    :raises ValueError: If an error occurs."""
         positions = species_to_positions.get(specie, [])
         if not positions:
             return
@@ -773,6 +898,17 @@ def run_fair_delta_rf(
         *,
         quantile_idx: int,
     ) -> None:
+        """ append allocated temp.
+
+    :param specie: Value for `specie`.
+    :type specie: str
+    :param temp_series: Value for `temp_series`.
+    :type temp_series: np.ndarray
+    :param sign_mode: Value for `sign_mode`.
+    :type sign_mode: str
+    :param quantile_idx: Value for `quantile_idx`.
+    :type quantile_idx: int
+    :raises ValueError: If an error occurs."""
         positions = species_to_positions.get(specie, [])
         if not positions:
             return

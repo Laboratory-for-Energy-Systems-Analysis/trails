@@ -8,21 +8,23 @@ import bisect
 from collections import defaultdict
 import numpy as np
 import plotly.graph_objects as go
+import plotly.io as pio
 import plotly.express as px
 from plotly.subplots import make_subplots
 import sparse
 import xarray as xr
 
 from .trails import Trails
-from .utils import _format_path_label, _format_path_label_with_years
+from .utils import _format_path_label
 
 
 def _build_activity_label_map(trails: Trails) -> dict[int, str]:
-    """Build a mapping of activity indices to display labels.
+    """ build activity label map.
 
-    For plot_temporal_scores we want labels to show ONLY the reference product
-    (used in both legend and hover).
-    """
+    :param trails: Value for `trails`.
+    :type trails: Trails
+    :returns: Return value.
+    :rtype: dict[int, str]"""
     labels: dict[int, str] = {}
     for scen_label, mapping in trails.activity_indices.items():
         for idx, meta in mapping.items():
@@ -41,6 +43,12 @@ def _build_activity_label_map(trails: Trails) -> dict[int, str]:
 
 
 def _build_flow_label_map(trails: Trails) -> dict[int, str]:
+    """ build flow label map.
+
+    :param trails: Value for `trails`.
+    :type trails: Trails
+    :returns: Return value.
+    :rtype: dict[int, str]"""
     labels: dict[int, str] = {}
 
     # Determine which flow keys are actually used in plotted arrays
@@ -91,15 +99,15 @@ def _select_years_from_results(
     results_by_year: dict[int, dict[str, Any]],
     year_range: tuple[int, int] | None,
 ) -> list[int]:
-    """Select years from results with an optional range filter.
+    """ select years from results.
 
-    :param results_by_year: Mapping of year to results payload.
-    :type results_by_year: dict[int, dict]
-    :param year_range: Optional ``(start, end)`` bounds.
+    :param results_by_year: Value for `results_by_year`.
+    :type results_by_year: dict[int, dict[str, Any]]
+    :param year_range: Value for `year_range`.
     :type year_range: tuple[int, int] | None
-    :returns: Sorted list of years to plot.
+    :returns: Return value.
     :rtype: list[int]
-    """
+    :raises ValueError: If an error occurs."""
     years_all = sorted(results_by_year.keys())
     if not years_all:
         raise ValueError("results_by_year is empty.")
@@ -121,15 +129,17 @@ def _collect_root_scores(
     years: list[int],
     score_key: str,
 ) -> list[int]:
-    """Collect unique root indices with scores across years.
+    """ collect root scores.
 
-    :param results_by_year: Mapping of year to results payload.
-    :type results_by_year: dict[int, dict]
-    :param years: Years to scan.
+    :param results_by_year: Value for `results_by_year`.
+    :type results_by_year: dict[int, dict[str, Any]]
+    :param years: Value for `years`.
     :type years: list[int]
-    :returns: Sorted list of root indices.
+    :param score_key: Value for `score_key`.
+    :type score_key: str
+    :returns: Return value.
     :rtype: list[int]
-    """
+    :raises ValueError: If an error occurs."""
     all_roots = sorted(
         {root for year in years for root in results_by_year[year].get(score_key, {})}
     )
@@ -144,17 +154,18 @@ def _build_score_matrix(
     all_roots: list[int],
     score_key: str,
 ) -> np.ndarray:
-    """Build a score matrix of shape ``(years, roots)``.
+    """ build score matrix.
 
-    :param results_by_year: Mapping of year to results payload.
-    :type results_by_year: dict[int, dict]
-    :param years: Years to include.
+    :param results_by_year: Value for `results_by_year`.
+    :type results_by_year: dict[int, dict[str, Any]]
+    :param years: Value for `years`.
     :type years: list[int]
-    :param all_roots: Root indices to include.
+    :param all_roots: Value for `all_roots`.
     :type all_roots: list[int]
-    :returns: Score matrix.
-    :rtype: numpy.ndarray
-    """
+    :param score_key: Value for `score_key`.
+    :type score_key: str
+    :returns: Return value.
+    :rtype: np.ndarray"""
     Y = np.zeros((len(years), len(all_roots)), dtype=float)
     for yi, year in enumerate(years):
         spr = results_by_year[year].get(score_key, {})
@@ -174,37 +185,35 @@ def _add_root_traces(
     showlegend_roots: Optional[set[int]] = None,
     showhover_roots: Optional[set[int]] = None,
 ) -> None:
-    """Add root score traces to a Plotly figure.
+    """ add root traces.
 
-    :param fig: Plotly figure to update.
-    :type fig: plotly.graph_objects.Figure
-    :param years: X-axis years.
+    :param fig: Value for `fig`.
+    :type fig: go.Figure
+    :param years: Value for `years`.
     :type years: list[int]
-    :param Y: Score matrix with shape ``(years, roots)``.
-    :type Y: numpy.ndarray
-    :param all_roots: Root indices corresponding to columns in ``Y``.
-    :type all_roots: list[int]
-    :param idx_to_label: Mapping from activity index to label.
-    :type idx_to_label: dict[int, str]
-    :param method_label: LCIA method label for hover text.
+    :param Y: Value for `Y`.
+    :type Y: np.ndarray
+    :param all_roots: Value for `all_roots`.
+    :type all_roots: list[Any]
+    :param idx_to_label: Value for `idx_to_label`.
+    :type idx_to_label: dict[Any, str]
+    :param method_label: Value for `method_label`.
     :type method_label: str
-    :param stacked: Whether to stack traces.
+    :param stacked: Value for `stacked`.
     :type stacked: bool
-    :param showlegend_roots: Optional set of root ids to show in the legend.
-    :type showlegend_roots: set[int] | None
-    :param showhover_roots: Optional set of root ids to show in hover.
-    :type showhover_roots: set[int] | None
-    """
+    :param showlegend_roots: Value for `showlegend_roots`.
+    :type showlegend_roots: Optional[set[int]]
+    :param showhover_roots: Value for `showhover_roots`.
+    :type showhover_roots: Optional[set[int]]"""
     alpha = 0.4 if not stacked else 1.0
 
     def label_for_root(idx: Any) -> str:
-        """Resolve a root index to its display label.
+        """Label for root.
 
-        :param idx: Activity index to label.
-        :type idx: int
-        :returns: Display label for the root.
-        :rtype: str
-        """
+    :param idx: Value for `idx`.
+    :type idx: Any
+    :returns: Return value.
+    :rtype: str"""
         if idx in idx_to_label:
             return idx_to_label[idx]
         if isinstance(idx, str):
@@ -272,59 +281,57 @@ def plot_temporal_graph(
     show_year_labels: bool = True,
     year_label_offset: float = 1.2,
     show_band_labels: bool = True,
-    band_label_chars: int = 80,
     band_label_offset_px: float | None = None,
     auto_depth_scale: bool = True,
     edge_weight: Literal["amount", "score"] = "amount",
     node_scores: dict[tuple, float] | None = None,
 ) -> str:
-    """Render the routing graph with pyvis.
+    """Plot temporal graph.
 
-    :param trails: Trails instance with a populated graph.
+    :param trails: Value for `trails`.
     :type trails: Trails
-    :param min_edge_amount: Minimum absolute edge value to include (amount or score).
+    :param min_edge_amount: Value for `min_edge_amount`.
     :type min_edge_amount: float
-    :param notebook: Whether to render for Jupyter notebooks.
+    :param notebook: Value for `notebook`.
     :type notebook: bool
-    :param filename: Output HTML file name.
+    :param filename: Value for `filename`.
     :type filename: str
-    :param height: HTML canvas height.
+    :param height: Value for `height`.
     :type height: str
-    :param width: HTML canvas width.
+    :param width: Value for `width`.
     :type width: str
-    :param physics: Enable physics simulation.
+    :param physics: Value for `physics`.
     :type physics: bool
-    :param layout_by_year_depth: Position nodes by year (x) and depth (y).
+    :param layout_by_year_depth: Value for `layout_by_year_depth`.
     :type layout_by_year_depth: bool
-    :param year_scale: Scale factor for year spacing on x-axis.
+    :param year_scale: Value for `year_scale`.
     :type year_scale: float
-    :param depth_scale: Scale factor for depth spacing on y-axis.
+    :param depth_scale: Value for `depth_scale`.
     :type depth_scale: float
-    :param max_label_chars: Max characters per label line (name/ref).
+    :param max_label_chars: Value for `max_label_chars`.
     :type max_label_chars: int
-    :param level0_edge_color: Color for edges from depth-0 nodes.
+    :param level0_edge_color: Value for `level0_edge_color`.
     :type level0_edge_color: str
-    :param palette: Colors for first-level branches (depth=1).
-    :type palette: list[str] | None
-    :param show_year_labels: Add year labels below the graph.
+    :param palette: Value for `palette`.
+    :type palette: Optional[list[str]]
+    :param show_year_labels: Value for `show_year_labels`.
     :type show_year_labels: bool
-    :param year_label_offset: Vertical offset multiplier for year labels.
+    :param year_label_offset: Value for `year_label_offset`.
     :type year_label_offset: float
-    :param show_band_labels: Add right-side labels for depth bands.
+    :param show_band_labels: Value for `show_band_labels`.
     :type show_band_labels: bool
-    :param band_label_chars: Max characters for band labels.
-    :type band_label_chars: int
-    :param band_label_offset_px: Pixel offset for band labels (vertical). If None, auto-compute.
+    :param band_label_offset_px: Value for `band_label_offset_px`.
     :type band_label_offset_px: float | None
-    :param auto_depth_scale: Increase depth spacing based on band count.
+    :param auto_depth_scale: Value for `auto_depth_scale`.
     :type auto_depth_scale: bool
-    :param edge_weight: Whether to size edges by technosphere amount or score.
-    :type edge_weight: Literal["amount", "score"]
-    :param node_scores: Optional node score mapping used when edge_weight="score".
+    :param edge_weight: Value for `edge_weight`.
+    :type edge_weight: Literal['amount', 'score']
+    :param node_scores: Value for `node_scores`.
     :type node_scores: dict[tuple, float] | None
-    :returns: Output filename.
+    :returns: Return value.
     :rtype: str
-    """
+    :raises RuntimeError: If an error occurs.
+    :raises ValueError: If an error occurs."""
     G = getattr(trails, "graph", None)
     if G is None:
         raise RuntimeError(
@@ -349,6 +356,12 @@ def plot_temporal_graph(
         ) from exc
 
     def _node_score(node: object) -> float:
+        """ node score.
+
+    :param node: Value for `node`.
+    :type node: object
+    :returns: Return value.
+    :rtype: float"""
         if not node_scores:
             return 0.0
         if node in node_scores:
@@ -397,11 +410,27 @@ def plot_temporal_graph(
 
     # Relabel tuple node ids to strings for pyvis compatibility
     def _truncate(text: str, limit: int) -> str:
+        """ truncate.
+
+    :param text: Value for `text`.
+    :type text: str
+    :param limit: Value for `limit`.
+    :type limit: int
+    :returns: Return value.
+    :rtype: str"""
         if len(text) <= limit:
             return text
         return text[:limit]
 
     def _label_node(node: tuple, data: dict) -> str:
+        """ label node.
+
+    :param node: Value for `node`.
+    :type node: tuple
+    :param data: Value for `data`.
+    :type data: dict
+    :returns: Return value.
+    :rtype: str"""
         year = data.get("year", "")
         depth = data.get("depth", "")
         name = data.get("name", "") or ""
@@ -446,6 +475,12 @@ def plot_temporal_graph(
     color_idx = 0
 
     def _branch_key(node: object) -> tuple[str, str, str]:
+        """ branch key.
+
+    :param node: Value for `node`.
+    :type node: object
+    :returns: Return value.
+    :rtype: tuple[str, str, str]"""
         data = H.nodes[node]
         return (
             str(data.get("name", "")),
@@ -474,12 +509,26 @@ def plot_temporal_graph(
                         queue.append(nxt)
 
     def _edge_color(u: object, v: object) -> str:
+        """ edge color.
+
+    :param u: Value for `u`.
+    :type u: object
+    :param v: Value for `v`.
+    :type v: object
+    :returns: Return value.
+    :rtype: str"""
         src_depth = int(H.nodes[u].get("depth", 0))
         if src_depth == 0:
             return edge_colors.get((u, v), level0_edge_color)
         return node_branch_color.get(u, palette[0])
 
     def _node_color(n: object) -> Optional[str]:
+        """ node color.
+
+    :param n: Value for `n`.
+    :type n: object
+    :returns: Return value.
+    :rtype: Optional[str]"""
         depth = int(H.nodes[n].get("depth", 0))
         if depth == 0:
             return None
@@ -605,6 +654,18 @@ def plot_temporal_graph(
             amount: float,
             score: float | None = None,
         ) -> str:
+            """ edge title.
+
+    :param src_label: Value for `src_label`.
+    :type src_label: str
+    :param dst_label: Value for `dst_label`.
+    :type dst_label: str
+    :param amount: Value for `amount`.
+    :type amount: float
+    :param score: Value for `score`.
+    :type score: float | None
+    :returns: Return value.
+    :rtype: str"""
             src = src_label.split("\n", 1)[0]
             dst = dst_label.split("\n", 1)[0]
             if score is None:
@@ -704,6 +765,18 @@ def plot_temporal_graph(
             amount: float,
             score: float | None = None,
         ) -> str:
+            """ edge title.
+
+    :param src_label: Value for `src_label`.
+    :type src_label: str
+    :param dst_label: Value for `dst_label`.
+    :type dst_label: str
+    :param amount: Value for `amount`.
+    :type amount: float
+    :param score: Value for `score`.
+    :type score: float | None
+    :returns: Return value.
+    :rtype: str"""
             src = src_label.split("\n", 1)[0]
             dst = dst_label.split("\n", 1)[0]
             if score is None:
@@ -1136,23 +1209,22 @@ def _add_cumulative_trace(
     yaxis_type: str,
     log_eps: float,
 ) -> np.ndarray:
-    """Add a cumulative total trace to a Plotly figure.
+    """ add cumulative trace.
 
-    :param fig: Plotly figure to update.
-    :type fig: plotly.graph_objects.Figure
-    :param years: X-axis years.
+    :param fig: Value for `fig`.
+    :type fig: go.Figure
+    :param years: Value for `years`.
     :type years: list[int]
-    :param total_raw: Raw total scores per year.
+    :param total_raw: Value for `total_raw`.
     :type total_raw: list[float]
-    :param cumulative_axis_label: Axis label for cumulative scores.
+    :param cumulative_axis_label: Value for `cumulative_axis_label`.
     :type cumulative_axis_label: str
-    :param yaxis_type: Axis scale type (e.g. ``"linear"`` or ``"log"``).
+    :param yaxis_type: Value for `yaxis_type`.
     :type yaxis_type: str
-    :param log_eps: Small epsilon for log scaling.
+    :param log_eps: Value for `log_eps`.
     :type log_eps: float
-    :returns: Cumulative values.
-    :rtype: numpy.ndarray
-    """
+    :returns: Return value.
+    :rtype: np.ndarray"""
     cum_vals = np.cumsum(total_raw)
     if yaxis_type == "log":
         cum_vals = np.where(cum_vals > 0, cum_vals, log_eps)
@@ -1186,23 +1258,22 @@ def _add_static_score_trace(
     static_score_color: str,
     method_label: str,
 ) -> None:
-    """Add a horizontal static score trace to a Plotly figure.
+    """ add static score trace.
 
-    :param fig: Plotly figure to update.
-    :type fig: plotly.graph_objects.Figure
-    :param years: X-axis years.
+    :param fig: Value for `fig`.
+    :type fig: go.Figure
+    :param years: Value for `years`.
     :type years: list[int]
-    :param static_score: Static score value.
+    :param static_score: Value for `static_score`.
     :type static_score: float
-    :param static_score_label: Label for the static score trace.
+    :param static_score_label: Value for `static_score_label`.
     :type static_score_label: str
-    :param static_score_dash: Line dash style.
+    :param static_score_dash: Value for `static_score_dash`.
     :type static_score_dash: str
-    :param static_score_color: Line color.
+    :param static_score_color: Value for `static_score_color`.
     :type static_score_color: str
-    :param method_label: LCIA method label for hover text.
-    :type method_label: str
-    """
+    :param method_label: Value for `method_label`.
+    :type method_label: str"""
     fig.add_trace(
         go.Scatter(
             x=[years[0], years[-1]],
@@ -1229,19 +1300,18 @@ def _compute_layout_dimensions(
     legend_row_height: int,
     n_items: int,
 ) -> tuple[int, int]:
-    """Compute layout sizing values for the plot.
+    """ compute layout dimensions.
 
-    :param width: Figure width override.
+    :param width: Value for `width`.
     :type width: int | None
-    :param legend_entrywidth: Legend entry width.
+    :param legend_entrywidth: Value for `legend_entrywidth`.
     :type legend_entrywidth: int
-    :param legend_row_height: Legend row height.
+    :param legend_row_height: Value for `legend_row_height`.
     :type legend_row_height: int
-    :param n_items: Number of legend items.
+    :param n_items: Value for `n_items`.
     :type n_items: int
-    :returns: Tuple of entry width and top margin.
-    :rtype: tuple[int, int]
-    """
+    :returns: Return value.
+    :rtype: tuple[int, int]"""
     fig_w = int(width) if (width is not None) else 800
     entry_w = max(80, int(legend_entrywidth))
     n_cols = max(1, fig_w // entry_w)
@@ -1264,33 +1334,32 @@ def _apply_base_layout(
     static_score: float | None,
     cumulative_axis_label: str,
 ) -> None:
-    """Apply base layout settings to a Plotly figure.
+    """ apply base layout.
 
-    :param fig: Plotly figure to update.
-    :type fig: plotly.graph_objects.Figure
-    :param width: Figure width.
+    :param fig: Value for `fig`.
+    :type fig: go.Figure
+    :param width: Value for `width`.
     :type width: int
-    :param height: Figure height.
+    :param height: Value for `height`.
     :type height: int
-    :param title: Figure title.
+    :param title: Value for `title`.
     :type title: str
-    :param legend_y: Legend y position.
+    :param legend_y: Value for `legend_y`.
     :type legend_y: float
-    :param entry_w: Legend entry width.
+    :param entry_w: Value for `entry_w`.
     :type entry_w: int
-    :param top_margin: Top margin height.
+    :param top_margin: Value for `top_margin`.
     :type top_margin: int
-    :param method_label: LCIA method label.
+    :param method_label: Value for `method_label`.
     :type method_label: str
-    :param yaxis_type: Axis scale type.
+    :param yaxis_type: Value for `yaxis_type`.
     :type yaxis_type: str
-    :param show_cumulative_axis: Whether to show cumulative axis.
+    :param show_cumulative_axis: Value for `show_cumulative_axis`.
     :type show_cumulative_axis: bool
-    :param static_score: Optional static score.
+    :param static_score: Value for `static_score`.
     :type static_score: float | None
-    :param cumulative_axis_label: Label for cumulative axis.
-    :type cumulative_axis_label: str
-    """
+    :param cumulative_axis_label: Value for `cumulative_axis_label`.
+    :type cumulative_axis_label: str"""
     fig.update_layout(
         width=width,
         height=height,
@@ -1354,27 +1423,26 @@ def _apply_linear_yaxis_alignment(
     y2_headroom: float,
     stacked: bool,
 ) -> None:
-    """Align linear y-axes for primary and cumulative traces.
+    """ apply linear yaxis alignment.
 
-    :param fig: Plotly figure to update.
-    :type fig: plotly.graph_objects.Figure
-    :param Y: Score matrix for primary axis.
-    :type Y: numpy.ndarray
-    :param cum_vals: Cumulative values for secondary axis.
-    :type cum_vals: numpy.ndarray | None
-    :param static_score: Optional static score value.
+    :param fig: Value for `fig`.
+    :type fig: go.Figure
+    :param Y: Value for `Y`.
+    :type Y: np.ndarray
+    :param cum_vals: Value for `cum_vals`.
+    :type cum_vals: np.ndarray | None
+    :param static_score: Value for `static_score`.
     :type static_score: float | None
-    :param y_min: Optional min for primary y-axis.
+    :param y_min: Value for `y_min`.
     :type y_min: float | None
-    :param y_max: Optional max for primary y-axis.
+    :param y_max: Value for `y_max`.
     :type y_max: float | None
-    :param y2_max: Optional max for secondary y-axis.
+    :param y2_max: Value for `y2_max`.
     :type y2_max: float | None
-    :param y2_headroom: Headroom multiplier for secondary axis.
+    :param y2_headroom: Value for `y2_headroom`.
     :type y2_headroom: float
-    :param stacked: Whether traces are stacked (affects y-range).
-    :type stacked: bool
-    """
+    :param stacked: Value for `stacked`.
+    :type stacked: bool"""
     if stacked:
         pos_sum = np.sum(np.where(Y > 0, Y, 0.0), axis=1)
         neg_sum = np.sum(np.where(Y < 0, Y, 0.0), axis=1)
@@ -1446,19 +1514,18 @@ def _apply_xaxis_settings(
     years: list[int],
     show_year_grid: bool,
 ) -> None:
-    """Apply x-axis settings for year-based plots.
+    """ apply xaxis settings.
 
-    :param fig: Plotly figure to update.
-    :type fig: plotly.graph_objects.Figure
-    :param year_tick: Tick step for the year axis.
+    :param fig: Value for `fig`.
+    :type fig: go.Figure
+    :param year_tick: Value for `year_tick`.
     :type year_tick: int | None
-    :param year_range: Optional year range bounds.
+    :param year_range: Value for `year_range`.
     :type year_range: tuple[int, int] | None
-    :param years: List of years in the plot.
+    :param years: Value for `years`.
     :type years: list[int]
-    :param show_year_grid: Whether to show grid lines on the year axis.
-    :type show_year_grid: bool
-    """
+    :param show_year_grid: Value for `show_year_grid`.
+    :type show_year_grid: bool"""
     fig.update_xaxes(
         dtick=year_tick,
         tickmode="linear",
@@ -1469,13 +1536,12 @@ def _apply_xaxis_settings(
 
 
 def _add_reference_year_line(fig: go.Figure, reference_year: int | None) -> None:
-    """Add a vertical reference year line to a Plotly figure.
+    """ add reference year line.
 
-    :param fig: Plotly figure to update.
-    :type fig: plotly.graph_objects.Figure
-    :param reference_year: Year to draw the reference line at.
-    :type reference_year: int
-    """
+    :param fig: Value for `fig`.
+    :type fig: go.Figure
+    :param reference_year: Value for `reference_year`.
+    :type reference_year: int | None"""
     if reference_year is not None:
         fig.add_vline(
             x=reference_year,
@@ -1489,29 +1555,13 @@ def _add_reference_year_line(fig: go.Figure, reference_year: int | None) -> None
 def to_impact_year_results(
     results: Dict[int, Dict[str, Any]] | Dict[str, Any],
 ) -> Dict[int, Dict[str, Any]]:
-    """
-    Normalize different result structures into the "impact-year" format expected by plot_temporal_scores:
+    """To impact year results.
 
-        impact_year -> {"scores": float, "scores_per_root": {root: float}}
-
-    Supported inputs:
-    1) New explicit structure:
-         {"results_by_solve_year": {...}, "results_by_impact_year": {...}}
-       -> returns results_by_impact_year
-
-    2) Already impact-year structure:
-         {2024: {"scores": ..., "scores_per_root": {...}}, ...}
-       -> returned as-is
-
-    3) Legacy per-solve-year duplicated timeline structure:
-         {solve_year: {"temporal_scores_by_year": {...}, "temporal_scores_per_root_by_year": {...}, ...}, ...}
-       -> aggregated to impact-year (sums across solve years if multiple are present)
-
-    :param results: Results mapping in one of the supported formats.
-    :type results: dict
-    :returns: Impact-year results mapping.
-    :rtype: dict[int, dict[str, Any]]
-    """
+    :param results: Value for `results`.
+    :type results: Dict[int, Dict[str, Any]] | Dict[str, Any]
+    :returns: Return value.
+    :rtype: Dict[int, Dict[str, Any]]
+    :raises ValueError: If an error occurs."""
 
     # --- Case 1: New explicit structure
     if isinstance(results, dict) and "results_by_impact_year" in results:
@@ -1583,7 +1633,15 @@ def _characterized_inventory_to_results(
     characterized_inventory: xr.DataArray,
     by_flow: bool = False,
 ) -> Dict[int, Dict[str, Any]]:
-    """Convert a characterized inventory DataArray into impact-year results."""
+    """ characterized inventory to results.
+
+    :param characterized_inventory: Value for `characterized_inventory`.
+    :type characterized_inventory: xr.DataArray
+    :param by_flow: Value for `by_flow`.
+    :type by_flow: bool
+    :returns: Return value.
+    :rtype: Dict[int, Dict[str, Any]]
+    :raises ValueError: If an error occurs."""
     if "method" in characterized_inventory.dims:
         methods = characterized_inventory.coords["method"].values
         if len(methods) != 1:
@@ -1642,7 +1700,13 @@ def _characterized_inventory_to_results(
 def _characterized_inventory_to_root_results(
     characterized_inventory: xr.DataArray,
 ) -> Dict[int, Dict[str, Any]]:
-    """Convert a characterized inventory with root activity dimension into results."""
+    """ characterized inventory to root results.
+
+    :param characterized_inventory: Value for `characterized_inventory`.
+    :type characterized_inventory: xr.DataArray
+    :returns: Return value.
+    :rtype: Dict[int, Dict[str, Any]]
+    :raises ValueError: If an error occurs."""
     if "method" in characterized_inventory.dims:
         methods = characterized_inventory.coords["method"].values
         if len(methods) != 1:
@@ -1702,12 +1766,14 @@ def _characterized_inventory_to_root_results(
 
 
 def _wrap_hover_label(text: str, max_chars: int = 45) -> str:
-    """
-    Wrap text for Plotly hoverlabels by inserting <br> at word boundaries.
+    """ wrap hover label.
 
-    Plotly hoverlabels don't support fixed pixel widths reliably; wrapping the
-    content is the most consistent way to keep hover popups narrow.
-    """
+    :param text: Value for `text`.
+    :type text: str
+    :param max_chars: Value for `max_chars`.
+    :type max_chars: int
+    :returns: Return value.
+    :rtype: str"""
     if not text:
         return ""
 
@@ -1744,19 +1810,15 @@ def _scores_to_results(
     *,
     by_flow: bool = False,
 ) -> Dict[int, Dict[str, Any]]:
-    """
-    Convert a score DataArray into impact-year results.
+    """ scores to results.
 
-    Supported dims (examples):
-      - ("year",) totals only
-      - ("activity","year") or ("year","activity")
-      - ("root activity","year") or ("year","root activity")
-      - ("activity","year","root activity") or permutations -> will sum over "activity"
-      - ("flow","year") or ("year","flow") if by_flow=True
-
-    Returns:
-      impact_year -> {"scores": float, score_key: {idx: float}}
-    """
+    :param scores: Value for `scores`.
+    :type scores: xr.DataArray
+    :param by_flow: Value for `by_flow`.
+    :type by_flow: bool
+    :returns: Return value.
+    :rtype: Dict[int, Dict[str, Any]]
+    :raises ValueError: If an error occurs."""
     if "year" not in scores.dims:
         raise ValueError("scores must include a 'year' dimension.")
 
@@ -1842,7 +1904,14 @@ def _aggregate_flow_results_by_name(
     results_by_year: Dict[int, Dict[str, Any]],
     trails: Trails,
 ) -> Dict[int, Dict[str, Any]]:
-    """Aggregate per-flow results by biosphere flow name."""
+    """ aggregate flow results by name.
+
+    :param results_by_year: Value for `results_by_year`.
+    :type results_by_year: Dict[int, Dict[str, Any]]
+    :param trails: Value for `trails`.
+    :type trails: Trails
+    :returns: Return value.
+    :rtype: Dict[int, Dict[str, Any]]"""
     flow_id_to_name: dict[int, str] = {}
     for _label, meta in trails.biosphere_indices.items():
         for fid, md in meta.items():
@@ -1899,6 +1968,73 @@ def _plot_results_by_year(
     *,
     flow_groupby_name: bool = False,
 ) -> go.Figure:
+    """ plot results by year.
+
+    :param results_by_year: Value for `results_by_year`.
+    :type results_by_year: Union[Dict[int, Dict[str, Any]], Dict[str, Any], xr.DataArray]
+    :param trails: Value for `trails`.
+    :type trails: Trails
+    :param title: Value for `title`.
+    :type title: str
+    :param method_label: Value for `method_label`.
+    :type method_label: str
+    :param cumulative: Value for `cumulative`.
+    :type cumulative: bool
+    :param stacked: Value for `stacked`.
+    :type stacked: bool
+    :param legend_top_n: Value for `legend_top_n`.
+    :type legend_top_n: int
+    :param show_flow_contributions: Value for `show_flow_contributions`.
+    :type show_flow_contributions: bool
+    :param width: Value for `width`.
+    :type width: Optional[int]
+    :param height: Value for `height`.
+    :type height: Optional[int]
+    :param year_tick: Value for `year_tick`.
+    :type year_tick: int
+    :param year_range: Value for `year_range`.
+    :type year_range: Optional[Tuple[int, int]]
+    :param show_year_grid: Value for `show_year_grid`.
+    :type show_year_grid: bool
+    :param yaxis_type: Value for `yaxis_type`.
+    :type yaxis_type: Literal['linear', 'log']
+    :param log_eps: Value for `log_eps`.
+    :type log_eps: float
+    :param reference_year: Value for `reference_year`.
+    :type reference_year: Optional[int]
+    :param show_cumulative_axis: Value for `show_cumulative_axis`.
+    :type show_cumulative_axis: bool
+    :param cumulative_axis_label: Value for `cumulative_axis_label`.
+    :type cumulative_axis_label: str
+    :param legend_entrywidth: Value for `legend_entrywidth`.
+    :type legend_entrywidth: int
+    :param legend_row_height: Value for `legend_row_height`.
+    :type legend_row_height: int
+    :param legend_y: Value for `legend_y`.
+    :type legend_y: float
+    :param y2_headroom: Value for `y2_headroom`.
+    :type y2_headroom: float
+    :param show_cumulative_in_legend: Value for `show_cumulative_in_legend`.
+    :type show_cumulative_in_legend: bool
+    :param static_score: Value for `static_score`.
+    :type static_score: Optional[float]
+    :param static_score_label: Value for `static_score_label`.
+    :type static_score_label: str
+    :param static_score_dash: Value for `static_score_dash`.
+    :type static_score_dash: str
+    :param static_score_color: Value for `static_score_color`.
+    :type static_score_color: str
+    :param y_min: Value for `y_min`.
+    :type y_min: Optional[float]
+    :param y_max: Value for `y_max`.
+    :type y_max: Optional[float]
+    :param y2_max: Value for `y2_max`.
+    :type y2_max: Optional[float]
+    :param flow_groupby_name: Value for `flow_groupby_name`.
+    :type flow_groupby_name: bool
+    :returns: Return value.
+    :rtype: go.Figure
+    :raises ValueError: If an error occurs."""
 
     if isinstance(results_by_year, xr.DataArray):
         # Inventory-style arrays have a "flow" dim; score arrays generally do not.
@@ -2117,7 +2253,73 @@ def plot_temporal_scores(
     y_max: Optional[float] = None,
     y2_max: Optional[float] = None,
 ) -> go.Figure | list[go.Figure]:
-    """Plot temporal impact scores by responsible activity."""
+    """Plot temporal scores.
+
+    :param trails: Value for `trails`.
+    :type trails: Trails
+    :param title: Value for `title`.
+    :type title: str
+    :param method_label: Value for `method_label`.
+    :type method_label: str
+    :param method: Value for `method`.
+    :type method: Optional[str]
+    :param cumulative: Value for `cumulative`.
+    :type cumulative: bool
+    :param stacked: Value for `stacked`.
+    :type stacked: bool
+    :param legend_top_n: Value for `legend_top_n`.
+    :type legend_top_n: int
+    :param show_flow_contributions: Value for `show_flow_contributions`.
+    :type show_flow_contributions: bool
+    :param width: Value for `width`.
+    :type width: Optional[int]
+    :param height: Value for `height`.
+    :type height: Optional[int]
+    :param year_tick: Value for `year_tick`.
+    :type year_tick: int
+    :param year_range: Value for `year_range`.
+    :type year_range: Optional[Tuple[int, int]]
+    :param show_year_grid: Value for `show_year_grid`.
+    :type show_year_grid: bool
+    :param yaxis_type: Value for `yaxis_type`.
+    :type yaxis_type: Literal['linear', 'log']
+    :param log_eps: Value for `log_eps`.
+    :type log_eps: float
+    :param reference_year: Value for `reference_year`.
+    :type reference_year: Optional[int]
+    :param show_cumulative_axis: Value for `show_cumulative_axis`.
+    :type show_cumulative_axis: bool
+    :param cumulative_axis_label: Value for `cumulative_axis_label`.
+    :type cumulative_axis_label: str
+    :param legend_entrywidth: Value for `legend_entrywidth`.
+    :type legend_entrywidth: int
+    :param legend_row_height: Value for `legend_row_height`.
+    :type legend_row_height: int
+    :param legend_y: Value for `legend_y`.
+    :type legend_y: float
+    :param y2_headroom: Value for `y2_headroom`.
+    :type y2_headroom: float
+    :param show_cumulative_in_legend: Value for `show_cumulative_in_legend`.
+    :type show_cumulative_in_legend: bool
+    :param flow_groupby_name: Value for `flow_groupby_name`.
+    :type flow_groupby_name: bool
+    :param static_score: Value for `static_score`.
+    :type static_score: Optional[float] | dict[str, float] | list[float]
+    :param static_score_label: Value for `static_score_label`.
+    :type static_score_label: str
+    :param static_score_dash: Value for `static_score_dash`.
+    :type static_score_dash: str
+    :param static_score_color: Value for `static_score_color`.
+    :type static_score_color: str
+    :param y_min: Value for `y_min`.
+    :type y_min: Optional[float]
+    :param y_max: Value for `y_max`.
+    :type y_max: Optional[float]
+    :param y2_max: Value for `y2_max`.
+    :type y2_max: Optional[float]
+    :returns: Return value.
+    :rtype: go.Figure | list[go.Figure]
+    :raises ValueError: If an error occurs."""
     if trails.characterized_inventory is not None:
         results_by_year: Union[
             Dict[int, Dict[str, Any]], Dict[str, Any], xr.DataArray
@@ -2271,23 +2473,23 @@ def plot_top_paths_for_year(
     title: str = "Top demand paths by amount",
     amount_label: str = "Demand (amount units)",
 ) -> go.Figure:
-    """Visualize the top-N paths contributing to demand for a given year.
+    """Plot top paths for year.
 
-    :param provenance: Provenance mapping from temporal traversal.
-    :type provenance: dict[tuple[int, int], dict[tuple[int, ...], float]]
-    :param trails: Trails instance to resolve activity labels.
+    :param provenance: Value for `provenance`.
+    :type provenance: Dict[tuple[int, int], Dict[tuple[int, ...], float]]
+    :param trails: Value for `trails`.
     :type trails: Trails
-    :param year: Scenario year to visualize.
+    :param year: Value for `year`.
     :type year: int
-    :param top_n: Number of paths to show.
+    :param top_n: Value for `top_n`.
     :type top_n: int
-    :param title: Plot title.
+    :param title: Value for `title`.
     :type title: str
-    :param amount_label: Label for the amount axis.
+    :param amount_label: Value for `amount_label`.
     :type amount_label: str
-    :returns: Plotly figure.
-    :rtype: plotly.graph_objects.Figure
-    """
+    :returns: Return value.
+    :rtype: go.Figure
+    :raises ValueError: If an error occurs."""
     from collections import defaultdict
     import numpy as np
     import plotly.graph_objects as go
@@ -2343,13 +2545,12 @@ def plot_top_paths_for_year(
 
 
 def _collect_activity_meta(trails_local: Trails) -> Dict[int, Dict[str, Any]]:
-    """Collect activity metadata keyed by activity index.
+    """ collect activity meta.
 
-    :param trails_local: Trails instance with activity indices.
+    :param trails_local: Value for `trails_local`.
     :type trails_local: Trails
-    :returns: Mapping of activity index to metadata dict.
-    :rtype: dict[int, dict[str, Any]]
-    """
+    :returns: Return value.
+    :rtype: Dict[int, Dict[str, Any]]"""
     meta_by_idx: Dict[int, Dict[str, Any]] = {}
     for scen_label, mapping in trails_local.activity_indices.items():
         for idx, meta in mapping.items():
@@ -2359,15 +2560,14 @@ def _collect_activity_meta(trails_local: Trails) -> Dict[int, Dict[str, Any]]:
 
 
 def _activity_label_from_meta(act_meta: Dict[int, Dict[str, Any]], act_idx: int) -> str:
-    """Build an activity label from metadata for a given index.
+    """ activity label from meta.
 
-    :param act_meta: Mapping of activity index to metadata.
-    :type act_meta: dict[int, dict[str, Any]]
-    :param act_idx: Activity index to label.
+    :param act_meta: Value for `act_meta`.
+    :type act_meta: Dict[int, Dict[str, Any]]
+    :param act_idx: Value for `act_idx`.
     :type act_idx: int
-    :returns: Display label for the activity.
-    :rtype: str
-    """
+    :returns: Return value.
+    :rtype: str"""
     meta = act_meta.get(act_idx, {})
     name = meta.get("name", f"Activity {act_idx}")
     rp = meta.get("reference product") or ""
@@ -2385,17 +2585,17 @@ def _build_full_path_amounts(
     start_year: int,
     start_act_idx: int,
 ) -> Dict[Tuple[Tuple[int, int], ...], float]:
-    """Build full provenance paths including the root node.
+    """ build full path amounts.
 
-    :param provenance: Provenance mapping from traversal.
-    :type provenance: dict[tuple[int, int], dict[tuple, float]]
-    :param start_year: Root year.
+    :param provenance: Value for `provenance`.
+    :type provenance: Dict[tuple[int, int], Dict[tuple[int, ...], float]]
+    :param start_year: Value for `start_year`.
     :type start_year: int
-    :param start_act_idx: Root activity index.
+    :param start_act_idx: Value for `start_act_idx`.
     :type start_act_idx: int
-    :returns: Mapping of full paths to amounts.
-    :rtype: dict[tuple[tuple[int, int], ...], float]
-    """
+    :returns: Return value.
+    :rtype: Dict[Tuple[Tuple[int, int], ...], float]
+    :raises ValueError: If an error occurs."""
     full_path_amounts: Dict[Tuple[Tuple[int, int], ...], float] = defaultdict(float)
     root_node = (start_year, start_act_idx)
 
@@ -2416,15 +2616,14 @@ def _select_paths(
     full_path_amounts: Dict[Tuple[Tuple[int, int], ...], float],
     top_n_paths: int | None,
 ) -> list[tuple[tuple[tuple[int, int], ...], float]]:
-    """Select top-N paths from a full path mapping.
+    """ select paths.
 
-    :param full_path_amounts: Mapping of paths to amounts.
-    :type full_path_amounts: dict
-    :param top_n_paths: Maximum number of paths to return.
+    :param full_path_amounts: Value for `full_path_amounts`.
+    :type full_path_amounts: Dict[Tuple[Tuple[int, int], ...], float]
+    :param top_n_paths: Value for `top_n_paths`.
     :type top_n_paths: int | None
-    :returns: Selected path items.
-    :rtype: list[tuple[tuple, float]]
-    """
+    :returns: Return value.
+    :rtype: list[tuple[tuple[tuple[int, int], ...], float]]"""
     if top_n_paths is None:
         return list(full_path_amounts.items())
     return sorted(
@@ -2437,13 +2636,12 @@ def _select_paths(
 def _build_depth_map(
     selected_paths: list[tuple[tuple[tuple[int, int], ...], float]],
 ) -> tuple[list[tuple[int, int]], dict[tuple[int, int], int]]:
-    """Build node depth mapping from selected paths.
+    """ build depth map.
 
-    :param selected_paths: Selected path items.
-    :type selected_paths: list[tuple[tuple, float]]
-    :returns: Tuple of node keys and depth map.
-    :rtype: tuple[list[tuple[int, int]], dict[tuple[int, int], int]]
-    """
+    :param selected_paths: Value for `selected_paths`.
+    :type selected_paths: list[tuple[tuple[tuple[int, int], ...], float]]
+    :returns: Return value.
+    :rtype: tuple[list[tuple[int, int]], dict[tuple[int, int], int]]"""
     node_keys: set[Tuple[int, int]] = set()
     depth_map: Dict[Tuple[int, int], int] = {}
 
@@ -2465,17 +2663,17 @@ def _aggregate_link_impacts(
     dict[tuple[tuple[int, int], tuple[int, int]], float],
     dict[tuple[tuple[int, int], tuple[int, int]], dict[int, float]],
 ]:
-    """Aggregate link impacts by depth/year nodes.
+    """ aggregate link impacts.
 
-    :param selected_paths: Selected path items.
-    :type selected_paths: list[tuple[tuple, float]]
-    :param depth_map: Mapping of node to depth.
+    :param selected_paths: Value for `selected_paths`.
+    :type selected_paths: list[tuple[tuple[tuple[int, int], ...], float]]
+    :param depth_map: Value for `depth_map`.
     :type depth_map: dict[tuple[int, int], int]
-    :param node_intensity: Mapping of node to intensity.
+    :param node_intensity: Value for `node_intensity`.
     :type node_intensity: dict[tuple[int, int], float]
-    :returns: Aggregated link impacts and activity contribution mapping.
-    :rtype: tuple[dict, dict]
-    """
+    :returns: Return value.
+    :rtype: tuple[dict[tuple[tuple[int, int], tuple[int, int]], float], dict[tuple[tuple[int, int], tuple[int, int]], dict[int, float]]]
+    :raises ValueError: If an error occurs."""
     link_impact_agg: Dict[Tuple[Tuple[int, int], Tuple[int, int]], float] = defaultdict(
         float
     )
@@ -2515,13 +2713,12 @@ def _aggregate_link_impacts(
 def _build_agg_nodes(
     link_impact_agg: dict[tuple[tuple[int, int], tuple[int, int]], float],
 ) -> tuple[list[tuple[int, int]], dict[tuple[int, int], int]]:
-    """Build aggregated node list and index mapping.
+    """ build agg nodes.
 
-    :param link_impact_agg: Aggregated link impacts.
-    :type link_impact_agg: dict
-    :returns: Tuple of aggregated nodes and index mapping.
-    :rtype: tuple[list[tuple[int, int]], dict[tuple[int, int], int]]
-    """
+    :param link_impact_agg: Value for `link_impact_agg`.
+    :type link_impact_agg: dict[tuple[tuple[int, int], tuple[int, int]], float]
+    :returns: Return value.
+    :rtype: tuple[list[tuple[int, int]], dict[tuple[int, int], int]]"""
     agg_nodes: set[Tuple[int, int]] = set()
     for src_agg, tgt_agg in link_impact_agg.keys():
         agg_nodes.add(src_agg)
@@ -2537,13 +2734,12 @@ def _build_agg_nodes(
 def _compute_node_totals(
     link_impact_agg: dict[tuple[tuple[int, int], tuple[int, int]], float],
 ) -> dict[tuple[int, int], float]:
-    """Compute total incoming impact per aggregated node.
+    """ compute node totals.
 
-    :param link_impact_agg: Aggregated link impacts.
-    :type link_impact_agg: dict
-    :returns: Mapping of node to total impact.
-    :rtype: dict[tuple[int, int], float]
-    """
+    :param link_impact_agg: Value for `link_impact_agg`.
+    :type link_impact_agg: dict[tuple[tuple[int, int], tuple[int, int]], float]
+    :returns: Return value.
+    :rtype: dict[tuple[int, int], float]"""
     node_total_impact: Dict[Tuple[int, int], float] = defaultdict(float)
     for (src_agg, tgt_agg), imp in link_impact_agg.items():
         node_total_impact[tgt_agg] += imp
@@ -2553,13 +2749,12 @@ def _compute_node_totals(
 def _compute_sankey_layout(
     agg_nodes: list[tuple[int, int]],
 ) -> tuple[list[float], list[float], list[int], list[int]]:
-    """Compute Sankey node positions from aggregated nodes.
+    """ compute sankey layout.
 
-    :param agg_nodes: Aggregated nodes as ``(depth, year)`` tuples.
+    :param agg_nodes: Value for `agg_nodes`.
     :type agg_nodes: list[tuple[int, int]]
-    :returns: Tuple of node coordinates and sorted depth/year lists.
-    :rtype: tuple[list[float], list[float], list[int], list[int]]
-    """
+    :returns: Return value.
+    :rtype: tuple[list[float], list[float], list[int], list[int]]"""
     depths = sorted({d for (d, y) in agg_nodes})
     years = sorted({y for (d, y) in agg_nodes})
 
@@ -2588,17 +2783,16 @@ def _build_node_labels(
     node_total_impact: dict[tuple[int, int], float],
     amount_label: str,
 ) -> list[str]:
-    """Build labels for Sankey nodes.
+    """ build node labels.
 
-    :param agg_nodes: Aggregated nodes as ``(depth, year)`` tuples.
+    :param agg_nodes: Value for `agg_nodes`.
     :type agg_nodes: list[tuple[int, int]]
-    :param node_total_impact: Total impact per node.
+    :param node_total_impact: Value for `node_total_impact`.
     :type node_total_impact: dict[tuple[int, int], float]
-    :param amount_label: Label for impact values.
+    :param amount_label: Value for `amount_label`.
     :type amount_label: str
-    :returns: Node label strings.
-    :rtype: list[str]
-    """
+    :returns: Return value.
+    :rtype: list[str]"""
     node_labels: List[str] = []
     for d, y in agg_nodes:
         total_imp = node_total_impact.get((d, y), 0.0)
@@ -2609,13 +2803,12 @@ def _build_node_labels(
 
 
 def _assign_year_colors(years: list[int]) -> dict[int, str]:
-    """Assign colors to years using a sequential palette.
+    """ assign year colors.
 
-    :param years: Years to assign colors for.
+    :param years: Value for `years`.
     :type years: list[int]
-    :returns: Mapping of year to color string.
-    :rtype: dict[int, str]
-    """
+    :returns: Return value.
+    :rtype: dict[int, str]"""
     year_palette = px.colors.sequential.Viridis
     if len(years) > len(year_palette):
         repeats = (len(years) // len(year_palette)) + 1
@@ -2637,23 +2830,22 @@ def _build_link_arrays(
     amount_label: str,
     activity_label: Callable[[int], str],
 ) -> tuple[list[int], list[int], list[float], list[str], list[str]]:
-    """Build Sankey link arrays from aggregated impact data.
+    """ build link arrays.
 
-    :param link_impact_agg: Aggregated link impacts.
-    :type link_impact_agg: dict
-    :param edge_activity_contrib: Activity contributions per link.
-    :type edge_activity_contrib: dict
-    :param node_index_agg: Mapping of aggregated node to index.
-    :type node_index_agg: dict
-    :param year_to_color: Mapping of year to color.
+    :param link_impact_agg: Value for `link_impact_agg`.
+    :type link_impact_agg: dict[tuple[tuple[int, int], tuple[int, int]], float]
+    :param edge_activity_contrib: Value for `edge_activity_contrib`.
+    :type edge_activity_contrib: dict[tuple[tuple[int, int], tuple[int, int]], dict[int, float]]
+    :param node_index_agg: Value for `node_index_agg`.
+    :type node_index_agg: dict[tuple[int, int], int]
+    :param year_to_color: Value for `year_to_color`.
     :type year_to_color: dict[int, str]
-    :param amount_label: Label for impact values.
+    :param amount_label: Value for `amount_label`.
     :type amount_label: str
-    :param activity_label: Function to label activity indices.
-    :type activity_label: callable
-    :returns: Link source/target/value/color/hovertemplate arrays.
-    :rtype: tuple[list[int], list[int], list[float], list[str], list[str]]
-    """
+    :param activity_label: Value for `activity_label`.
+    :type activity_label: Callable[[int], str]
+    :returns: Return value.
+    :rtype: tuple[list[int], list[int], list[float], list[str], list[str]]"""
     link_sources: List[int] = []
     link_targets: List[int] = []
     link_values: List[float] = []
@@ -2708,51 +2900,45 @@ def plot_temporal_sankey(
     top_n_paths: int | None = 30,
     title: str = "Temporal Sankey (impact-weighted, aggregated by year)",
     amount_label: str = "Impact score",
-    fig_width: int = 1200,
-    fig_height: int = 800,
+    fig_width: int = 1600,
+    fig_height: int | None = None,
     node_thickness: int = 20,
     node_pad: int = 15,
     font_size: int = 11,
     filename: str | None = None,
 ) -> go.Figure:
-    """Build an impact-weighted temporal Sankey plot.
+    """Plot temporal sankey.
 
-    Nodes are aggregated by ``(depth, year)`` and links are impact-weighted
-    sums between those nodes, preserving activity-level contributions in
-    hover text.
-
-    :param provenance: Provenance mapping from traversal or a Sankey tree from
-        ``build_temporal_sankey_tree``.
-    :type provenance: dict
-    :param trails: Trails instance for metadata.
+    :param provenance: Value for `provenance`.
+    :type provenance: Dict[tuple[int, int], Dict[tuple[tuple[int, int], ...], float]] | dict[str, Any]
+    :param trails: Value for `trails`.
     :type trails: Trails
-    :param start_year: Root demand year.
+    :param start_year: Value for `start_year`.
     :type start_year: int
-    :param start_act_idx: Root activity index.
+    :param start_act_idx: Value for `start_act_idx`.
     :type start_act_idx: int
-    :param node_intensity: Impact intensities keyed by ``(year, act_idx)``.
-    :type node_intensity: dict[tuple[int, int], float] | None
-    :param top_n_paths: Number of paths to include (``None`` for all).
+    :param node_intensity: Value for `node_intensity`.
+    :type node_intensity: Optional[Dict[Tuple[int, int], float]]
+    :param top_n_paths: Value for `top_n_paths`.
     :type top_n_paths: int | None
-    :param title: Figure title.
+    :param title: Value for `title`.
     :type title: str
-    :param amount_label: Label for impact values.
+    :param amount_label: Value for `amount_label`.
     :type amount_label: str
-    :param fig_width: Figure width in pixels.
+    :param fig_width: Value for `fig_width`.
     :type fig_width: int
-    :param fig_height: Figure height in pixels.
-    :type fig_height: int
-    :param node_thickness: Node thickness in pixels.
+    :param fig_height: Value for `fig_height`.
+    :type fig_height: int | None
+    :param node_thickness: Value for `node_thickness`.
     :type node_thickness: int
-    :param node_pad: Node padding in pixels.
+    :param node_pad: Value for `node_pad`.
     :type node_pad: int
-    :param font_size: Font size for labels.
+    :param font_size: Value for `font_size`.
     :type font_size: int
-    :param filename: Optional HTML filename to write the figure to disk.
+    :param filename: Value for `filename`.
     :type filename: str | None
-    :returns: Plotly figure.
-    :rtype: plotly.graph_objects.Figure
-    """
+    :returns: Return value.
+    :rtype: go.Figure"""
 
     # If given a Sankey tree (from build_temporal_sankey_tree), use the tree path.
     if isinstance(provenance, dict) and "node" in provenance and "children" in provenance:
@@ -2854,6 +3040,797 @@ def plot_temporal_sankey(
     return fig
 
 
+def plot_temporal_sankey_graphlike(
+    trails: Trails,
+    *,
+    min_edge_amount: float = 0.0,
+    edge_weight: Literal["amount", "score"] = "amount",
+    node_scores: dict[tuple[int, int], float] | None = None,
+    title: str = "Temporal Sankey (graph-like layout)",
+    amount_label: str = "Impact score",
+    fig_width: int = 1200,
+    fig_height: int = 800,
+    node_thickness: int = 14,
+    node_pad: int = 8,
+    font_size: int = 11,
+    max_label_chars: int = 28,
+    layout_by_year_depth: bool = True,
+    year_scale: float = 300.0,
+    depth_scale: float = 2000.0,
+    auto_depth_scale: bool = True,
+    orientation: Literal["year_x_depth_y", "depth_x_year_y"] = "year_x_depth_y",
+    y_padding: float = 0.04,
+    branch_dropdown: bool = True,
+    depth_dropdown: bool = True,
+    default_depth_level: int = 1,
+    min_display_value: float | None = None,
+    year_slider: bool = True,
+    filename: str | None = None,
+) -> go.Figure:
+    """Plot temporal sankey graphlike.
+
+    :param trails: Value for `trails`.
+    :type trails: Trails
+    :param min_edge_amount: Value for `min_edge_amount`.
+    :type min_edge_amount: float
+    :param edge_weight: Value for `edge_weight`.
+    :type edge_weight: Literal['amount', 'score']
+    :param node_scores: Value for `node_scores`.
+    :type node_scores: dict[tuple[int, int], float] | None
+    :param title: Value for `title`.
+    :type title: str
+    :param amount_label: Value for `amount_label`.
+    :type amount_label: str
+    :param fig_width: Value for `fig_width`.
+    :type fig_width: int
+    :param fig_height: Value for `fig_height`.
+    :type fig_height: int
+    :param node_thickness: Value for `node_thickness`.
+    :type node_thickness: int
+    :param node_pad: Value for `node_pad`.
+    :type node_pad: int
+    :param font_size: Value for `font_size`.
+    :type font_size: int
+    :param max_label_chars: Value for `max_label_chars`.
+    :type max_label_chars: int
+    :param layout_by_year_depth: Value for `layout_by_year_depth`.
+    :type layout_by_year_depth: bool
+    :param year_scale: Value for `year_scale`.
+    :type year_scale: float
+    :param depth_scale: Value for `depth_scale`.
+    :type depth_scale: float
+    :param auto_depth_scale: Value for `auto_depth_scale`.
+    :type auto_depth_scale: bool
+    :param orientation: Value for `orientation`.
+    :type orientation: Literal['year_x_depth_y', 'depth_x_year_y']
+    :param y_padding: Value for `y_padding`.
+    :type y_padding: float
+    :param branch_dropdown: Value for `branch_dropdown`.
+    :type branch_dropdown: bool
+    :param depth_dropdown: Value for `depth_dropdown`.
+    :type depth_dropdown: bool
+    :param default_depth_level: Value for `default_depth_level`.
+    :type default_depth_level: int
+    :param min_display_value: Value for `min_display_value`.
+    :type min_display_value: float | None
+    :param year_slider: Value for `year_slider`.
+    :type year_slider: bool
+    :param filename: Value for `filename`.
+    :type filename: str | None
+    :returns: Return value.
+    :rtype: go.Figure
+    :raises RuntimeError: If an error occurs.
+    :raises ValueError: If an error occurs."""
+    G = getattr(trails, "graph", None)
+    if G is None:
+        raise RuntimeError(
+            "Trails graph is missing; run trails.temporal_routing(...) first."
+        )
+
+    if edge_weight == "score" and node_scores is None:
+        node_scores = _node_scores_from_trails(trails)
+
+    # Prefer explicit label from caller, else try to infer from characterized inventory.
+    score_unit = amount_label
+    if amount_label == "Impact score":
+        try:
+            char = getattr(trails, "characterized_inventory", None)
+            if char is not None and "unit" in char.attrs:
+                score_unit = str(char.attrs["unit"])
+        except Exception:
+            pass
+    # Prefer explicit label from caller, else try to infer from characterized inventory.
+    score_unit = amount_label
+    if amount_label == "Impact score":
+        try:
+            char = getattr(trails, "characterized_inventory", None)
+            if char is not None and "unit" in char.attrs:
+                score_unit = str(char.attrs["unit"])
+        except Exception:
+            pass
+
+    edges: list[tuple[tuple, tuple, float]] = []
+    for u, v, data in G.edges(data=True):
+        amt = float(data.get("amount", 0.0))
+        if abs(amt) < float(min_edge_amount):
+            continue
+        value = abs(amt)
+        if value == 0.0:
+            continue
+        edges.append((u, v, amt))
+
+    if not edges:
+        raise ValueError("No edges meet the filter criteria; nothing to plot.")
+
+    node_ids: dict[tuple, int] = {}
+    nodes: list[tuple] = []
+    for u, v, _ in edges:
+        if u not in node_ids:
+            node_ids[u] = len(nodes)
+            nodes.append(u)
+        if v not in node_ids:
+            node_ids[v] = len(nodes)
+            nodes.append(v)
+
+    years = [float(G.nodes[n].get("year", 0.0)) for n in nodes]
+    depths = [float(G.nodes[n].get("depth", 0.0)) for n in nodes]
+    min_year = min(years) if years else 0.0
+    max_year = max(years) if years else 0.0
+    min_depth = min(depths) if depths else 0.0
+    max_depth_val = max(depths) if depths else 0.0
+    year_mid = (min_year + max_year) / 2.0
+    depth_mid = 0.0
+
+    depth_buckets: dict[int, list[tuple[object, dict]]] = {}
+    for n in nodes:
+        d = G.nodes.get(n, {})
+        depth_buckets.setdefault(int(d.get("depth", 0)), []).append((n, d))
+
+    depth_offsets: dict[object, float] = {}
+    max_bands_per_depth = 1
+    for depth, items in depth_buckets.items():
+        band_map: dict[tuple[str, str, str], list[tuple[object, dict]]] = {}
+        for n, d in items:
+            key = (
+                str(d.get("name", "")),
+                str(d.get("reference_product", "")),
+                str(d.get("location", "")),
+            )
+            band_map.setdefault(key, []).append((n, d))
+        bands = sorted(band_map.items(), key=lambda it: it[0])
+        if not bands:
+            continue
+        max_bands_per_depth = max(max_bands_per_depth, len(bands))
+        band_step = 32.0
+        band_start = -band_step * (len(bands) - 1) / 2.0
+        for band_idx, (_key, band_items) in enumerate(bands):
+            band_offset = band_start + band_idx * band_step
+            max_offset = float(depth_scale) * 0.35
+            band_offset = max(min(band_offset, max_offset), -max_offset)
+            for n, _ in band_items:
+                depth_offsets[n] = band_offset
+    if auto_depth_scale:
+        max_band_offset = (24.0 * (max_bands_per_depth - 1)) / 2.0
+        depth_scale = max(float(depth_scale), 2.0 * max_band_offset + 200.0)
+
+    if layout_by_year_depth:
+        xs: list[float] = []
+        ys: list[float] = []
+        for n in nodes:
+            d = G.nodes.get(n, {})
+            year = float(d.get("year", 0.0))
+            depth = float(d.get("depth", 0.0))
+            if orientation == "depth_x_year_y":
+                x = (depth - depth_mid) * float(depth_scale) + float(
+                    depth_offsets.get(n, 0.0)
+                )
+                y = (year - year_mid) * float(year_scale)
+            else:
+                x = (year - year_mid) * float(year_scale)
+                y = -(depth - depth_mid) * float(depth_scale) + float(
+                    depth_offsets.get(n, 0.0)
+                )
+            xs.append(x)
+            ys.append(y)
+        min_x = min(xs) if xs else 0.0
+        max_x = max(xs) if xs else 1.0
+        min_y = min(ys) if ys else 0.0
+        max_y = max(ys) if ys else 1.0
+        x_span = max_x - min_x
+        y_span = max_y - min_y
+        node_x = [(x - min_x) / x_span if x_span else 0.5 for x in xs]
+        node_y = [(y - min_y) / y_span if y_span else 0.5 for y in ys]
+
+        # If rotated, keep early years at the top and center the root node vertically.
+        if orientation == "depth_x_year_y":
+            for idx, n in enumerate(nodes):
+                depth = int(G.nodes.get(n, {}).get("depth", 0))
+                if depth == 0:
+                    node_y[idx] = 0.5
+            # Keep nodes away from edges so labels don't flip sides as much.
+            node_x = [min(0.88, max(0.08, x)) for x in node_x]
+        # Apply padding to avoid truncation at bounds
+        effective_pad = max(float(y_padding), 0.03)
+        node_y = [
+            min(1.0 - effective_pad, max(effective_pad, y)) for y in node_y
+        ]
+    else:
+        node_x = [0.5 for _ in nodes]
+        node_y = [0.5 for _ in nodes]
+
+    act_meta = _collect_activity_meta(trails)
+
+    def _shorten(text: str, limit: int) -> str:
+        """ shorten.
+
+    :param text: Value for `text`.
+    :type text: str
+    :param limit: Value for `limit`.
+    :type limit: int
+    :returns: Return value.
+    :rtype: str"""
+        if limit <= 0 or len(text) <= limit:
+            return text
+        return text[: max(0, limit - 1)] + "…"
+
+    labels: list[str] = []
+    for node in nodes:
+        data = G.nodes.get(node, {})
+        act_idx = int(data.get("act_idx", -1))
+        year = int(data.get("year", -1))
+        meta = act_meta.get(act_idx, {})
+        name = (meta.get("name") or "").strip()
+        ref = (meta.get("reference product") or "").strip()
+        loc = (meta.get("location") or "").strip()
+        base = " | ".join([p for p in (name, ref, loc) if p])
+        base = _shorten(base, max_label_chars)
+        labels.append(f"{base} ({year})" if base else f"Activity {act_idx} ({year})")
+
+    # Color edges by first-level branch (reference product), and propagate down.
+    palette = [
+        "#4c78a8",
+        "#f58518",
+        "#54a24b",
+        "#e45756",
+        "#72b7b2",
+        "#b279a2",
+        "#ff9da6",
+        "#9d755d",
+        "#bab0ac",
+    ]
+    depth0_nodes = [n for n in nodes if int(G.nodes.get(n, {}).get("depth", 0)) == 0]
+    edge_colors: dict[tuple, str] = {}
+    node_branch_color: dict = {}
+    color_idx = 0
+
+    def _branch_key(node: object) -> str:
+        """ branch key.
+
+    :param node: Value for `node`.
+    :type node: object
+    :returns: Return value.
+    :rtype: str"""
+        data = G.nodes.get(node, {})
+        meta = act_meta.get(int(data.get("act_idx", -1)), {})
+        return str(meta.get("reference product") or "")
+
+    key_colors: dict[str, str] = {}
+    for n in depth0_nodes:
+        for _, child in G.out_edges(n):
+            key = _branch_key(child)
+            if key in key_colors:
+                color = key_colors[key]
+            else:
+                color = palette[color_idx % len(palette)]
+                color_idx += 1
+                key_colors[key] = color
+            edge_colors[(n, child)] = color
+            node_branch_color[child] = color
+            queue = [child]
+            while queue:
+                cur = queue.pop(0)
+                for _, nxt in G.out_edges(cur):
+                    if nxt not in node_branch_color:
+                        node_branch_color[nxt] = color
+                        queue.append(nxt)
+
+    def _edge_color(u: object, v: object) -> str:
+        """ edge color.
+
+    :param u: Value for `u`.
+    :type u: object
+    :param v: Value for `v`.
+    :type v: object
+    :returns: Return value.
+    :rtype: str"""
+        src_depth = int(G.nodes.get(u, {}).get("depth", 0))
+        if src_depth == 0:
+            return edge_colors.get((u, v), "#999999")
+        return node_branch_color.get(u, "#999999")
+
+    # Compute edge scores (if available) and base values for scaling.
+    incoming_abs: dict[object, float] = defaultdict(float)
+    for u, v, raw_amt in edges:
+        incoming_abs[v] += abs(float(raw_amt))
+
+    edge_scores: list[float] = []
+    base_values: list[float] = []
+    for u, v, raw_amt in edges:
+        amt_abs = abs(float(raw_amt))
+        if edge_weight == "score":
+            vdata = G.nodes.get(v, {})
+            year = int(vdata.get("year", -1))
+            act = int(vdata.get("act_idx", -1))
+            child_score = float((node_scores or {}).get((year, act), 0.0))
+            denom = float(incoming_abs.get(v, 0.0))
+            score_val = child_score * (amt_abs / denom) if denom > 0.0 else 0.0
+            base_values.append(score_val)
+            edge_scores.append(score_val)
+        else:
+            base_values.append(amt_abs)
+            # still compute score for hover if we can
+            vdata = G.nodes.get(v, {})
+            year = int(vdata.get("year", -1))
+            act = int(vdata.get("act_idx", -1))
+            child_score = float((node_scores or {}).get((year, act), 0.0))
+            denom = float(incoming_abs.get(v, 0.0))
+            score_val = child_score * (amt_abs / denom) if denom > 0.0 else 0.0
+            edge_scores.append(score_val)
+
+    # Enforce flow conservation so node heights do not exceed incoming links.
+    incoming_sum: dict[object, float] = defaultdict(float)
+    outgoing_sum: dict[object, float] = defaultdict(float)
+    for (u, v, _), val in zip(edges, base_values):
+        incoming_sum[v] += float(val)
+        outgoing_sum[u] += float(val)
+
+    adjusted_edges: list[tuple[object, object, float, float, float]] = []
+    for (u, v, raw_amt), val, score in zip(edges, base_values, edge_scores):
+        depth_u = int(G.nodes.get(u, {}).get("depth", 0))
+        scale = 1.0
+        if depth_u > 0:
+            inc = float(incoming_sum.get(u, 0.0))
+            out = float(outgoing_sum.get(u, 0.0))
+            if out > 0.0 and inc > 0.0:
+                scale = inc / out
+        adjusted_edges.append((u, v, float(val) * scale, abs(float(raw_amt)), float(score)))
+
+    link_sources = [node_ids[u] for u, _, _, _, _ in adjusted_edges]
+    link_targets = [node_ids[v] for _, v, _, _, _ in adjusted_edges]
+    link_values = [val for _, _, val, _, _ in adjusted_edges]
+    if min_display_value is not None:
+        floor = float(min_display_value)
+        if floor > 0.0:
+            link_values = [max(v, floor) for v in link_values]
+    link_colors = [_edge_color(u, v) for u, v, _, _, _ in adjusted_edges]
+
+    # Node color = color of dominant incoming edge (or branch color).
+    incoming_color: dict[object, str] = {}
+    incoming_value: dict[object, float] = defaultdict(float)
+    for u, v, val, _, _ in adjusted_edges:
+        color = _edge_color(u, v)
+        if val > incoming_value.get(v, 0.0):
+            incoming_value[v] = val
+            incoming_color[v] = color
+    node_colors = []
+    for n in nodes:
+        depth = int(G.nodes.get(n, {}).get("depth", 0))
+        if depth == 0:
+            node_colors.append("#cccccc")
+        else:
+            node_colors.append(incoming_color.get(n, node_branch_color.get(n, "#cccccc")))
+
+    def _with_alpha(color: str, alpha: float) -> str:
+        """ with alpha.
+
+    :param color: Value for `color`.
+    :type color: str
+    :param alpha: Value for `alpha`.
+    :type alpha: float
+    :returns: Return value.
+    :rtype: str"""
+        if color.startswith("rgba"):
+            parts = color.strip("rgba()").split(",")
+            if len(parts) >= 3:
+                return f"rgba({parts[0]},{parts[1]},{parts[2]},{alpha})"
+        if color.startswith("#") and len(color) == 7:
+            r = int(color[1:3], 16)
+            g = int(color[3:5], 16)
+            b = int(color[5:7], 16)
+            return f"rgba({r},{g},{b},{alpha})"
+        return color
+
+    customdata = []
+    for (u, v, _, amt, score) in adjusted_edges:
+        udata = G.nodes.get(u, {})
+        vdata = G.nodes.get(v, {})
+        u_act = int(udata.get("act_idx", -1))
+        v_act = int(vdata.get("act_idx", -1))
+        u_year = int(udata.get("year", -1))
+        v_year = int(vdata.get("year", -1))
+        u_meta = act_meta.get(u_act, {})
+        v_meta = act_meta.get(v_act, {})
+        u_name = (u_meta.get("name") or "").strip()
+        u_ref = (u_meta.get("reference product") or "").strip()
+        u_loc = (u_meta.get("location") or "").strip()
+        v_name = (v_meta.get("name") or "").strip()
+        v_ref = (v_meta.get("reference product") or "").strip()
+        v_loc = (v_meta.get("location") or "").strip()
+        u_label = " | ".join([p for p in (u_name, u_ref, u_loc) if p])
+        v_label = " | ".join([p for p in (v_name, v_ref, v_loc) if p])
+        v_unit = (v_meta.get("unit") or "").strip()
+        customdata.append(
+            [
+                u_label,
+                u_year,
+                v_label,
+                v_year,
+                float(amt),
+                float(score),
+                v_unit,
+            ]
+        )
+
+    # Node-level amount (incoming) for hover, plus root amount from routing params
+    node_amounts: dict[object, float] = defaultdict(float)
+    for (u, v, _raw_amt) in edges:
+        node_amounts[v] += abs(float(_raw_amt))
+    routing_params = getattr(trails, "_routing_params", {}) or {}
+    if routing_params:
+        root_year = int(routing_params.get("start_year", -1))
+        root_act = int(routing_params.get("start_act_idx", -1))
+        root_amt = abs(float(routing_params.get("amount", 0.0)))
+        for n in nodes:
+            data = G.nodes.get(n, {})
+            if (
+                int(data.get("year", -1)) == root_year
+                and int(data.get("act_idx", -1)) == root_act
+            ):
+                node_amounts[n] = root_amt
+
+    node_customdata = []
+    for n in nodes:
+        data = G.nodes.get(n, {})
+        act_idx = int(data.get("act_idx", -1))
+        year = int(data.get("year", -1))
+        meta = act_meta.get(act_idx, {})
+        name = (meta.get("name") or "").strip()
+        ref = (meta.get("reference product") or "").strip()
+        loc = (meta.get("location") or "").strip()
+        unit = (meta.get("unit") or "").strip()
+        label = " | ".join([p for p in (name, ref, loc) if p])
+        score_val = float((node_scores or {}).get((year, act_idx), 0.0))
+        node_customdata.append(
+            [label, year, unit, float(node_amounts.get(n, 0.0)), score_val]
+        )
+
+    sankey = go.Sankey(
+        arrangement="snap",
+        node=dict(
+            pad=node_pad,
+            thickness=node_thickness,
+            label=["" for _ in labels],
+            x=node_x,
+            y=node_y,
+            color=node_colors,
+            customdata=node_customdata,
+            hovertemplate=(
+                "%{customdata[0]} (%{customdata[1]})"
+                "<br>amount=%{customdata[3]:.2e} %{customdata[2]}"
+                f"<br>score=%{{customdata[4]:.2e}} {score_unit}"
+                "<extra></extra>"
+            ),
+        ),
+        link=dict(
+            source=link_sources,
+            target=link_targets,
+            value=link_values,
+            color=link_colors,
+            customdata=customdata,
+            hovertemplate=(
+                "source=%{customdata[0]} (%{customdata[1]})"
+                "<br>target=%{customdata[2]} (%{customdata[3]})"
+                "<br>amount=%{customdata[4]:.2e} %{customdata[6]} | "
+                f"score=%{{customdata[5]:.2e}} {score_unit}"
+                "<extra></extra>"
+            ),
+            hoverinfo="all",
+        ),
+    )
+    # Auto height if not provided
+    if fig_height is None:
+        if orientation == "depth_x_year_y":
+            year_count = len({int(y) for y in years})
+            fig_height = max(1200, min(3200, int(year_count * 3.5)))
+        else:
+            # Fall back to node count-based heuristic
+            fig_height = max(900, min(2000, int(len(nodes) * 6)))
+
+    fig = go.Figure(sankey)
+    fig.update_layout(
+        title=title,
+        width=fig_width,
+        height=int(fig_height),
+        margin=dict(l=40, r=40, t=60, b=140),
+        font=dict(size=font_size),
+    )
+    if depth_dropdown:
+        max_depth = max(
+            int(G.nodes.get(n, {}).get("depth", 0)) for n in nodes
+        ) if nodes else 0
+        max_depth = max(max_depth, 0)
+        def _depth_mask(level: int) -> tuple[list[str], list[str]]:
+            """ depth mask.
+
+    :param level: Value for `level`.
+    :type level: int
+    :returns: Return value.
+    :rtype: tuple[list[str], list[str]]"""
+            node_colors_sel = []
+            for n, c in zip(nodes, node_colors):
+                depth = int(G.nodes.get(n, {}).get("depth", 0))
+                if depth <= level:
+                    node_colors_sel.append(c)
+                else:
+                    node_colors_sel.append(_with_alpha(c, 0.05))
+            link_colors_sel = []
+            for (u, v, _, _, _), c in zip(adjusted_edges, link_colors):
+                depth_u = int(G.nodes.get(u, {}).get("depth", 0))
+                depth_v = int(G.nodes.get(v, {}).get("depth", 0))
+                if depth_u <= level and depth_v <= level:
+                    link_colors_sel.append(c)
+                else:
+                    link_colors_sel.append(_with_alpha(c, 0.05))
+            return node_colors_sel, link_colors_sel
+
+        depth_buttons = []
+        for level in range(1, max_depth + 1):
+            node_colors_sel, link_colors_sel = _depth_mask(level)
+            depth_buttons.append(
+                dict(
+                    label=f"Depth ≤ {level}",
+                    method="update",
+                    args=[
+                        {
+                            "node.color": [node_colors_sel],
+                            "link.color": [link_colors_sel],
+                        }
+                    ],
+                )
+            )
+
+        # Apply default depth level on init
+        default_level = min(max(default_depth_level, 1), max_depth)
+        init_node_colors, init_link_colors = _depth_mask(default_level)
+        fig.update_traces(node=dict(color=init_node_colors), link=dict(color=init_link_colors))
+
+        fig.update_layout(
+            updatemenus=[
+                dict(
+                    type="dropdown",
+                    direction="down",
+                    x=0.0,
+                    y=1.0,
+                    xanchor="left",
+                    yanchor="top",
+                    showactive=True,
+                    buttons=depth_buttons,
+                )
+            ]
+        )
+    if branch_dropdown:
+        # Build branch groups from depth-1 nodes (by name only)
+        depth0 = [n for n in nodes if int(G.nodes.get(n, {}).get("depth", 0)) == 0]
+        depth1_children = []
+        for n in depth0:
+            depth1_children.extend([v for _, v in G.out_edges(n)])
+        branch_map: dict[str, list[object]] = {}
+        for child in depth1_children:
+            meta = act_meta.get(int(G.nodes.get(child, {}).get("act_idx", -1)), {})
+            name = str(meta.get("name") or "").strip()
+            if not name:
+                name = f"Activity {int(G.nodes.get(child, {}).get('act_idx', -1))}"
+            branch_map.setdefault(name, []).append(child)
+
+        # Precompute descendants per branch
+        descendants: dict[str, set[object]] = {}
+        for name, roots in branch_map.items():
+            seen = set()
+            queue = list(roots)
+            while queue:
+                cur = queue.pop(0)
+                if cur in seen:
+                    continue
+                seen.add(cur)
+                for _, nxt in G.out_edges(cur):
+                    if nxt not in seen:
+                        queue.append(nxt)
+            descendants[name] = seen
+
+        base_node_colors = node_colors[:]
+        base_link_colors = link_colors[:]
+
+        buttons = []
+        buttons.append(
+            dict(
+                label="All",
+                method="update",
+                args=[
+                    {
+                        "node.color": [base_node_colors],
+                        "link.color": [base_link_colors],
+                    }
+                ],
+            )
+        )
+
+        for name, nodes_in_branch in sorted(descendants.items()):
+            node_colors_sel = []
+            for n, c in zip(nodes, base_node_colors):
+                if n in nodes_in_branch or int(G.nodes.get(n, {}).get("depth", 0)) == 0:
+                    node_colors_sel.append(c)
+                else:
+                    node_colors_sel.append(_with_alpha(c, 0.05))
+
+            link_colors_sel = []
+            for (u, v, _, _, _), c in zip(adjusted_edges, base_link_colors):
+                if u in nodes_in_branch or v in nodes_in_branch:
+                    link_colors_sel.append(c)
+                else:
+                    link_colors_sel.append(_with_alpha(c, 0.05))
+
+            buttons.append(
+                dict(
+                    label=name,
+                    method="update",
+                    args=[
+                        {
+                            "node.color": [node_colors_sel],
+                            "link.color": [link_colors_sel],
+                        }
+                    ],
+                )
+            )
+
+        existing_menus = list(fig.layout.updatemenus) if fig.layout.updatemenus else []
+        existing_menus.append(
+            dict(
+                type="dropdown",
+                direction="down",
+                x=1.02,
+                y=1.0,
+                xanchor="left",
+                yanchor="top",
+                showactive=True,
+                buttons=buttons,
+            )
+        )
+        fig.update_layout(updatemenus=existing_menus)
+    if filename:
+        if year_slider:
+            _write_sankey_html_with_year_slider(
+                fig=fig,
+                filename=filename,
+                div_id="trails-sankey-graphlike",
+            )
+        else:
+            fig.write_html(filename)
+    return fig
+
+
+def _write_sankey_html_with_year_slider(
+    *,
+    fig: go.Figure,
+    filename: str,
+    div_id: str,
+) -> None:
+    """ write sankey html with year slider.
+
+    :param fig: Value for `fig`.
+    :type fig: go.Figure
+    :param filename: Value for `filename`.
+    :type filename: str
+    :param div_id: Value for `div_id`.
+    :type div_id: str"""
+    html = pio.to_html(
+        fig,
+        full_html=True,
+        include_plotlyjs="cdn",
+        div_id=div_id,
+    )
+    slider_html = """
+<div id="trails-year-slider-wrap" style="max-width:1200px;margin:0 auto 6px;display:flex;flex-direction:column;align-items:center;">
+  <div id="trails-year-slider" style="width:70%;"></div>
+  <div id="trails-year-range" style="font-size:12px;margin-top:6px;"></div>
+</div>
+"""
+    script = f"""
+<script src="https://cdn.jsdelivr.net/npm/nouislider@15.7.1/dist/nouislider.min.js"></script>
+<link href="https://cdn.jsdelivr.net/npm/nouislider@15.7.1/dist/nouislider.min.css" rel="stylesheet">
+<script>
+(function() {{
+  var gd = document.getElementById("{div_id}");
+  if (!gd || !gd.data || !gd.data.length) return;
+  var link = gd.data[0].link || {{}};
+  var custom = link.customdata || [];
+  var years = custom.map(function(cd) {{ return Number(cd[3]); }}).filter(function(v) {{ return !isNaN(v); }});
+  if (!years.length) return;
+  var minY = Math.min.apply(null, years);
+  var maxY = Math.max.apply(null, years);
+  var slider = document.getElementById("trails-year-slider");
+  var origValues = (link.value || []).slice();
+  var origColors = (link.color || []).slice();
+
+  function withAlpha(color, a) {{
+    if (!color) return color;
+    if (color.startsWith("rgba")) {{
+      var parts = color.replace("rgba(", "").replace(")", "").split(",");
+      if (parts.length >= 3) {{
+        return "rgba(" + parts[0] + "," + parts[1] + "," + parts[2] + "," + a + ")";
+      }}
+    }}
+    if (color.startsWith("#") && color.length === 7) {{
+      var r = parseInt(color.slice(1,3), 16);
+      var g = parseInt(color.slice(3,5), 16);
+      var b = parseInt(color.slice(5,7), 16);
+      return "rgba(" + r + "," + g + "," + b + "," + a + ")";
+    }}
+    return color;
+  }}
+
+  noUiSlider.create(slider, {{
+    start: [minY, maxY],
+    connect: true,
+    step: 1,
+    range: {{ min: minY, max: maxY }},
+    tooltips: [true, true],
+    format: {{
+      to: function(v) {{ return String(Math.round(v)); }},
+      from: function(v) {{ return Number(v); }}
+    }}
+  }});
+
+  // Fallback range display under the slider
+  var rangeEl = document.getElementById("trails-year-range");
+  function updateRange(values) {{
+    if (rangeEl) {{
+      rangeEl.textContent = "Selected years: " + values[0] + " – " + values[1];
+    }}
+  }}
+  updateRange(slider.noUiSlider.get());
+
+  slider.noUiSlider.on("update", function(values) {{
+    var lo = Number(values[0]);
+    var hi = Number(values[1]);
+    updateRange(values);
+    var newValues = [];
+    var newColors = [];
+    for (var i = 0; i < custom.length; i++) {{
+      var y = Number(custom[i][3]);
+      if (y >= lo && y <= hi) {{
+        newValues.push(origValues[i]);
+        newColors.push(origColors[i]);
+      }} else {{
+        newValues.push(0);
+        newColors.push(withAlpha(origColors[i], 0.02));
+      }}
+    }}
+    Plotly.restyle(gd, {{
+      "link.value": [newValues],
+      "link.color": [newColors]
+    }});
+  }});
+}})();
+</script>
+"""
+    marker = f'<div id="{div_id}"'
+    if marker in html:
+        html = html.replace(marker, slider_html + marker)
+    html = html.replace("</body>", script + "</body>")
+    with open(filename, "w", encoding="utf-8") as f:
+        f.write(html)
+
+
 def build_sankey_arrays_from_tree(
     tree: dict[str, Any],
     *,
@@ -2863,27 +3840,33 @@ def build_sankey_arrays_from_tree(
     trails: Trails | None = None,
     score_years: list[int] | None = None,
 ) -> dict[str, list]:
-    """Convert a nested tree from lca.build_temporal_sankey_tree into Sankey arrays.
+    """Build sankey arrays from tree.
 
-    :param tree: Nested tree dict with "node" and "children" entries.
-    :type tree: dict
-    :param label_fn: Optional function to build labels from a node payload.
-    :type label_fn: callable | None
-    :param edge_weight: Use "amount" (technosphere) or "score" (characterized).
-    :type edge_weight: Literal["amount", "score"]
-    :param node_scores: Optional mapping (year, act_idx) -> characterized score.
+    :param tree: Value for `tree`.
+    :type tree: dict[str, Any]
+    :param label_fn: Value for `label_fn`.
+    :type label_fn: Callable[[dict[str, Any]], str] | None
+    :param edge_weight: Value for `edge_weight`.
+    :type edge_weight: Literal['amount', 'score']
+    :param node_scores: Value for `node_scores`.
     :type node_scores: dict[tuple[int, int], float] | None
-    :param trails: Trails instance used to derive node_scores from trails.scores.
+    :param trails: Value for `trails`.
     :type trails: Trails | None
-    :param score_years: Optional list of years to align scores to node years.
+    :param score_years: Value for `score_years`.
     :type score_years: list[int] | None
-    :returns: Dict with "labels", "sources", "targets", "values", "node_meta".
-    :rtype: dict
-    """
+    :returns: Return value.
+    :rtype: dict[str, list]
+    :raises ValueError: If an error occurs."""
     if not tree or "node" not in tree:
         raise ValueError("Tree is empty or missing 'node' key.")
 
     def _default_label(node: dict[str, Any]) -> str:
+        """ default label.
+
+    :param node: Value for `node`.
+    :type node: dict[str, Any]
+    :returns: Return value.
+    :rtype: str"""
         name = node.get("name") or f"Activity {node.get('act_idx')}"
         rp = node.get("reference_product") or ""
         loc = node.get("location") or ""
@@ -2905,6 +3888,12 @@ def build_sankey_arrays_from_tree(
     edge_scores: list[float] = []
 
     def _node_key(node_payload: dict[str, Any]) -> Any:
+        """ node key.
+
+    :param node_payload: Value for `node_payload`.
+    :type node_payload: dict[str, Any]
+    :returns: Return value.
+    :rtype: Any"""
         key = node_payload.get("key")
         if key is None:
             return (
@@ -2944,6 +3933,10 @@ def build_sankey_arrays_from_tree(
     year_map: dict[int, int] = {}
 
     def _precompute_incoming(subtree: dict[str, Any]) -> None:
+        """ precompute incoming.
+
+    :param subtree: Value for `subtree`.
+    :type subtree: dict[str, Any]"""
         for child in subtree.get("children", []):
             edge_amt = float(child.get("edge_amount") or 0.0)
             child_payload = child.get("node") or {}
@@ -2961,6 +3954,12 @@ def build_sankey_arrays_from_tree(
                 year_map[y] = _nearest_year(score_years, y)
 
     def _get_node_id(node_payload: dict[str, Any]) -> int:
+        """ get node id.
+
+    :param node_payload: Value for `node_payload`.
+    :type node_payload: dict[str, Any]
+    :returns: Return value.
+    :rtype: int"""
         key = _node_key(node_payload)
         if key in node_index:
             return node_index[key]
@@ -2971,6 +3970,10 @@ def build_sankey_arrays_from_tree(
         return idx
 
     def _walk(subtree: dict[str, Any]) -> None:
+        """ walk.
+
+    :param subtree: Value for `subtree`.
+    :type subtree: dict[str, Any]"""
         parent_payload = subtree["node"]
         parent_id = _get_node_id(parent_payload)
         for child in subtree.get("children", []):
@@ -3013,10 +4016,19 @@ def build_sankey_arrays_from_tree(
 
 
 def _iter_tree_nodes(tree: dict[str, Any]) -> list[dict[str, Any]]:
-    """Return a flat list of node payloads from a Sankey tree."""
+    """ iter tree nodes.
+
+    :param tree: Value for `tree`.
+    :type tree: dict[str, Any]
+    :returns: Return value.
+    :rtype: list[dict[str, Any]]"""
     nodes: list[dict[str, Any]] = []
 
     def _walk(subtree: dict[str, Any]) -> None:
+        """ walk.
+
+    :param subtree: Value for `subtree`.
+    :type subtree: dict[str, Any]"""
         nodes.append(subtree["node"])
         for child in subtree.get("children", []):
             _walk(child)
@@ -3026,7 +4038,14 @@ def _iter_tree_nodes(tree: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def _nearest_year(years_sorted: list[int], target: int) -> int:
-    """Return nearest year from a sorted list."""
+    """ nearest year.
+
+    :param years_sorted: Value for `years_sorted`.
+    :type years_sorted: list[int]
+    :param target: Value for `target`.
+    :type target: int
+    :returns: Return value.
+    :rtype: int"""
     if not years_sorted:
         return int(target)
     i = bisect.bisect_left(years_sorted, target)
@@ -3042,7 +4061,12 @@ def _nearest_year(years_sorted: list[int], target: int) -> int:
 
 
 def _score_years_from_trails(trails: Trails) -> list[int]:
-    """Return available score years from trails.scores or characterized inventory."""
+    """ score years from trails.
+
+    :param trails: Value for `trails`.
+    :type trails: Trails
+    :returns: Return value.
+    :rtype: list[int]"""
     scores = getattr(trails, "scores", None)
     if scores is not None and "year" in scores.coords:
         return [int(y) for y in scores.coords["year"].values.tolist()]
@@ -3053,7 +4077,13 @@ def _score_years_from_trails(trails: Trails) -> list[int]:
 
 
 def _node_scores_from_trails(trails: Trails) -> dict[tuple[int, int], float]:
-    """Build (year, act_idx) -> score mapping from trails.scores."""
+    """ node scores from trails.
+
+    :param trails: Value for `trails`.
+    :type trails: Trails
+    :returns: Return value.
+    :rtype: dict[tuple[int, int], float]
+    :raises ValueError: If an error occurs."""
     scores = getattr(trails, "scores", None)
     if scores is None:
         characterized = getattr(trails, "characterized_inventory", None)
@@ -3104,7 +4134,13 @@ def _node_scores_from_trails(trails: Trails) -> dict[tuple[int, int], float]:
 def _node_scores_from_characterized_inventory(
     characterized_inventory: xr.DataArray,
 ) -> dict[tuple[int, int], float]:
-    """Build (year, act_idx) -> score mapping from characterized inventory."""
+    """ node scores from characterized inventory.
+
+    :param characterized_inventory: Value for `characterized_inventory`.
+    :type characterized_inventory: xr.DataArray
+    :returns: Return value.
+    :rtype: dict[tuple[int, int], float]
+    :raises ValueError: If an error occurs."""
     if "method" in characterized_inventory.dims:
         methods = characterized_inventory.coords["method"].values
         if len(methods) != 1:
@@ -3181,15 +4217,15 @@ def _node_scores_from_characterized_inventory(
 def _select_depths(
     edges_by_depth: dict[int, dict], depths: list[int] | None
 ) -> list[int]:
-    """Select which traversal depths to plot.
+    """ select depths.
 
-    :param edges_by_depth: Mapping of depth to edges.
+    :param edges_by_depth: Value for `edges_by_depth`.
     :type edges_by_depth: dict[int, dict]
-    :param depths: Optional list of depths to include.
+    :param depths: Value for `depths`.
     :type depths: list[int] | None
-    :returns: Filtered list of depths.
+    :returns: Return value.
     :rtype: list[int]
-    """
+    :raises ValueError: If an error occurs."""
     if depths is None:
         depths_list = sorted(edges_by_depth.keys())
     else:
@@ -3207,19 +4243,19 @@ def _collect_activities(
     depths_list: list[int],
     include_all_activities: bool,
 ) -> list[int]:
-    """Collect activity indices referenced by selected edges.
+    """ collect activities.
 
-    :param edges_by_depth: Mapping of depth to edges.
+    :param edges_by_depth: Value for `edges_by_depth`.
     :type edges_by_depth: dict[int, dict]
-    :param trails: Trails instance for metadata.
+    :param trails: Value for `trails`.
     :type trails: Trails
-    :param depths_list: Depths to include.
+    :param depths_list: Value for `depths_list`.
     :type depths_list: list[int]
-    :param include_all_activities: Whether to include all activities from metadata.
+    :param include_all_activities: Value for `include_all_activities`.
     :type include_all_activities: bool
-    :returns: Sorted list of activity indices.
+    :returns: Return value.
     :rtype: list[int]
-    """
+    :raises ValueError: If an error occurs."""
     if include_all_activities:
         all_activities = set()
         for scen_label, mapping in trails.activity_indices.items():
@@ -3243,15 +4279,15 @@ def _collect_activities(
 def _collect_global_years(
     edges_by_depth: dict[int, dict], depths_list: list[int]
 ) -> tuple[int, int, list[int]]:
-    """Collect all years referenced by selected depths.
+    """ collect global years.
 
-    :param edges_by_depth: Mapping of depth to edges.
+    :param edges_by_depth: Value for `edges_by_depth`.
     :type edges_by_depth: dict[int, dict]
-    :param depths_list: Depths to include.
+    :param depths_list: Value for `depths_list`.
     :type depths_list: list[int]
-    :returns: Tuple of ``(year_min, year_max, years_global)``.
+    :returns: Return value.
     :rtype: tuple[int, int, list[int]]
-    """
+    :raises ValueError: If an error occurs."""
     years_global_set = set()
     for d in depths_list:
         for (parent, child), amt in edges_by_depth.get(d, {}).items():
@@ -3271,15 +4307,14 @@ def _collect_global_years(
 
 
 def _init_flow_subplots(panel_labels: list[str], ncols: int) -> tuple[go.Figure, int]:
-    """Initialize subplot grid for flow panels.
+    """ init flow subplots.
 
-    :param panel_labels: Labels for each panel.
+    :param panel_labels: Value for `panel_labels`.
     :type panel_labels: list[str]
-    :param ncols: Number of columns.
+    :param ncols: Value for `ncols`.
     :type ncols: int
-    :returns: Plotly figure with subplots.
-    :rtype: plotly.graph_objects.Figure
-    """
+    :returns: Return value.
+    :rtype: tuple[go.Figure, int]"""
     n_panels = len(panel_labels)
     nrows = int(np.ceil(n_panels / ncols))
     fig = make_subplots(
@@ -3326,7 +4361,69 @@ def plot_rf(
     y_max: Optional[float] = None,
     y2_max: Optional[float] = None,
 ) -> go.Figure:
-    """Plot radiative forcing time series by flow or root activity."""
+    """Plot rf.
+
+    :param trails: Value for `trails`.
+    :type trails: Trails
+    :param by: Value for `by`.
+    :type by: Literal['flow', 'root activity']
+    :param title: Value for `title`.
+    :type title: str
+    :param method_label: Value for `method_label`.
+    :type method_label: str
+    :param quantile: Value for `quantile`.
+    :type quantile: float | None
+    :param show_cumulative_quantile_band: Value for `show_cumulative_quantile_band`.
+    :type show_cumulative_quantile_band: bool
+    :param band_quantiles: Value for `band_quantiles`.
+    :type band_quantiles: tuple[float, float]
+    :param cumulative: Value for `cumulative`.
+    :type cumulative: bool
+    :param stacked: Value for `stacked`.
+    :type stacked: bool
+    :param legend_top_n: Value for `legend_top_n`.
+    :type legend_top_n: int
+    :param width: Value for `width`.
+    :type width: Optional[int]
+    :param height: Value for `height`.
+    :type height: Optional[int]
+    :param year_tick: Value for `year_tick`.
+    :type year_tick: int
+    :param year_range: Value for `year_range`.
+    :type year_range: Optional[Tuple[int, int]]
+    :param show_year_grid: Value for `show_year_grid`.
+    :type show_year_grid: bool
+    :param yaxis_type: Value for `yaxis_type`.
+    :type yaxis_type: Literal['linear', 'log']
+    :param log_eps: Value for `log_eps`.
+    :type log_eps: float
+    :param reference_year: Value for `reference_year`.
+    :type reference_year: Optional[int]
+    :param show_cumulative_axis: Value for `show_cumulative_axis`.
+    :type show_cumulative_axis: bool
+    :param cumulative_axis_label: Value for `cumulative_axis_label`.
+    :type cumulative_axis_label: str
+    :param legend_entrywidth: Value for `legend_entrywidth`.
+    :type legend_entrywidth: int
+    :param legend_row_height: Value for `legend_row_height`.
+    :type legend_row_height: int
+    :param legend_y: Value for `legend_y`.
+    :type legend_y: float
+    :param y2_headroom: Value for `y2_headroom`.
+    :type y2_headroom: float
+    :param show_cumulative_in_legend: Value for `show_cumulative_in_legend`.
+    :type show_cumulative_in_legend: bool
+    :param flow_groupby_name: Value for `flow_groupby_name`.
+    :type flow_groupby_name: bool
+    :param y_min: Value for `y_min`.
+    :type y_min: Optional[float]
+    :param y_max: Value for `y_max`.
+    :type y_max: Optional[float]
+    :param y2_max: Value for `y2_max`.
+    :type y2_max: Optional[float]
+    :returns: Return value.
+    :rtype: go.Figure
+    :raises ValueError: If an error occurs."""
     rf = getattr(trails, "instant_radiative_forcing", None)
     if rf is None:
         raise ValueError("No radiative forcing data stored on Trails.")
@@ -3414,6 +4511,12 @@ def plot_rf(
         q_high_data = rf_all.sel(quantile=float(q_high), drop=True)
 
         def _results_for(data: xr.DataArray) -> dict[int, dict[str, Any]]:
+            """ results for.
+
+    :param data: Value for `data`.
+    :type data: xr.DataArray
+    :returns: Return value.
+    :rtype: dict[int, dict[str, Any]]"""
             if by == "flow":
                 if "root activity" in data.dims:
                     data = data.sum(dim="root activity")
@@ -3431,6 +4534,14 @@ def plot_rf(
         years = _select_years_from_results(results_by_year, year_range)
 
         def _totals(res: dict[int, dict[str, Any]], years_seq: list[int]) -> np.ndarray:
+            """ totals.
+
+    :param res: Value for `res`.
+    :type res: dict[int, dict[str, Any]]
+    :param years_seq: Value for `years_seq`.
+    :type years_seq: list[int]
+    :returns: Return value.
+    :rtype: np.ndarray"""
             out = np.zeros(len(years_seq), dtype=float)
             for i, y in enumerate(years_seq):
                 payload = res.get(int(y), {})
@@ -3530,7 +4641,65 @@ def plot_temp(
     y_max: Optional[float] = None,
     y2_max: Optional[float] = None,
 ) -> go.Figure:
-    """Plot delta temperature time series by flow or root activity."""
+    """Plot temp.
+
+    :param trails: Value for `trails`.
+    :type trails: Trails
+    :param by: Value for `by`.
+    :type by: Literal['flow', 'root activity']
+    :param title: Value for `title`.
+    :type title: str
+    :param method_label: Value for `method_label`.
+    :type method_label: str
+    :param quantile: Value for `quantile`.
+    :type quantile: float | None
+    :param stacked: Value for `stacked`.
+    :type stacked: bool
+    :param legend_top_n: Value for `legend_top_n`.
+    :type legend_top_n: int
+    :param width: Value for `width`.
+    :type width: Optional[int]
+    :param height: Value for `height`.
+    :type height: Optional[int]
+    :param year_tick: Value for `year_tick`.
+    :type year_tick: int
+    :param year_range: Value for `year_range`.
+    :type year_range: Optional[Tuple[int, int]]
+    :param show_year_grid: Value for `show_year_grid`.
+    :type show_year_grid: bool
+    :param yaxis_type: Value for `yaxis_type`.
+    :type yaxis_type: Literal['linear', 'log']
+    :param log_eps: Value for `log_eps`.
+    :type log_eps: float
+    :param reference_year: Value for `reference_year`.
+    :type reference_year: Optional[int]
+    :param show_total_axis: Value for `show_total_axis`.
+    :type show_total_axis: bool
+    :param show_total_quantile_band: Value for `show_total_quantile_band`.
+    :type show_total_quantile_band: bool
+    :param total_axis_label: Value for `total_axis_label`.
+    :type total_axis_label: str
+    :param legend_entrywidth: Value for `legend_entrywidth`.
+    :type legend_entrywidth: int
+    :param legend_row_height: Value for `legend_row_height`.
+    :type legend_row_height: int
+    :param legend_y: Value for `legend_y`.
+    :type legend_y: float
+    :param y2_headroom: Value for `y2_headroom`.
+    :type y2_headroom: float
+    :param show_cumulative_in_legend: Value for `show_cumulative_in_legend`.
+    :type show_cumulative_in_legend: bool
+    :param flow_groupby_name: Value for `flow_groupby_name`.
+    :type flow_groupby_name: bool
+    :param y_min: Value for `y_min`.
+    :type y_min: Optional[float]
+    :param y_max: Value for `y_max`.
+    :type y_max: Optional[float]
+    :param y2_max: Value for `y2_max`.
+    :type y2_max: Optional[float]
+    :returns: Return value.
+    :rtype: go.Figure
+    :raises ValueError: If an error occurs."""
     delta_t = getattr(trails, "delta_temperature", None)
     if delta_t is None:
         raise ValueError("No delta temperature data stored on Trails.")
@@ -3616,6 +4785,14 @@ def plot_temp(
         years = _select_years_from_results(results_by_year, year_range)
 
         def _totals(res: dict[int, dict[str, Any]], years_seq: list[int]) -> np.ndarray:
+            """ totals.
+
+    :param res: Value for `res`.
+    :type res: dict[int, dict[str, Any]]
+    :param years_seq: Value for `years_seq`.
+    :type years_seq: list[int]
+    :returns: Return value.
+    :rtype: np.ndarray"""
             out = np.zeros(len(years_seq), dtype=float)
             for i, y in enumerate(years_seq):
                 payload = res.get(int(y), {})
@@ -3652,6 +4829,12 @@ def plot_temp(
                 q_high_data = delta_t_all.sel(quantile=float(q_high), drop=True)
 
                 def _results_for(data: xr.DataArray) -> dict[int, dict[str, Any]]:
+                    """ results for.
+
+    :param data: Value for `data`.
+    :type data: xr.DataArray
+    :returns: Return value.
+    :rtype: dict[int, dict[str, Any]]"""
                     if by == "flow":
                         if "root activity" in data.dims:
                             data = data.sum(dim="root activity")
@@ -3709,8 +4892,15 @@ def plot_temp(
     return fig
 
 
-def plot_delta_temperature(*args, **kwargs) -> go.Figure:
-    """Backward-compatible alias for plot_temp."""
+def plot_delta_temperature(*args: Any, **kwargs: Any) -> go.Figure:
+    """Plot delta temperature.
+
+    :param args: Variadic positional arguments.
+    :type args: Any
+    :param kwargs: Variadic keyword arguments.
+    :type kwargs: Any
+    :returns: Return value.
+    :rtype: go.Figure"""
     return plot_temp(*args, **kwargs)
 
 
@@ -3722,21 +4912,20 @@ def _configure_flow_axes(
     year_min: int,
     year_max: int,
 ) -> None:
-    """Configure axes for flow subplots.
+    """ configure flow axes.
 
-    :param fig: Plotly figure to update.
-    :type fig: plotly.graph_objects.Figure
-    :param n_panels: Number of panels.
+    :param fig: Value for `fig`.
+    :type fig: go.Figure
+    :param n_panels: Value for `n_panels`.
     :type n_panels: int
-    :param ncols: Number of columns.
+    :param ncols: Value for `ncols`.
     :type ncols: int
-    :param acts: Activity indices used for labels.
+    :param acts: Value for `acts`.
     :type acts: list[int]
-    :param year_min: Minimum year.
+    :param year_min: Value for `year_min`.
     :type year_min: int
-    :param year_max: Maximum year.
-    :type year_max: int
-    """
+    :param year_max: Value for `year_max`.
+    :type year_max: int"""
     n_acts = len(acts)
     all_row_idx = list(range(n_acts))
 
@@ -3771,15 +4960,14 @@ def _configure_flow_axes(
 def _merge_all_edges(
     edges_by_depth: dict[int, dict], depths_list: list[int]
 ) -> dict[tuple[tuple[int, int], tuple[int, int]], float]:
-    """Merge edge mappings across depths.
+    """ merge all edges.
 
-    :param edges_by_depth: Mapping of depth to edges.
+    :param edges_by_depth: Value for `edges_by_depth`.
     :type edges_by_depth: dict[int, dict]
-    :param depths_list: Depths to include.
+    :param depths_list: Value for `depths_list`.
     :type depths_list: list[int]
-    :returns: Mapping of edges to total amounts.
-    :rtype: dict[tuple, float]
-    """
+    :returns: Return value.
+    :rtype: dict[tuple[tuple[int, int], tuple[int, int]], float]"""
     merged_edges_all: dict[tuple[tuple[int, int], tuple[int, int]], float] = (
         defaultdict(float)
     )
@@ -3799,25 +4987,24 @@ def _add_flow_panel_traces(
     col: int,
     show_legend: bool,
 ) -> None:
-    """Add consumer and supplier node traces for a panel.
+    """ add flow panel traces.
 
-    :param fig: Plotly figure to update.
-    :type fig: plotly.graph_objects.Figure
-    :param edges: Edge mapping for the panel.
+    :param fig: Value for `fig`.
+    :type fig: go.Figure
+    :param edges: Value for `edges`.
     :type edges: dict[tuple[tuple[int, int], tuple[int, int]], float]
-    :param act_to_row: Mapping of activity index to row position.
+    :param act_to_row: Value for `act_to_row`.
     :type act_to_row: dict[int, int]
-    :param idx_to_label: Mapping of activity index to label.
+    :param idx_to_label: Value for `idx_to_label`.
     :type idx_to_label: dict[int, str]
-    :param dot_size: Marker size for nodes.
+    :param dot_size: Value for `dot_size`.
     :type dot_size: int
-    :param row: Subplot row index.
+    :param row: Value for `row`.
     :type row: int
-    :param col: Subplot column index.
+    :param col: Value for `col`.
     :type col: int
-    :param show_legend: Whether to show legend entries.
-    :type show_legend: bool
-    """
+    :param show_legend: Value for `show_legend`.
+    :type show_legend: bool"""
     consumer_nodes = set()
     supplier_nodes = set()
 
@@ -3936,15 +5123,14 @@ def _add_flow_panel_traces(
 def _add_activity_legend(
     fig: go.Figure, acts: list[int], idx_to_label: dict[int, str]
 ) -> None:
-    """Add activity legend entries to the figure.
+    """ add activity legend.
 
-    :param fig: Plotly figure to update.
-    :type fig: plotly.graph_objects.Figure
-    :param acts: Activity indices to label.
+    :param fig: Value for `fig`.
+    :type fig: go.Figure
+    :param acts: Value for `acts`.
     :type acts: list[int]
-    :param idx_to_label: Mapping of activity index to label.
-    :type idx_to_label: dict[int, str]
-    """
+    :param idx_to_label: Value for `idx_to_label`.
+    :type idx_to_label: dict[int, str]"""
     mapping_lines = []
     for a in acts:
         label = idx_to_label.get(a, f"Activity {a}")
@@ -3968,19 +5154,18 @@ def _add_activity_legend(
 def _apply_flow_layout(
     fig: go.Figure, title: str, base_width: int, base_height: int, nrows: int
 ) -> None:
-    """Apply layout settings for flow subplots.
+    """ apply flow layout.
 
-    :param fig: Plotly figure to update.
-    :type fig: plotly.graph_objects.Figure
-    :param title: Figure title.
+    :param fig: Value for `fig`.
+    :type fig: go.Figure
+    :param title: Value for `title`.
     :type title: str
-    :param base_width: Base width in pixels.
+    :param base_width: Value for `base_width`.
     :type base_width: int
-    :param base_height: Base height in pixels.
+    :param base_height: Value for `base_height`.
     :type base_height: int
-    :param nrows: Number of subplot rows.
-    :type nrows: int
-    """
+    :param nrows: Value for `nrows`.
+    :type nrows: int"""
     fig.update_layout(
         title=title,
         width=base_width * 2,
@@ -4008,41 +5193,26 @@ def plot_traversal_grid_flow(
     base_width: int = 550,
     base_height: int = 260,
 ) -> go.Figure:
-    """Plot traversal edges as a grid of flow panels.
+    """Plot traversal grid flow.
 
-    Multi-panel plot of traversal flows on an activity×year grid.
-
-    For each depth d in ``depths`` AND for "All depths":
-      - rows  = activity indices
-      - cols  = years (global min..max across all depths)
-      - red   = consumers (nodes with outgoing edges at that depth)
-      - green = suppliers (nodes appearing as children)
-      - arrows from supplier -> consumer
-
-    Layout:
-      - 2 columns, as many rows as needed.
-      - Last subplot is "All depths" (cumulative edges).
-      - Y-axis shows activity indices; a legend below maps index → label.
-
-    :param edges_by_depth: Mapping of depth to traversal edges.
+    :param edges_by_depth: Value for `edges_by_depth`.
     :type edges_by_depth: dict[int, dict[tuple[tuple[int, int], tuple[int, int]], float]]
-    :param trails: Trails instance used for metadata.
+    :param trails: Value for `trails`.
     :type trails: Trails
-    :param depths: Optional list of depths to include.
-    :type depths: list[int] | None
-    :param include_all_activities: Whether to include all activities.
+    :param depths: Value for `depths`.
+    :type depths: Optional[List[int]]
+    :param include_all_activities: Value for `include_all_activities`.
     :type include_all_activities: bool
-    :param title: Figure title.
+    :param title: Value for `title`.
     :type title: str
-    :param dot_size: Marker size for scatter points.
+    :param dot_size: Value for `dot_size`.
     :type dot_size: int
-    :param base_width: Base width in pixels.
+    :param base_width: Value for `base_width`.
     :type base_width: int
-    :param base_height: Base height in pixels.
+    :param base_height: Value for `base_height`.
     :type base_height: int
-    :returns: Plotly figure with flow panels.
-    :rtype: plotly.graph_objects.Figure
-    """
+    :returns: Return value.
+    :rtype: go.Figure"""
     depths_list = _select_depths(edges_by_depth, depths)
     panel_labels: List[str] = [f"Depth {d}" for d in depths_list] + ["All depths"]
 

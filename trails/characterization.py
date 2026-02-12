@@ -13,10 +13,13 @@ if TYPE_CHECKING:
 
 
 def _build_flowkey_to_flowindex(trails: Trails) -> dict[tuple, int]:
-    """
-    Build (name, compartment, subcompartment) -> flow_index mapping,
-    where flow_index is the position along the Trails/B/inventory flow dimension.
-    """
+    """ build flowkey to flowindex.
+
+    :param trails: Value for `trails`.
+    :type trails: Trails
+    :returns: Return value.
+    :rtype: dict[tuple, int]
+    :raises TypeError: If an error occurs."""
     # Prefer explicit flow coordinate if available
     flow_coord = None
     if (
@@ -70,13 +73,13 @@ def _build_flowkey_to_flowindex(trails: Trails) -> dict[tuple, int]:
 
 
 def _build_flowkey_to_flowid(trails: Trails) -> dict[tuple, int]:
-    """Build a flow-key to flow-id mapping across labels.
+    """ build flowkey to flowid.
 
-    :param trails: Trails instance with biosphere metadata.
+    :param trails: Value for `trails`.
     :type trails: Trails
-    :returns: Mapping of ``(name, compartment, subcompartment)`` to flow id.
+    :returns: Return value.
     :rtype: dict[tuple, int]
-    """
+    :raises TypeError: If an error occurs."""
     out: dict[tuple, int] = {}
 
     for _label, meta in getattr(trails, "biosphere_indices", {}).items():
@@ -112,21 +115,21 @@ def _build_cf_matrix_flowid_space(
     char_cache: dict[tuple, np.ndarray],
     debug: bool = False,
 ) -> np.ndarray:
-    """Build a CF matrix aligned with Trails flow-id space.
+    """ build cf matrix flowid space.
 
-    :param trails: Trails instance with biosphere metadata.
+    :param trails: Value for `trails`.
     :type trails: Trails
-    :param methods: LCIA methods to include.
-    :type methods: list[str]
-    :param ei_version: Ecoinvent release identifier.
+    :param methods: Value for `methods`.
+    :type methods: List[str]
+    :param ei_version: Value for `ei_version`.
     :type ei_version: str
-    :param char_cache: Cache mapping for characterization matrices.
-    :type char_cache: dict
-    :param debug: Whether to emit debug logging.
+    :param char_cache: Value for `char_cache`.
+    :type char_cache: dict[tuple, np.ndarray]
+    :param debug: Value for `debug`.
     :type debug: bool
-    :returns: CF matrix in flow-id space (method x flow).
-    :rtype: numpy.ndarray
-    """
+    :returns: Return value.
+    :rtype: np.ndarray
+    :raises ValueError: If an error occurs."""
     n_flows = int(trails.B.shape[2]) if trails.B is not None else 0
     if n_flows <= 0:
         return np.zeros((0, 0), dtype=np.float64)
@@ -163,7 +166,21 @@ def build_characterized_inventory(
     debug: bool = False,
     ei_version: str = "3.11",
 ) -> xr.DataArray:
-    """Characterize a Trails inventory into a sparse array."""
+    """Build characterized inventory.
+
+    :param trails: Value for `trails`.
+    :type trails: Trails
+    :param methods: Value for `methods`.
+    :type methods: List[str]
+    :param char_cache: Value for `char_cache`.
+    :type char_cache: dict[tuple, np.ndarray]
+    :param debug: Value for `debug`.
+    :type debug: bool
+    :param ei_version: Value for `ei_version`.
+    :type ei_version: str
+    :returns: Return value.
+    :rtype: xr.DataArray
+    :raises ValueError: If an error occurs."""
     if trails.inventory is None:
         raise ValueError("Trails.inventory is empty; run LCA first.")
 
@@ -234,10 +251,20 @@ def get_cf_vector(
     debug: bool = False,
     ei_version: str = "3.11",
 ) -> np.ndarray:
-    """Return a dense CF vector aligned to trails.B flow dimension.
+    """Get cf vector.
 
-    When multiple methods are provided, the vector is the sum across methods.
-    """
+    :param trails: Value for `trails`.
+    :type trails: Trails
+    :param methods: Value for `methods`.
+    :type methods: List[str]
+    :param char_cache: Value for `char_cache`.
+    :type char_cache: dict[tuple, np.ndarray]
+    :param debug: Value for `debug`.
+    :type debug: bool
+    :param ei_version: Value for `ei_version`.
+    :type ei_version: str
+    :returns: Return value.
+    :rtype: np.ndarray"""
     cf = _build_cf_matrix_flowid_space(
         trails=trails,
         methods=methods,
