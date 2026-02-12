@@ -38,6 +38,10 @@ docs = [
     "sphinx-rtd-theme"
 ]
 
+umfpack = [
+    "scikit-umfpack"
+]
+
 [tool.setuptools]
 license-files = ["LICENSE"]
 include-package-data = true
