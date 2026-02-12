@@ -99,8 +99,12 @@ class DummyTrailsStatic:
         self.inventory = None
         self.characterized_inventory = None
         self.static_score = None
-        self.A = sparse.COO(coords=[np.array([], dtype=int)] * 3, data=np.array([]), shape=(1, 2, 2))
-        self.B = sparse.COO(coords=[np.array([], dtype=int)] * 3, data=np.array([]), shape=(1, 2, 3))
+        self.A = sparse.COO(
+            coords=[np.array([], dtype=int)] * 3, data=np.array([]), shape=(1, 2, 2)
+        )
+        self.B = sparse.COO(
+            coords=[np.array([], dtype=int)] * 3, data=np.array([]), shape=(1, 2, 3)
+        )
 
     def reset_inventory(self, reset_scores: bool = False) -> None:
         """Reset inventory for testing."""
@@ -232,7 +236,9 @@ def test_static_score_preserves_method_order(monkeypatch: pytest.MonkeyPatch) ->
     import importlib
 
     lca_module = importlib.import_module("trails.lca")
-    monkeypatch.setattr(lca_module, "build_datapackage_for_year_from_trails", fake_build_dp)
+    monkeypatch.setattr(
+        lca_module, "build_datapackage_for_year_from_trails", fake_build_dp
+    )
     monkeypatch.setattr(lca_module.bc, "LCA", DummyLCA)
     monkeypatch.setattr(lca_module, "get_cf_vector", fake_get_cf_vector)
     monkeypatch.setattr(
@@ -251,7 +257,9 @@ def test_static_score_preserves_method_order(monkeypatch: pytest.MonkeyPatch) ->
     assert trails.static_score == pytest.approx([1.0, 2.0])
 
 
-def test_importer_unlinked_exchange_raises(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+def test_importer_unlinked_exchange_raises(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     from trails.importer import import_excel_inventory
 
     data = [
@@ -309,7 +317,9 @@ def test_fair_quantile_dimensions(monkeypatch: pytest.MonkeyPatch) -> None:
             }
         )
 
-    def fake_load_species_mapping(*args: Any, **kwargs: Any) -> tuple[dict[object, str], dict[object, float]]:
+    def fake_load_species_mapping(
+        *args: Any, **kwargs: Any
+    ) -> tuple[dict[object, str], dict[object, float]]:
         return {("CO2", "air", ""): "CO2"}, {}
 
     call_state = {"count": 0}
@@ -322,7 +332,9 @@ def test_fair_quantile_dimensions(monkeypatch: pytest.MonkeyPatch) -> None:
         return DummyFairRun(str(scenario), list(config_names), values)
 
     monkeypatch.setattr("trails.fair_rf.load_emissions_csv", fake_load_emissions_csv)
-    monkeypatch.setattr("trails.fair_rf.load_species_mapping", fake_load_species_mapping)
+    monkeypatch.setattr(
+        "trails.fair_rf.load_species_mapping", fake_load_species_mapping
+    )
     monkeypatch.setattr("trails.fair_rf._run_fair_emissions", fake_run_fair_emissions)
 
     rf = run_fair_delta_rf(
@@ -335,7 +347,12 @@ def test_fair_quantile_dimensions(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
     assert rf.dims == ("quantile", "year", "flow", "root activity")
-    assert trails.delta_temperature.dims == ("quantile", "year", "flow", "root activity")
+    assert trails.delta_temperature.dims == (
+        "quantile",
+        "year",
+        "flow",
+        "root activity",
+    )
     assert rf.shape[0] == 5
     assert int(getattr(rf.data, "nnz", 0)) > 0
 
@@ -359,7 +376,9 @@ def test_sankey_graphlike_writes_html(tmp_path: Path) -> None:
 
 
 def test_cache_dir_uses_short_hash(example_package: Any) -> None:
-    cache_dir = cache_dir_for_package(example_package, value_dtype="float32", index_dtype="int32")
+    cache_dir = cache_dir_for_package(
+        example_package, value_dtype="float32", index_dtype="int32"
+    )
     name = cache_dir.name
     assert name.startswith("interp_")
     suffix = name.split("interp_", 1)[1]
