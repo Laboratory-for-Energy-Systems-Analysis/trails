@@ -106,22 +106,6 @@ Tutorial notebooks are available under `examples/`:
 These walk through a full workflow (data loading, routing, LCA, plotting, and
 FaIR-based climate metrics).
 
-## Solver Performance Notes
-
-`TRAILS` relies on `bw2calc` for linear system solves. Performance depends on the
-available sparse solver backend:
-
-- **PC users**: `bw2calc` will use `pypardiso` with **MKL’s PARDISO** solver (fast).
-- **Mac users with ARM chips**: install `scikit-umfpack` to enable **UMFPACK**. Without
-  it, the solver falls back to SciPy’s default, which is significantly slower.
-
-To enable UMFPACK on ARM Macs:
-
-```bash
-pip install .[umfpack]
-```
-
-
 ## Importing Excel Inventories
 
 You can import user-provided inventories from Excel using ``bw2io``. When you
@@ -295,6 +279,40 @@ pip install trails
 ```
 
 ---
+
+## Solver Performance Notes
+
+`TRAILS` relies on `bw2calc` for linear system solves. Performance depends on the
+available sparse solver backend:
+
+- **PC users**: `bw2calc` will use `pypardiso` with **MKL’s PARDISO** solver (fast).
+- **Mac users with ARM chips**: install `scikit-umfpack` to enable **UMFPACK**. Without
+  it, the solver falls back to SciPy’s default, which is significantly slower.
+
+To enable `pypardiso` on PCs:
+
+```bash
+pip install pypardiso
+```
+
+or, using conda:
+
+```bash
+conda install -c conda-forge pypardiso
+```
+
+
+To enable UMFPACK on ARM Macs:
+
+```bash
+pip install scikit-umfpack
+```
+
+or, using conda:
+
+```bash
+conda install -c conda-forge scikit-umfpack
+```
 
 ## Documentation
 
