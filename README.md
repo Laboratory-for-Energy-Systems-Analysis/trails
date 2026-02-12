@@ -24,6 +24,35 @@ At a high level, `TRAILS`:
 
 ---
 
+## Example Outputs
+
+One gasoline-fueled passenger car driven 200,000 km, with a reference year of 2050, 
+using a prospective background scenario.
+
+
+<table>
+  <tr>
+    <td align="center">
+      <img src="assets/permanent/example_gwp.png" width="300"/>
+      <br/>
+      Temporal GWP example
+    </td>
+    <td align="center">
+      <img src="assets/permanent/example_rf.png" width="300"/>
+      <br/>
+      Radiative forcing example
+    </td>
+    <td align="center">
+      <img src="assets/permanent/example_temp.png" width="300"/>
+      <br/>
+      Temperature anomaly example
+    </td>
+  </tr>
+</table>
+
+---
+
+
 ## Usage
 
 Below is a minimal example that loads a Frictionless data package, runs a
@@ -77,29 +106,6 @@ Tutorial notebooks are available under `examples/`:
 These walk through a full workflow (data loading, routing, LCA, plotting, and
 FaIR-based climate metrics).
 
-## Example Outputs
-
-<table>
-  <tr>
-    <td align="center">
-      <img src="assets/permanent/example_gwp.png" width="300"/>
-      <br/>
-      Temporal GWP example
-    </td>
-    <td align="center">
-      <img src="assets/permanent/example_rf.png" width="300"/>
-      <br/>
-      Radiative forcing example
-    </td>
-    <td align="center">
-      <img src="assets/permanent/example_temp.png" width="300"/>
-      <br/>
-      Temperature anomaly example
-    </td>
-  </tr>
-</table>
-
----
 
 ## Importing Excel Inventories
 

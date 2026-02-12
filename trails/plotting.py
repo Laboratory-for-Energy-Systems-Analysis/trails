@@ -4897,6 +4897,7 @@ def plot_temp(
         yanchor="top",
         showarrow=False,
     )
+    fig.update_yaxes(tickformat=".2e")
     return fig
 
 
