@@ -74,7 +74,7 @@ def example_package() -> Package:
     """
     package_path = (
         Path(__file__).resolve().parents[1]
-        / "dev"
+        / "examples"
         / "example data package"
         / "datapackage.json"
     )
