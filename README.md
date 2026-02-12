@@ -12,7 +12,7 @@ models **time-resolved supply chains** where technosphere and biosphere exchange
 different points in time and across **scenario years**. This makes it possible to compute
 how impacts evolve over time, attribute them to responsible activities, and compare scenarios.
 
-Online documentation: `https://trails.readthedocs.io/en/latest/`
+Online documentation: [https://trails.readthedocs.io/en/latest/]/(https://trails.readthedocs.io/en/latest/)
 
 At a high level, `TRAILS`:
 
