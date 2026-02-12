@@ -101,6 +101,63 @@ years and interpolated across annual years.
     # Target a single scenario slice instead
     trails.import_excel_inventory("path/to/inventory.xlsx", year=2020)
 
+Example inventory: ``examples/lci-pass_cars.xlsx``
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+This file demonstrates the ``bw2io`` Excel format that TRAILS expects:
+
+* **Activity section** (top of the sheet): key/value pairs that define the
+  activity being imported.
+* **Exchanges section** (table starting after the ``Exchanges`` row): each row
+  is an exchange linked to the activity.
+
+Activity section fields (column A = field name, column B = value):
+
+* ``Activity``: activity name (string).
+* ``reference product``: reference product (string).
+* ``location``: location code (string).
+* ``unit``: activity unit (string).
+* Additional fields (e.g., ``lifetime [km]``, ``average age [year]``) are
+  allowed and preserved as metadata.
+
+Exchange table columns (from the header row):
+
+* ``name``: exchange name (string).
+* ``amount``: base exchange amount (float). Used when no year-specific columns
+  are provided.
+* **Year-specific columns** (e.g., ``2020``, ``2040``, ``2060``):
+  optional numeric columns used as **year-specific amounts**. TRAILS writes
+  these values into the corresponding years in the A/B matrices and then
+  linearly interpolates between them for intermediate years. For years outside
+  the provided range, the nearest endpoint value is used (clamped).
+* ``location``: exchange location (string). Required for technosphere/production
+  linking.
+* ``categories``: biosphere categories (tuple or ``compartment/subcompartment``).
+* ``unit``: exchange unit (string).
+* ``type``: exchange type: ``production``, ``technosphere``, or ``biosphere``.
+* ``reference product``: required for technosphere/production exchanges.
+* ``temporal_distribution``: integer code for the temporal distribution.
+* ``temporal_loc``: location parameter (mean/median/mode depending on distribution).
+* ``temporal_scale``: scale parameter (e.g., stddev/sigma).
+* ``temporal_min`` / ``temporal_max``: integer offsets defining the support.
+* ``temporal_amount_source``: either ``port`` or ``matrix``:
+  ``port`` applies the **ported exchange amount** over time; ``matrix`` uses
+  the **matrix-stored values** in other years.
+* ``comment``: optional notes.
+
+TRAILS-specific temporal fields
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+The temporal columns correspond directly to ``TemporalExchange``:
+
+* ``temporal_distribution``: distribution code (1=discrete, 2=lognormal,
+  3=normal, 4=uniform, 5=triangular).
+* ``temporal_loc`` and ``temporal_scale``: distribution parameters.
+* ``temporal_min`` and ``temporal_max``: inclusive integer offsets.
+* ``temporal_amount_source``:
+  - ``port``: uses the exchange amount for all years (ported value).
+  - ``matrix``: uses the matrix values for the selected years.
+
 Temporal distributions
 ----------------------
 
