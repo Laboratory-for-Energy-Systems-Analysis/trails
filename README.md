@@ -38,7 +38,7 @@ deeply-temporalized, technosphere representation.
 `TRAILS` is compatible with Frictionless data packages produced by `premise`.
 
 
-## Example Outputs
+## Algorithm Overview
 
 ```mermaid
 flowchart TD
