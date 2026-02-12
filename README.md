@@ -64,7 +64,7 @@ Tutorial notebooks are available under `examples/`:
 - `examples/2. premise and imported lci example.ipynb`
 
 These walk through a full workflow (data loading, routing, LCA, plotting, and
-FaIR-based climate metrics).
+[FaIR](https://github.com/OMS-NetZero/FAIR)-based climate metrics).
 
 ---
 
@@ -134,11 +134,11 @@ between them across annual years as usual. If no year-specific columns are
 present, the importer uses the standard `amount` field.
 
 
-## FaIR Climate Model Integration
+## [FaIR](https://github.com/OMS-NetZero/FAIR) Climate Model Integration
 
 TRAILS can translate time-resolved inventories into radiative forcing and
-temperature anomalies using the FaIR climate model. The workflow runs a baseline
-FaIR scenario and performs per-species perturbations derived from the Trails
+temperature anomalies using the [FaIR](https://github.com/OMS-NetZero/FAIR) climate model. The workflow runs a baseline
+[FaIR](https://github.com/OMS-NetZero/FAIR) scenario and performs per-species perturbations derived from the Trails
 inventory. Positive and negative emissions are treated separately to preserve
 long-lived CO2 tails for both uptake and release. Results are allocated to root
 activities using cumulative signed emissions for each (flow, root) pair and
@@ -146,10 +146,10 @@ stored as ``trails.instant_radiative_forcing`` and ``trails.delta_temperature``.
 
 Key components:
 
-* Emissions baseline from the bundled REMIND/FAIR IAMC CSV
+* Emissions baseline from the bundled REMIND/[FaIR](https://github.com/OMS-NetZero/FAIR) IAMC CSV
 * Flow-to-species mapping via ``data/scenarios/fair_species_map.yaml``
-* Per-species FaIR runs with optional auto-scaling
-* All FaIR configs are evaluated; quantiles (2.5, 25, 50, 75, 97.5) are stored
+* Per-species [FaIR](https://github.com/OMS-NetZero/FAIR) runs with optional auto-scaling
+* All [FaIR](https://github.com/OMS-NetZero/FAIR) configs are evaluated; quantiles (2.5, 25, 50, 75, 97.5) are stored
 * Output dims: ``(quantile, year, flow, root activity)``
 * Units: ``W/m²`` for radiative forcing and ``°C`` for temperature anomaly
 

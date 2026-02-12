@@ -44,7 +44,9 @@ Plotting
 .. autofunction:: trails.plot_temp
 
 
-FaIR integration
-----------------
+FaIR_ integration
+-----------------
 
 .. autofunction:: trails.fair_rf.run_fair_delta_rf
+
+.. _FaIR: https://github.com/OMS-NetZero/FAIR

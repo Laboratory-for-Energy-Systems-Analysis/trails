@@ -226,17 +226,19 @@ Troubleshooting and diagnostics
   diagnostics on the Trails instance.
 
 
-FaIR radiative forcing
-----------------------
+FaIR_ radiative forcing
+-----------------------
 
-TRAILS integrates with the FaIR climate model to convert time-resolved
+TRAILS integrates with the FaIR_ climate model to convert time-resolved
 inventories into radiative forcing and temperature anomalies. The workflow runs
-a baseline FaIR scenario from the bundled REMIND/FAIR emissions data, then
+a baseline FaIR_ scenario from the bundled REMIND/FaIR_ emissions data, then
 performs per-species perturbation runs derived from the Trails inventory.
 Positive and negative emissions are treated separately to preserve long-lived
 CO2 tails for both uptake and release. Results are allocated to root activities
 using cumulative signed emissions for each (flow, root) pair, and summarized
-across all FaIR configurations as quantiles (2.5, 25, 50, 75, 97.5).
+across all FaIR_ configurations as quantiles (2.5, 25, 50, 75, 97.5).
+
+.. _FaIR: https://github.com/OMS-NetZero/FAIR
 
 .. code-block:: python
 

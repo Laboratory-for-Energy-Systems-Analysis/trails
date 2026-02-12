@@ -11,6 +11,16 @@ Install
 
     pip install trails
 
+You can also install from conda:
+
+.. code-block:: bash
+
+    conda install romainsacchi::trails
+
+Solver note: TRAILS relies on fast sparse solvers for large LCAs. Install the
+recommended solver for your platform (see the README) to avoid slow SciPy
+fallbacks.
+
 Run a temporal LCA
 ------------------
 
@@ -80,14 +90,33 @@ Sign conventions for Excel imports:
     # Target a single scenario slice instead
     trails.import_excel_inventory("path/to/inventory.xlsx", year=2020)
 
+Excel column meanings (from the exchanges table):
 
-FaIR radiative forcing
-----------------------
+* ``name``: exchange name.
+* ``amount``: base exchange amount (used when no year-specific columns exist).
+* **Year-specific columns** (e.g., ``2020``, ``2040``): optional numeric columns
+  that set year-specific amounts. TRAILS writes these values into the matching
+  years and linearly interpolates between them; years outside the provided range
+  are clamped to the nearest endpoint.
+* ``location``: exchange location (required for technosphere/production).
+* ``categories``: biosphere categories (tuple or ``compartment/subcompartment``).
+* ``unit``: exchange unit.
+* ``type``: ``production``, ``technosphere``, or ``biosphere``.
+* ``reference product``: required for technosphere/production exchanges.
+* ``temporal_distribution``: temporal distribution code.
+* ``temporal_loc`` / ``temporal_scale``: distribution parameters.
+* ``temporal_min`` / ``temporal_max``: integer offset bounds.
+* ``temporal_amount_source``: ``port`` (ported amount) or ``matrix`` (use matrix values).
+* ``comment``: optional notes.
+
+
+FaIR_ radiative forcing
+-----------------------
 
 After running a temporal LCA, you can translate the inventory into radiative
-forcing and temperature anomalies using the FaIR climate model. This uses a
+forcing and temperature anomalies using the FaIR_ climate model. This uses a
 baseline IAMC scenario and per-species perturbations derived from the Trails
-inventory. Outputs are aggregated across all FaIR configurations and stored as
+inventory. Outputs are aggregated across all FaIR_ configurations and stored as
 quantiles (2.5, 25, 50, 75, 97.5).
 
 .. code-block:: python
@@ -106,6 +135,8 @@ The resulting outputs are stored on the Trails instance:
 
 You can visualize these with the built-in plotting helpers (defaults to the 50th
 quantile):
+
+.. _FaIR: https://github.com/OMS-NetZero/FAIR
 
 .. code-block:: python
 
