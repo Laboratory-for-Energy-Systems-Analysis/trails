@@ -13,7 +13,7 @@ if TYPE_CHECKING:
 
 
 def _build_flowkey_to_flowindex(trails: Trails) -> dict[tuple, int]:
-    """ build flowkey to flowindex.
+    """build flowkey to flowindex.
 
     :param trails: Value for `trails`.
     :type trails: Trails
@@ -73,7 +73,7 @@ def _build_flowkey_to_flowindex(trails: Trails) -> dict[tuple, int]:
 
 
 def _build_flowkey_to_flowid(trails: Trails) -> dict[tuple, int]:
-    """ build flowkey to flowid.
+    """build flowkey to flowid.
 
     :param trails: Value for `trails`.
     :type trails: Trails
@@ -115,7 +115,7 @@ def _build_cf_matrix_flowid_space(
     char_cache: dict[tuple, np.ndarray],
     debug: bool = False,
 ) -> np.ndarray:
-    """ build cf matrix flowid space.
+    """build cf matrix flowid space.
 
     :param trails: Value for `trails`.
     :type trails: Trails

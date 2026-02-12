@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 
 
 def _log_every(n: int, i: int) -> bool:
-    """ log every.
+    """log every.
 
     :param n: Value for `n`.
     :type n: int
@@ -73,7 +73,8 @@ class Trails:
     """Wrapper around 3D sparse matrices A and B loaded from a Frictionless data package, with
     optional temporal interpolation.
 
-    Dimensions: A: (scenario, activity, product) B: (scenario, activity, biosphere_flow)"""
+    Dimensions: A: (scenario, activity, product) B: (scenario, activity, biosphere_flow)
+    """
 
     def __init__(
         self,
@@ -84,20 +85,20 @@ class Trails:
         index_dtype: np.dtype = np.int32,
         debug: bool = False,
     ) -> None:
-        """  init  .
+        """init  .
 
-    :param package: Value for `package`.
-    :type package: Any
-    :param interpolate_annual: Value for `interpolate_annual`.
-    :type interpolate_annual: bool
-    :param cache_interpolation: Value for `cache_interpolation`.
-    :type cache_interpolation: bool
-    :param value_dtype: Value for `value_dtype`.
-    :type value_dtype: np.dtype
-    :param index_dtype: Value for `index_dtype`.
-    :type index_dtype: np.dtype
-    :param debug: Value for `debug`.
-    :type debug: bool"""
+        :param package: Value for `package`.
+        :type package: Any
+        :param interpolate_annual: Value for `interpolate_annual`.
+        :type interpolate_annual: bool
+        :param cache_interpolation: Value for `cache_interpolation`.
+        :type cache_interpolation: bool
+        :param value_dtype: Value for `value_dtype`.
+        :type value_dtype: np.dtype
+        :param index_dtype: Value for `index_dtype`.
+        :type index_dtype: np.dtype
+        :param debug: Value for `debug`.
+        :type debug: bool"""
         self.package = package
         self.value_dtype = value_dtype
         self.index_dtype = index_dtype
@@ -289,8 +290,8 @@ class Trails:
     ) -> None:
         """Reset scores.
 
-    :param attribute_to_roots: Value for `attribute_to_roots`.
-    :type attribute_to_roots: bool"""
+        :param attribute_to_roots: Value for `attribute_to_roots`.
+        :type attribute_to_roots: bool"""
         min_offset, max_offset = self._biosphere_offset_bounds()
         # Extend the inventory time axis to allow biosphere emissions to spread/decay
         # beyond the matrix years (e.g., for long-lived gases).
@@ -319,13 +320,13 @@ class Trails:
         self.scores = None
 
     def _clamp_year_to_inventory(self, year: int) -> int:
-        """ clamp year to inventory.
+        """clamp year to inventory.
 
-    :param year: Value for `year`.
-    :type year: int
-    :returns: Return value.
-    :rtype: int
-    :raises RuntimeError: If an error occurs."""
+        :param year: Value for `year`.
+        :type year: int
+        :returns: Return value.
+        :rtype: int
+        :raises RuntimeError: If an error occurs."""
         years = self._inventory_years
         if years is None or years.size == 0:
             raise RuntimeError(
@@ -339,13 +340,13 @@ class Trails:
         return y
 
     def _clamp_year_to_scores(self, year: int) -> int:
-        """ clamp year to scores.
+        """clamp year to scores.
 
-    :param year: Value for `year`.
-    :type year: int
-    :returns: Return value.
-    :rtype: int
-    :raises RuntimeError: If an error occurs."""
+        :param year: Value for `year`.
+        :type year: int
+        :returns: Return value.
+        :rtype: int
+        :raises RuntimeError: If an error occurs."""
         years = self._score_years
         if years is None or years.size == 0:
             raise RuntimeError(
@@ -359,12 +360,12 @@ class Trails:
         return y
 
     def _get_debug_flow_filters(self, *, debug: bool) -> dict | None:
-        """ get debug flow filters.
+        """get debug flow filters.
 
-    :param debug: Value for `debug`.
-    :type debug: bool
-    :returns: Return value.
-    :rtype: dict | None"""
+        :param debug: Value for `debug`.
+        :type debug: bool
+        :returns: Return value.
+        :rtype: dict | None"""
         if not (debug or self.debug):
             return None
         if getattr(self, "_debug_flow_filters", None) is not None:
@@ -409,14 +410,14 @@ class Trails:
         *,
         root_activity: int | None = None,
     ) -> None:
-        """ append scores from yearidx map.
+        """append scores from yearidx map.
 
-    :param act_idx: Value for `act_idx`.
-    :type act_idx: int
-    :param yearidx_to_value: Value for `yearidx_to_value`.
-    :type yearidx_to_value: dict[int, float]
-    :param root_activity: Value for `root_activity`.
-    :type root_activity: int | None"""
+        :param act_idx: Value for `act_idx`.
+        :type act_idx: int
+        :param yearidx_to_value: Value for `yearidx_to_value`.
+        :type yearidx_to_value: dict[int, float]
+        :param root_activity: Value for `root_activity`.
+        :type root_activity: int | None"""
         if not yearidx_to_value:
             return
 
@@ -443,11 +444,11 @@ class Trails:
     ) -> None:
         """Reset inventory.
 
-    :param attribute_to_roots: Value for `attribute_to_roots`.
-    :type attribute_to_roots: bool
-    :param reset_scores: Value for `reset_scores`.
-    :type reset_scores: bool
-    :raises RuntimeError: If an error occurs."""
+        :param attribute_to_roots: Value for `attribute_to_roots`.
+        :type attribute_to_roots: bool
+        :param reset_scores: Value for `reset_scores`.
+        :type reset_scores: bool
+        :raises RuntimeError: If an error occurs."""
         if self.min_year is None or self.max_year is None:
             if not getattr(self, "scenario_labels", None):
                 raise RuntimeError(
@@ -520,16 +521,16 @@ class Trails:
     ) -> dict[str, int]:
         """Import excel inventory.
 
-    :param path: Value for `path`.
-    :type path: str | Path
-    :param year: Value for `year`.
-    :type year: int | None
-    :param scenario_label: Value for `scenario_label`.
-    :type scenario_label: str | None
-    :param cache_import: Value for `cache_import`.
-    :type cache_import: bool
-    :returns: Return value.
-    :rtype: dict[str, int]"""
+        :param path: Value for `path`.
+        :type path: str | Path
+        :param year: Value for `year`.
+        :type year: int | None
+        :param scenario_label: Value for `scenario_label`.
+        :type scenario_label: str | None
+        :param cache_import: Value for `cache_import`.
+        :type cache_import: bool
+        :returns: Return value.
+        :rtype: dict[str, int]"""
         from .importer import import_excel_inventory
 
         return import_excel_inventory(
@@ -548,17 +549,17 @@ class Trails:
         *,
         root_activity: int | None = None,
     ) -> None:
-        """ append score entry.
+        """append score entry.
 
-    :param act_idx: Value for `act_idx`.
-    :type act_idx: int
-    :param year: Value for `year`.
-    :type year: int
-    :param value: Value for `value`.
-    :type value: float
-    :param root_activity: Value for `root_activity`.
-    :type root_activity: int | None
-    :raises RuntimeError: If an error occurs."""
+        :param act_idx: Value for `act_idx`.
+        :type act_idx: int
+        :param year: Value for `year`.
+        :type year: int
+        :param value: Value for `value`.
+        :type value: float
+        :param root_activity: Value for `root_activity`.
+        :type root_activity: int | None
+        :raises RuntimeError: If an error occurs."""
         if not hasattr(self, "_score_chunk_value"):
             raise RuntimeError(
                 "Score builders not initialized. Call reset_scores() or reset_inventory() first."
@@ -585,9 +586,9 @@ class Trails:
     def finalize_scores(self) -> xr.DataArray:
         """Finalize scores.
 
-    :returns: Return value.
-    :rtype: xr.DataArray
-    :raises RuntimeError: If an error occurs."""
+        :returns: Return value.
+        :rtype: xr.DataArray
+        :raises RuntimeError: If an error occurs."""
         years = self._score_years
         if years is None:
             raise RuntimeError("Scores years not initialized. Call reset_inventory().")
@@ -689,10 +690,10 @@ class Trails:
         return self.scores
 
     def _inventory_offset_bounds(self) -> tuple[int, int]:
-        """ inventory offset bounds.
+        """inventory offset bounds.
 
-    :returns: Return value.
-    :rtype: tuple[int, int]"""
+        :returns: Return value.
+        :rtype: tuple[int, int]"""
         min_offset = 0
         max_offset = 0
         for exchanges in (
@@ -711,10 +712,10 @@ class Trails:
         return min_offset, max_offset
 
     def _biosphere_offset_bounds(self) -> tuple[int, int]:
-        """ biosphere offset bounds.
+        """biosphere offset bounds.
 
-    :returns: Return value.
-    :rtype: tuple[int, int]"""
+        :returns: Return value.
+        :rtype: tuple[int, int]"""
         min_offset = 0
         max_offset = 0
         exchanges = self.temporal_biosphere_exchanges
@@ -737,20 +738,20 @@ class Trails:
         *,
         root_activity: int | None = None,
     ) -> None:
-        """ append inventory entries.
+        """append inventory entries.
 
-    :param act_idx: Value for `act_idx`.
-    :type act_idx: int
-    :param year: Value for `year`.
-    :type year: int
-    :param flows: Value for `flows`.
-    :type flows: np.ndarray
-    :param values: Value for `values`.
-    :type values: np.ndarray
-    :param root_activity: Value for `root_activity`.
-    :type root_activity: int | None
-    :raises RuntimeError: If an error occurs.
-    :raises ValueError: If an error occurs."""
+        :param act_idx: Value for `act_idx`.
+        :type act_idx: int
+        :param year: Value for `year`.
+        :type year: int
+        :param flows: Value for `flows`.
+        :type flows: np.ndarray
+        :param values: Value for `values`.
+        :type values: np.ndarray
+        :param root_activity: Value for `root_activity`.
+        :type root_activity: int | None
+        :raises RuntimeError: If an error occurs.
+        :raises ValueError: If an error occurs."""
         # Chunk builders must exist (single source of truth)
         if not hasattr(self, "_inv_chunk_len"):
             raise RuntimeError(
@@ -820,18 +821,18 @@ class Trails:
         *,
         root_activity: np.ndarray | None = None,
     ) -> None:
-        """ append scores bulk.
+        """append scores bulk.
 
-    :param act_idx: Value for `act_idx`.
-    :type act_idx: np.ndarray
-    :param year_idx: Value for `year_idx`.
-    :type year_idx: np.ndarray
-    :param values: Value for `values`.
-    :type values: np.ndarray
-    :param root_activity: Value for `root_activity`.
-    :type root_activity: np.ndarray | None
-    :raises RuntimeError: If an error occurs.
-    :raises ValueError: If an error occurs."""
+        :param act_idx: Value for `act_idx`.
+        :type act_idx: np.ndarray
+        :param year_idx: Value for `year_idx`.
+        :type year_idx: np.ndarray
+        :param values: Value for `values`.
+        :type values: np.ndarray
+        :param root_activity: Value for `root_activity`.
+        :type root_activity: np.ndarray | None
+        :raises RuntimeError: If an error occurs.
+        :raises ValueError: If an error occurs."""
         if not hasattr(self, "_score_bulk_value"):
             raise RuntimeError(
                 "Score bulk builders not initialized. Call reset_scores() or reset_inventory() first."
@@ -882,20 +883,20 @@ class Trails:
         *,
         root_activity: int | np.ndarray | None = None,
     ) -> None:
-        """ append inventory entries bulk.
+        """append inventory entries bulk.
 
-    :param act_idx: Value for `act_idx`.
-    :type act_idx: np.ndarray
-    :param year: Value for `year`.
-    :type year: int | np.ndarray
-    :param flows: Value for `flows`.
-    :type flows: np.ndarray
-    :param values: Value for `values`.
-    :type values: np.ndarray
-    :param root_activity: Value for `root_activity`.
-    :type root_activity: int | np.ndarray | None
-    :raises RuntimeError: If an error occurs.
-    :raises ValueError: If an error occurs."""
+        :param act_idx: Value for `act_idx`.
+        :type act_idx: np.ndarray
+        :param year: Value for `year`.
+        :type year: int | np.ndarray
+        :param flows: Value for `flows`.
+        :type flows: np.ndarray
+        :param values: Value for `values`.
+        :type values: np.ndarray
+        :param root_activity: Value for `root_activity`.
+        :type root_activity: int | np.ndarray | None
+        :raises RuntimeError: If an error occurs.
+        :raises ValueError: If an error occurs."""
         if not hasattr(self, "_inv_bulk_flow"):
             raise RuntimeError(
                 "Inventory bulk builders not initialized. Call reset_inventory() first."
@@ -975,10 +976,10 @@ class Trails:
     def finalize_inventory(self) -> xr.DataArray:
         """Finalize inventory.
 
-    :returns: Return value.
-    :rtype: xr.DataArray
-    :raises RuntimeError: If an error occurs.
-    :raises ValueError: If an error occurs."""
+        :returns: Return value.
+        :rtype: xr.DataArray
+        :raises RuntimeError: If an error occurs.
+        :raises ValueError: If an error occurs."""
         if self.A is None or self.B is None:
             raise ValueError("Cannot finalize inventory: A or B is None.")
 
@@ -1088,18 +1089,18 @@ class Trails:
         other_idx: int,
         exchanges: Dict[tuple, TemporalExchange],
     ) -> Optional[TemporalExchange]:
-        """ interpolate temporal exchange.
+        """interpolate temporal exchange.
 
-    :param year: Value for `year`.
-    :type year: int
-    :param act_idx: Value for `act_idx`.
-    :type act_idx: int
-    :param other_idx: Value for `other_idx`.
-    :type other_idx: int
-    :param exchanges: Value for `exchanges`.
-    :type exchanges: Dict[tuple, TemporalExchange]
-    :returns: Return value.
-    :rtype: Optional[TemporalExchange]"""
+        :param year: Value for `year`.
+        :type year: int
+        :param act_idx: Value for `act_idx`.
+        :type act_idx: int
+        :param other_idx: Value for `other_idx`.
+        :type other_idx: int
+        :param exchanges: Value for `exchanges`.
+        :type exchanges: Dict[tuple, TemporalExchange]
+        :returns: Return value.
+        :rtype: Optional[TemporalExchange]"""
         if not exchanges:
             return None
 
@@ -1142,12 +1143,12 @@ class Trails:
                 def interp_optional(v0: float | None, v1: float | None) -> float | None:
                     """Interp optional.
 
-    :param v0: Value for `v0`.
-    :type v0: float | None
-    :param v1: Value for `v1`.
-    :type v1: float | None
-    :returns: Return value.
-    :rtype: float | None"""
+                    :param v0: Value for `v0`.
+                    :type v0: float | None
+                    :param v1: Value for `v1`.
+                    :type v1: float | None
+                    :returns: Return value.
+                    :rtype: float | None"""
                     if v0 is None or v1 is None:
                         return v0 if (year - y0) <= (y1 - year) else v1
                     return float(v0) + (float(v1) - float(v0)) * w
@@ -1164,12 +1165,12 @@ class Trails:
         return None
 
     def _map_year_to_scenario_year(self, year: int) -> int:
-        """ map year to scenario year.
+        """map year to scenario year.
 
-    :param year: Value for `year`.
-    :type year: int
-    :returns: Return value.
-    :rtype: int"""
+        :param year: Value for `year`.
+        :type year: int
+        :returns: Return value.
+        :rtype: int"""
         y = max(self.min_year, min(self.max_year, int(year)))
 
         # If we have a full annual grid, this is effectively identity after clipping
@@ -1181,23 +1182,23 @@ class Trails:
         return int(self.years_int[idx])
 
     def _map_year_to_template_year(self, year: int) -> int:
-        """ map year to template year.
+        """map year to template year.
 
-    :param year: Value for `year`.
-    :type year: int
-    :returns: Return value.
-    :rtype: int"""
+        :param year: Value for `year`.
+        :type year: int
+        :returns: Return value.
+        :rtype: int"""
         y = int(year)
         idx = int(np.abs(self.template_years_int - y).argmin())
         return int(self.template_years_int[idx])
 
     def _get_scenario_context(self, year: int) -> tuple[int, str, int] | None:
-        """ get scenario context.
+        """get scenario context.
 
-    :param year: Value for `year`.
-    :type year: int
-    :returns: Return value.
-    :rtype: tuple[int, str, int] | None"""
+        :param year: Value for `year`.
+        :type year: int
+        :returns: Return value.
+        :rtype: tuple[int, str, int] | None"""
         scenario_year = self._map_year_to_scenario_year(year)
         scenario_label = str(scenario_year)
         if scenario_label not in self.scenario_index:
@@ -1212,16 +1213,16 @@ class Trails:
         product_index: int,
         exchange_amount: float,
     ) -> None:
-        """ add demand entry.
+        """add demand entry.
 
-    :param demand: Value for `demand`.
-    :type demand: dict[int, dict[int, float]]
-    :param target_year: Value for `target_year`.
-    :type target_year: int
-    :param product_index: Value for `product_index`.
-    :type product_index: int
-    :param exchange_amount: Value for `exchange_amount`.
-    :type exchange_amount: float"""
+        :param demand: Value for `demand`.
+        :type demand: dict[int, dict[int, float]]
+        :param target_year: Value for `target_year`.
+        :type target_year: int
+        :param product_index: Value for `product_index`.
+        :type product_index: int
+        :param exchange_amount: Value for `exchange_amount`.
+        :type exchange_amount: float"""
         demand.setdefault(target_year, {})
         demand[target_year][product_index] = (
             demand[target_year].get(product_index, 0.0) + exchange_amount
@@ -1229,14 +1230,14 @@ class Trails:
 
     @staticmethod
     def _child_amount(parent_amount: float, exchange_value: float) -> float:
-        """ child amount.
+        """child amount.
 
-    :param parent_amount: Value for `parent_amount`.
-    :type parent_amount: float
-    :param exchange_value: Value for `exchange_value`.
-    :type exchange_value: float
-    :returns: Return value.
-    :rtype: float"""
+        :param parent_amount: Value for `parent_amount`.
+        :type parent_amount: float
+        :param exchange_value: Value for `exchange_value`.
+        :type exchange_value: float
+        :returns: Return value.
+        :rtype: float"""
         if exchange_value < 0.0:
             return parent_amount * (-exchange_value)
         return parent_amount * exchange_value
@@ -1251,20 +1252,20 @@ class Trails:
         demand: dict[int, dict[int, float]],
         debug: bool,
     ) -> None:
-        """ apply temporal distribution to demand.
+        """apply temporal distribution to demand.
 
-    :param year: Value for `year`.
-    :type year: int
-    :param product_index: Value for `product_index`.
-    :type product_index: int
-    :param child_amount: Value for `child_amount`.
-    :type child_amount: float
-    :param tex: Value for `tex`.
-    :type tex: TemporalExchange
-    :param demand: Value for `demand`.
-    :type demand: dict[int, dict[int, float]]
-    :param debug: Value for `debug`.
-    :type debug: bool"""
+        :param year: Value for `year`.
+        :type year: int
+        :param product_index: Value for `product_index`.
+        :type product_index: int
+        :param child_amount: Value for `child_amount`.
+        :type child_amount: float
+        :param tex: Value for `tex`.
+        :type tex: TemporalExchange
+        :param demand: Value for `demand`.
+        :type demand: dict[int, dict[int, float]]
+        :param debug: Value for `debug`.
+        :type debug: bool"""
         offsets_and_weights = self._get_td_offsets(tex=tex, debug=debug)
         if not offsets_and_weights:
             if debug:
@@ -1294,18 +1295,18 @@ class Trails:
     def _get_tech_td_expanded(
         self, *, year: int, act_idx: int, prod_idx: int, debug: bool
     ) -> tuple[Optional[TemporalExchange], list[tuple[int, float]]]:
-        """ get tech td expanded.
+        """get tech td expanded.
 
-    :param year: Value for `year`.
-    :type year: int
-    :param act_idx: Value for `act_idx`.
-    :type act_idx: int
-    :param prod_idx: Value for `prod_idx`.
-    :type prod_idx: int
-    :param debug: Value for `debug`.
-    :type debug: bool
-    :returns: Return value.
-    :rtype: tuple[Optional[TemporalExchange], list[tuple[int, float]]]"""
+        :param year: Value for `year`.
+        :type year: int
+        :param act_idx: Value for `act_idx`.
+        :type act_idx: int
+        :param prod_idx: Value for `prod_idx`.
+        :type prod_idx: int
+        :param debug: Value for `debug`.
+        :type debug: bool
+        :returns: Return value.
+        :rtype: tuple[Optional[TemporalExchange], list[tuple[int, float]]]"""
         y_tpl = self._map_year_to_template_year(year)
         key = (int(y_tpl), int(act_idx), int(prod_idx))
         cached = self._tech_td_expanded_cache.get(key)
@@ -1322,14 +1323,14 @@ class Trails:
     def _get_td_offsets(
         self, *, tex: TemporalExchange, debug: bool
     ) -> list[tuple[int, float]]:
-        """ get td offsets.
+        """get td offsets.
 
-    :param tex: Value for `tex`.
-    :type tex: TemporalExchange
-    :param debug: Value for `debug`.
-    :type debug: bool
-    :returns: Return value.
-    :rtype: list[tuple[int, float]]"""
+        :param tex: Value for `tex`.
+        :type tex: TemporalExchange
+        :param debug: Value for `debug`.
+        :type debug: bool
+        :returns: Return value.
+        :rtype: list[tuple[int, float]]"""
         key = (
             int(tex.distribution),
             float(tex.loc) if tex.loc is not None else None,
@@ -1348,20 +1349,20 @@ class Trails:
     def get_A_for_scenario(self, label: str) -> sparse.COO:
         """Get a for scenario.
 
-    :param label: Value for `label`.
-    :type label: str
-    :returns: Return value.
-    :rtype: sparse.COO"""
+        :param label: Value for `label`.
+        :type label: str
+        :returns: Return value.
+        :rtype: sparse.COO"""
         t = self.scenario_index[label]
         return self.A[t, :, :]
 
     def get_B_for_scenario(self, label: str) -> sparse.COO:
         """Get b for scenario.
 
-    :param label: Value for `label`.
-    :type label: str
-    :returns: Return value.
-    :rtype: sparse.COO"""
+        :param label: Value for `label`.
+        :type label: str
+        :returns: Return value.
+        :rtype: sparse.COO"""
         t = self.scenario_index[label]
         return self.B[t, :, :]
 
@@ -1370,14 +1371,14 @@ class Trails:
     ) -> TemporalExchange | None:
         """Get temporal exchange.
 
-    :param year: Value for `year`.
-    :type year: int
-    :param act_idx: Value for `act_idx`.
-    :type act_idx: int
-    :param prod_idx: Value for `prod_idx`.
-    :type prod_idx: int
-    :returns: Return value.
-    :rtype: TemporalExchange | None"""
+        :param year: Value for `year`.
+        :type year: int
+        :param act_idx: Value for `act_idx`.
+        :type act_idx: int
+        :param prod_idx: Value for `prod_idx`.
+        :type prod_idx: int
+        :returns: Return value.
+        :rtype: TemporalExchange | None"""
         return self._interpolate_temporal_exchange(
             year,
             act_idx,
@@ -1390,14 +1391,14 @@ class Trails:
     ) -> TemporalDistribution | None:
         """Get temporal distribution.
 
-    :param year: Value for `year`.
-    :type year: int
-    :param act_idx: Value for `act_idx`.
-    :type act_idx: int
-    :param prod_idx: Value for `prod_idx`.
-    :type prod_idx: int
-    :returns: Return value.
-    :rtype: TemporalDistribution | None"""
+        :param year: Value for `year`.
+        :type year: int
+        :param act_idx: Value for `act_idx`.
+        :type act_idx: int
+        :param prod_idx: Value for `prod_idx`.
+        :type prod_idx: int
+        :returns: Return value.
+        :rtype: TemporalDistribution | None"""
         tex = self._interpolate_temporal_exchange(
             year,
             act_idx,
@@ -1411,12 +1412,12 @@ class Trails:
     def lca(self, *args: Any, **kwargs: Any) -> Any:
         """Lca.
 
-    :param args: Variadic positional arguments.
-    :type args: Any
-    :param kwargs: Variadic keyword arguments.
-    :type kwargs: Any
-    :returns: Return value.
-    :rtype: Any"""
+        :param args: Variadic positional arguments.
+        :type args: Any
+        :param kwargs: Variadic keyword arguments.
+        :type kwargs: Any
+        :returns: Return value.
+        :rtype: Any"""
         from .lca import lca as lca_fn
 
         if "debug" in kwargs:
@@ -1438,23 +1439,23 @@ class Trails:
     ) -> None:
         """Temporal routing.
 
-    :param start_year: Value for `start_year`.
-    :type start_year: int
-    :param start_act_idx: Value for `start_act_idx`.
-    :type start_act_idx: int
-    :param amount: Value for `amount`.
-    :type amount: float
-    :param max_depth: Value for `max_depth`.
-    :type max_depth: int
-    :param min_amount: Value for `min_amount`.
-    :type min_amount: float
-    :param show_progress: Value for `show_progress`.
-    :type show_progress: bool
-    :param attribute_to_roots: Value for `attribute_to_roots`.
-    :type attribute_to_roots: bool
-    :param debug: Value for `debug`.
-    :type debug: bool
-    :raises RuntimeError: If an error occurs."""
+        :param start_year: Value for `start_year`.
+        :type start_year: int
+        :param start_act_idx: Value for `start_act_idx`.
+        :type start_act_idx: int
+        :param amount: Value for `amount`.
+        :type amount: float
+        :param max_depth: Value for `max_depth`.
+        :type max_depth: int
+        :param min_amount: Value for `min_amount`.
+        :type min_amount: float
+        :param show_progress: Value for `show_progress`.
+        :type show_progress: bool
+        :param attribute_to_roots: Value for `attribute_to_roots`.
+        :type attribute_to_roots: bool
+        :param debug: Value for `debug`.
+        :type debug: bool
+        :raises RuntimeError: If an error occurs."""
         try:
             import networkx as nx
         except Exception as exc:  # pragma: no cover - dependency guard
@@ -1479,10 +1480,10 @@ class Trails:
         def map_year(y: int) -> int:
             """Map year.
 
-    :param y: Value for `y`.
-    :type y: int
-    :returns: Return value.
-    :rtype: int"""
+            :param y: Value for `y`.
+            :type y: int
+            :returns: Return value.
+            :rtype: int"""
             yi = int(y)
             if yi in year_cache:
                 return year_cache[yi]
@@ -1491,14 +1492,14 @@ class Trails:
             return mapped
 
         def _get_activity_meta(label: str, idx: int) -> dict:
-            """ get activity meta.
+            """get activity meta.
 
-    :param label: Value for `label`.
-    :type label: str
-    :param idx: Value for `idx`.
-    :type idx: int
-    :returns: Return value.
-    :rtype: dict"""
+            :param label: Value for `label`.
+            :type label: str
+            :param idx: Value for `idx`.
+            :type idx: int
+            :returns: Return value.
+            :rtype: dict"""
             key = (int(label), int(idx)) if label.isdigit() else None
             if key is not None and key in meta_cache:
                 return meta_cache[key]
@@ -1517,16 +1518,16 @@ class Trails:
             return {}
 
         def _node_key(year: int, depth: int, act_idx: int) -> tuple:
-            """ node key.
+            """node key.
 
-    :param year: Value for `year`.
-    :type year: int
-    :param depth: Value for `depth`.
-    :type depth: int
-    :param act_idx: Value for `act_idx`.
-    :type act_idx: int
-    :returns: Return value.
-    :rtype: tuple"""
+            :param year: Value for `year`.
+            :type year: int
+            :param depth: Value for `depth`.
+            :type depth: int
+            :param act_idx: Value for `act_idx`.
+            :type act_idx: int
+            :returns: Return value.
+            :rtype: tuple"""
             k = (int(year), int(depth), int(act_idx))
             if k in node_key_cache:
                 return node_key_cache[k]
@@ -1541,16 +1542,16 @@ class Trails:
             return key
 
         def _ensure_node(key: tuple, year: int, depth: int, act_idx: int) -> None:
-            """ ensure node.
+            """ensure node.
 
-    :param key: Value for `key`.
-    :type key: tuple
-    :param year: Value for `year`.
-    :type year: int
-    :param depth: Value for `depth`.
-    :type depth: int
-    :param act_idx: Value for `act_idx`.
-    :type act_idx: int"""
+            :param key: Value for `key`.
+            :type key: tuple
+            :param year: Value for `year`.
+            :type year: int
+            :param depth: Value for `depth`.
+            :type depth: int
+            :param act_idx: Value for `act_idx`.
+            :type act_idx: int"""
             if key in G:
                 return
             scenario_year = map_year(year)
@@ -1574,16 +1575,16 @@ class Trails:
         def _add_root_amount(
             data: dict[int, float], root_act: int | None, amt: float, fallback: int
         ) -> None:
-            """ add root amount.
+            """add root amount.
 
-    :param data: Value for `data`.
-    :type data: dict[int, float]
-    :param root_act: Value for `root_act`.
-    :type root_act: int | None
-    :param amt: Value for `amt`.
-    :type amt: float
-    :param fallback: Value for `fallback`.
-    :type fallback: int"""
+            :param data: Value for `data`.
+            :type data: dict[int, float]
+            :param root_act: Value for `root_act`.
+            :type root_act: int | None
+            :param amt: Value for `amt`.
+            :type amt: float
+            :param fallback: Value for `fallback`.
+            :type fallback: int"""
             root = int(root_act) if root_act is not None else int(fallback)
             data[root] = float(data.get(root, 0.0)) + float(amt)
 
@@ -1754,20 +1755,20 @@ class Trails:
     ) -> None:
         """Static lca.
 
-    :param year: Value for `year`.
-    :type year: int
-    :param act_idx: Value for `act_idx`.
-    :type act_idx: int
-    :param methods: Value for `methods`.
-    :type methods: list[str]
-    :param amount: Value for `amount`.
-    :type amount: float
-    :param debug: Value for `debug`.
-    :type debug: bool
-    :param ei_version: Value for `ei_version`.
-    :type ei_version: str
-    :returns: Return value.
-    :rtype: None"""
+        :param year: Value for `year`.
+        :type year: int
+        :param act_idx: Value for `act_idx`.
+        :type act_idx: int
+        :param methods: Value for `methods`.
+        :type methods: list[str]
+        :param amount: Value for `amount`.
+        :type amount: float
+        :param debug: Value for `debug`.
+        :type debug: bool
+        :param ei_version: Value for `ei_version`.
+        :type ei_version: str
+        :returns: Return value.
+        :rtype: None"""
         lca_static(
             trails=self,
             year=int(year),
@@ -1790,18 +1791,18 @@ class Trails:
     ) -> dict[int, dict[int, float]]:
         """Expand temporal exchanges.
 
-    :param year: Value for `year`.
-    :type year: int
-    :param act_idx: Value for `act_idx`.
-    :type act_idx: int
-    :param amount: Value for `amount`.
-    :type amount: float
-    :param use_temporal_distributions: Value for `use_temporal_distributions`.
-    :type use_temporal_distributions: bool
-    :param debug: Value for `debug`.
-    :type debug: bool
-    :returns: Return value.
-    :rtype: dict[int, dict[int, float]]"""
+        :param year: Value for `year`.
+        :type year: int
+        :param act_idx: Value for `act_idx`.
+        :type act_idx: int
+        :param amount: Value for `amount`.
+        :type amount: float
+        :param use_temporal_distributions: Value for `use_temporal_distributions`.
+        :type use_temporal_distributions: bool
+        :param debug: Value for `debug`.
+        :type debug: bool
+        :returns: Return value.
+        :rtype: dict[int, dict[int, float]]"""
         demand: dict[int, dict[int, float]] = {}
         # --- summary counters for low-noise debugging ---
         n_exchanges = 0
@@ -1944,16 +1945,16 @@ class Trails:
     def _get_tech_temporal_exchange(
         self, year: int, act_idx: int, prod_idx: int
     ) -> Optional[TemporalExchange]:
-        """ get tech temporal exchange.
+        """get tech temporal exchange.
 
-    :param year: Value for `year`.
-    :type year: int
-    :param act_idx: Value for `act_idx`.
-    :type act_idx: int
-    :param prod_idx: Value for `prod_idx`.
-    :type prod_idx: int
-    :returns: Return value.
-    :rtype: Optional[TemporalExchange]"""
+        :param year: Value for `year`.
+        :type year: int
+        :param act_idx: Value for `act_idx`.
+        :type act_idx: int
+        :param prod_idx: Value for `prod_idx`.
+        :type prod_idx: int
+        :returns: Return value.
+        :rtype: Optional[TemporalExchange]"""
         if not self.temporal_technosphere_exchanges:
             return None
 
@@ -1968,16 +1969,16 @@ class Trails:
     def _get_bio_temporal_exchange(
         self, year: int, act_idx: int, flow_idx: int
     ) -> Optional[TemporalExchange]:
-        """ get bio temporal exchange.
+        """get bio temporal exchange.
 
-    :param year: Value for `year`.
-    :type year: int
-    :param act_idx: Value for `act_idx`.
-    :type act_idx: int
-    :param flow_idx: Value for `flow_idx`.
-    :type flow_idx: int
-    :returns: Return value.
-    :rtype: Optional[TemporalExchange]"""
+        :param year: Value for `year`.
+        :type year: int
+        :param act_idx: Value for `act_idx`.
+        :type act_idx: int
+        :param flow_idx: Value for `flow_idx`.
+        :type flow_idx: int
+        :returns: Return value.
+        :rtype: Optional[TemporalExchange]"""
         if not self.temporal_biosphere_exchanges:
             return None
 
@@ -1996,14 +1997,14 @@ class Trails:
     ) -> None:
         """Print exchange table.
 
-    :param year: Value for `year`.
-    :type year: int
-    :param act_idx: Value for `act_idx`.
-    :type act_idx: int
-    :param max_rows: Value for `max_rows`.
-    :type max_rows: int | None
-    :param sort_by_amount: Value for `sort_by_amount`.
-    :type sort_by_amount: bool"""
+        :param year: Value for `year`.
+        :type year: int
+        :param act_idx: Value for `act_idx`.
+        :type act_idx: int
+        :param max_rows: Value for `max_rows`.
+        :type max_rows: int | None
+        :param sort_by_amount: Value for `sort_by_amount`.
+        :type sort_by_amount: bool"""
         context = self._get_scenario_context(int(year))
         if context is None:
             print(f"No scenario data available for year={year}")
@@ -2012,12 +2013,12 @@ class Trails:
         scenario_label = str(scenario_label)
 
         def _format_amount(value: float) -> str:
-            """ format amount.
+            """format amount.
 
-    :param value: Value for `value`.
-    :type value: float
-    :returns: Return value.
-    :rtype: str"""
+            :param value: Value for `value`.
+            :type value: float
+            :returns: Return value.
+            :rtype: str"""
             if value == 0.0:
                 return "0"
             abs_v = abs(value)
@@ -2026,14 +2027,14 @@ class Trails:
             return f"{value:.2f}".rstrip("0").rstrip(".")
 
         def _get_activity_meta(label: str, idx: int) -> dict:
-            """ get activity meta.
+            """get activity meta.
 
-    :param label: Value for `label`.
-    :type label: str
-    :param idx: Value for `idx`.
-    :type idx: int
-    :returns: Return value.
-    :rtype: dict"""
+            :param label: Value for `label`.
+            :type label: str
+            :param idx: Value for `idx`.
+            :type idx: int
+            :returns: Return value.
+            :rtype: dict"""
             mapping = self.activity_indices.get(label)
             if mapping and idx in mapping:
                 return mapping.get(idx, {})
@@ -2044,14 +2045,14 @@ class Trails:
             return {}
 
         def _get_bio_meta(label: str, idx: int) -> dict:
-            """ get bio meta.
+            """get bio meta.
 
-    :param label: Value for `label`.
-    :type label: str
-    :param idx: Value for `idx`.
-    :type idx: int
-    :returns: Return value.
-    :rtype: dict"""
+            :param label: Value for `label`.
+            :type label: str
+            :param idx: Value for `idx`.
+            :type idx: int
+            :returns: Return value.
+            :rtype: dict"""
             mapping = self.biosphere_indices.get(label)
             if mapping and idx in mapping:
                 return mapping.get(idx, {})
@@ -2136,12 +2137,12 @@ class Trails:
         if sort_by_amount:
 
             def _sort_key(row: dict[str, object]) -> float:
-                """ sort key.
+                """sort key.
 
-    :param row: Value for `row`.
-    :type row: dict[str, object]
-    :returns: Return value.
-    :rtype: float"""
+                :param row: Value for `row`.
+                :type row: dict[str, object]
+                :returns: Return value.
+                :rtype: float"""
                 raw = row.get("amount", "0")
                 try:
                     return abs(float(raw))
@@ -2161,14 +2162,14 @@ class Trails:
             rows = rows[: int(max_rows)]
 
         def _truncate(value: object, limit: int) -> str:
-            """ truncate.
+            """truncate.
 
-    :param value: Value for `value`.
-    :type value: object
-    :param limit: Value for `limit`.
-    :type limit: int
-    :returns: Return value.
-    :rtype: str"""
+            :param value: Value for `value`.
+            :type value: object
+            :param limit: Value for `limit`.
+            :type limit: int
+            :returns: Return value.
+            :rtype: str"""
             text = "" if value is None else str(value)
             if len(text) <= limit:
                 return text
@@ -2248,10 +2249,10 @@ class Trails:
     def list_lcia_methods(self, ei_version: str = "3.11") -> list[str]:
         """List lcia methods.
 
-    :param ei_version: Value for `ei_version`.
-    :type ei_version: str
-    :returns: Return value.
-    :rtype: list[str]"""
+        :param ei_version: Value for `ei_version`.
+        :type ei_version: str
+        :returns: Return value.
+        :rtype: list[str]"""
         from .lcia import get_lcia_method_names
 
         return get_lcia_method_names(ei_version=ei_version)
@@ -2259,14 +2260,14 @@ class Trails:
     def _get_biosphere_slice(
         self, base_year: int, debug: bool
     ) -> tuple[int, int, sparse.COO, int] | None:
-        """ get biosphere slice.
+        """get biosphere slice.
 
-    :param base_year: Value for `base_year`.
-    :type base_year: int
-    :param debug: Value for `debug`.
-    :type debug: bool
-    :returns: Return value.
-    :rtype: tuple[int, int, sparse.COO, int] | None"""
+        :param base_year: Value for `base_year`.
+        :type base_year: int
+        :param debug: Value for `debug`.
+        :type debug: bool
+        :returns: Return value.
+        :rtype: tuple[int, int, sparse.COO, int] | None"""
         if self.B is None:
             if debug:
                 logger.warning("accumulate_bio: B is None -> nothing to accumulate")
@@ -2300,13 +2301,13 @@ class Trails:
         return scenario_year, t, B_t, n_flows
 
     def _get_B_csr_for_t(self, t: int) -> sparse.GCXS:
-        """ get b csr for t.
+        """get b csr for t.
 
-    :param t: Value for `t`.
-    :type t: int
-    :returns: Return value.
-    :rtype: sparse.GCXS
-    :raises RuntimeError: If an error occurs."""
+        :param t: Value for `t`.
+        :type t: int
+        :returns: Return value.
+        :rtype: sparse.GCXS
+        :raises RuntimeError: If an error occurs."""
         if not hasattr(self, "_B_csr_cache"):
             self._B_csr_cache = {}  # type: ignore[attr-defined]
         cache = self._B_csr_cache  # type: ignore[attr-defined]
@@ -2325,13 +2326,13 @@ class Trails:
     def _get_B_row_cache_for_t(
         self, t: int
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-        """ get b row cache for t.
+        """get b row cache for t.
 
-    :param t: Value for `t`.
-    :type t: int
-    :returns: Return value.
-    :rtype: tuple[np.ndarray, np.ndarray, np.ndarray]
-    :raises RuntimeError: If an error occurs."""
+        :param t: Value for `t`.
+        :type t: int
+        :returns: Return value.
+        :rtype: tuple[np.ndarray, np.ndarray, np.ndarray]
+        :raises RuntimeError: If an error occurs."""
         if not hasattr(self, "_B_row_cache"):
             self._B_row_cache = {}  # type: ignore[attr-defined]
 
@@ -2368,15 +2369,15 @@ class Trails:
         return cached
 
     def _get_B_row_index_map_for_t_act(self, t: int, act: int) -> np.ndarray:
-        """ get b row index map for t act.
+        """get b row index map for t act.
 
-    :param t: Value for `t`.
-    :type t: int
-    :param act: Value for `act`.
-    :type act: int
-    :returns: Return value.
-    :rtype: np.ndarray
-    :raises RuntimeError: If an error occurs."""
+        :param t: Value for `t`.
+        :type t: int
+        :param act: Value for `act`.
+        :type act: int
+        :returns: Return value.
+        :rtype: np.ndarray
+        :raises RuntimeError: If an error occurs."""
         if not hasattr(self, "_B_row_index_map"):
             self._B_row_index_map = {}  # type: ignore[attr-defined]
         cache = self._B_row_index_map  # type: ignore[attr-defined]
@@ -2405,16 +2406,16 @@ class Trails:
         row_vals_sorted: np.ndarray,
         query_flows_sorted: np.ndarray,
     ) -> np.ndarray:
-        """ row values for flows sorted.
+        """row values for flows sorted.
 
-    :param row_flows_sorted: Value for `row_flows_sorted`.
-    :type row_flows_sorted: np.ndarray
-    :param row_vals_sorted: Value for `row_vals_sorted`.
-    :type row_vals_sorted: np.ndarray
-    :param query_flows_sorted: Value for `query_flows_sorted`.
-    :type query_flows_sorted: np.ndarray
-    :returns: Return value.
-    :rtype: np.ndarray"""
+        :param row_flows_sorted: Value for `row_flows_sorted`.
+        :type row_flows_sorted: np.ndarray
+        :param row_vals_sorted: Value for `row_vals_sorted`.
+        :type row_vals_sorted: np.ndarray
+        :param query_flows_sorted: Value for `query_flows_sorted`.
+        :type query_flows_sorted: np.ndarray
+        :returns: Return value.
+        :rtype: np.ndarray"""
         # positions where each query flow would be inserted
         pos = np.searchsorted(row_flows_sorted, query_flows_sorted)
         out = np.zeros(query_flows_sorted.size, dtype=np.float64)
@@ -2432,16 +2433,16 @@ class Trails:
         use_temporal_distributions: bool,
         debug: bool,
     ) -> _BioAccumulationContext | None:
-        """ build bio accumulation context.
+        """build bio accumulation context.
 
-    :param base_year: Value for `base_year`.
-    :type base_year: int
-    :param use_temporal_distributions: Value for `use_temporal_distributions`.
-    :type use_temporal_distributions: bool
-    :param debug: Value for `debug`.
-    :type debug: bool
-    :returns: Return value.
-    :rtype: _BioAccumulationContext | None"""
+        :param base_year: Value for `base_year`.
+        :type base_year: int
+        :param use_temporal_distributions: Value for `use_temporal_distributions`.
+        :type use_temporal_distributions: bool
+        :param debug: Value for `debug`.
+        :type debug: bool
+        :returns: Return value.
+        :rtype: _BioAccumulationContext | None"""
         biosphere_slice = self._get_biosphere_slice(base_year, debug)
         if biosphere_slice is None:
             return None
@@ -2535,14 +2536,14 @@ class Trails:
     def _filter_idx_with_keep(
         self, idx_full: np.ndarray, keep_full: np.ndarray
     ) -> np.ndarray:
-        """ filter idx with keep.
+        """filter idx with keep.
 
-    :param idx_full: Value for `idx_full`.
-    :type idx_full: np.ndarray
-    :param keep_full: Value for `keep_full`.
-    :type keep_full: np.ndarray
-    :returns: Return value.
-    :rtype: np.ndarray"""
+        :param idx_full: Value for `idx_full`.
+        :type idx_full: np.ndarray
+        :param keep_full: Value for `keep_full`.
+        :type keep_full: np.ndarray
+        :returns: Return value.
+        :rtype: np.ndarray"""
         if idx_full is None or idx_full.size == 0:
             return idx_full
 
@@ -2562,14 +2563,14 @@ class Trails:
         return idxv[keep_full[idxv]]
 
     def _get_B_cf_activity_vector(self, t: int, cf: np.ndarray) -> np.ndarray:
-        """ get b cf activity vector.
+        """get b cf activity vector.
 
-    :param t: Value for `t`.
-    :type t: int
-    :param cf: Value for `cf`.
-    :type cf: np.ndarray
-    :returns: Return value.
-    :rtype: np.ndarray"""
+        :param t: Value for `t`.
+        :type t: int
+        :param cf: Value for `cf`.
+        :type cf: np.ndarray
+        :returns: Return value.
+        :rtype: np.ndarray"""
         if not hasattr(self, "_B_cf_actvec_cache"):
             self._B_cf_actvec_cache = {}  # type: ignore[attr-defined]
 
@@ -2602,21 +2603,21 @@ class Trails:
     ) -> None:
         """Accumulate temporalized biosphere score matrix.
 
-    :param base_year: Value for `base_year`.
-    :type base_year: int
-    :param supply_matrix: Value for `supply_matrix`.
-    :type supply_matrix: np.ndarray
-    :param root_activities: Value for `root_activities`.
-    :type root_activities: np.ndarray
-    :param cf: Value for `cf`.
-    :type cf: np.ndarray
-    :param min_amount: Value for `min_amount`.
-    :type min_amount: float
-    :param use_temporal_distributions: Value for `use_temporal_distributions`.
-    :type use_temporal_distributions: bool
-    :param debug: Value for `debug`.
-    :type debug: bool
-    :raises ValueError: If an error occurs."""
+        :param base_year: Value for `base_year`.
+        :type base_year: int
+        :param supply_matrix: Value for `supply_matrix`.
+        :type supply_matrix: np.ndarray
+        :param root_activities: Value for `root_activities`.
+        :type root_activities: np.ndarray
+        :param cf: Value for `cf`.
+        :type cf: np.ndarray
+        :param min_amount: Value for `min_amount`.
+        :type min_amount: float
+        :param use_temporal_distributions: Value for `use_temporal_distributions`.
+        :type use_temporal_distributions: bool
+        :param debug: Value for `debug`.
+        :type debug: bool
+        :raises ValueError: If an error occurs."""
         if self.B is None:
             return
         if supply_matrix.size == 0:
@@ -2753,10 +2754,10 @@ class Trails:
         def td_key(tex: TemporalExchange) -> tuple:
             """Td key.
 
-    :param tex: Value for `tex`.
-    :type tex: TemporalExchange
-    :returns: Return value.
-    :rtype: tuple"""
+            :param tex: Value for `tex`.
+            :type tex: TemporalExchange
+            :returns: Return value.
+            :rtype: tuple"""
             return (
                 tex.distribution,
                 tex.loc,
@@ -2769,10 +2770,10 @@ class Trails:
         def pulses_from_key(k: tuple) -> list[tuple[int, float]]:
             """Pulses from key.
 
-    :param k: Value for `k`.
-    :type k: tuple
-    :returns: Return value.
-    :rtype: list[tuple[int, float]]"""
+            :param k: Value for `k`.
+            :type k: tuple
+            :returns: Return value.
+            :rtype: list[tuple[int, float]]"""
             dist, loc, scale, off_min, off_max, amt_src = k
             tex = TemporalExchange(
                 distribution=dist,
@@ -2914,10 +2915,10 @@ class Trails:
                 def map_year_cached(raw_year: int) -> int:
                     """Map year cached.
 
-    :param raw_year: Value for `raw_year`.
-    :type raw_year: int
-    :returns: Return value.
-    :rtype: int"""
+                    :param raw_year: Value for `raw_year`.
+                    :type raw_year: int
+                    :returns: Return value.
+                    :rtype: int"""
                     y = year_map_cache.get(raw_year)
                     if y is None:
                         y = int(self._map_year_to_scenario_year(raw_year))
@@ -3036,21 +3037,21 @@ class Trails:
     ) -> None:
         """Accumulate temporalized biosphere score.
 
-    :param base_year: Value for `base_year`.
-    :type base_year: int
-    :param supply_by_activity: Value for `supply_by_activity`.
-    :type supply_by_activity: Dict[int, float]
-    :param cf: Value for `cf`.
-    :type cf: np.ndarray
-    :param min_amount: Value for `min_amount`.
-    :type min_amount: float
-    :param store_activity: Value for `store_activity`.
-    :type store_activity: int | None
-    :param use_temporal_distributions: Value for `use_temporal_distributions`.
-    :type use_temporal_distributions: bool
-    :param debug: Value for `debug`.
-    :type debug: bool
-    :raises ValueError: If an error occurs."""
+        :param base_year: Value for `base_year`.
+        :type base_year: int
+        :param supply_by_activity: Value for `supply_by_activity`.
+        :type supply_by_activity: Dict[int, float]
+        :param cf: Value for `cf`.
+        :type cf: np.ndarray
+        :param min_amount: Value for `min_amount`.
+        :type min_amount: float
+        :param store_activity: Value for `store_activity`.
+        :type store_activity: int | None
+        :param use_temporal_distributions: Value for `use_temporal_distributions`.
+        :type use_temporal_distributions: bool
+        :param debug: Value for `debug`.
+        :type debug: bool
+        :raises ValueError: If an error occurs."""
         # Ensure score builders exist
         if not hasattr(self, "_score_year_index") or not hasattr(
             self, "_score_chunk_value"
@@ -3125,10 +3126,10 @@ class Trails:
         def map_year_cached(raw_year: int) -> int:
             """Map year cached.
 
-    :param raw_year: Value for `raw_year`.
-    :type raw_year: int
-    :returns: Return value.
-    :rtype: int"""
+            :param raw_year: Value for `raw_year`.
+            :type raw_year: int
+            :returns: Return value.
+            :rtype: int"""
             y = year_map_cache.get(raw_year)
             if y is None:
                 y = int(map_year_to_scenario(raw_year))
@@ -3138,10 +3139,10 @@ class Trails:
         def td_key(tex: TemporalExchange) -> tuple:
             """Td key.
 
-    :param tex: Value for `tex`.
-    :type tex: TemporalExchange
-    :returns: Return value.
-    :rtype: tuple"""
+            :param tex: Value for `tex`.
+            :type tex: TemporalExchange
+            :returns: Return value.
+            :rtype: tuple"""
             return (
                 tex.distribution,
                 tex.loc,
@@ -3154,10 +3155,10 @@ class Trails:
         def pulses_from_key(k: tuple) -> list[tuple[int, float]]:
             """Pulses from key.
 
-    :param k: Value for `k`.
-    :type k: tuple
-    :returns: Return value.
-    :rtype: list[tuple[int, float]]"""
+            :param k: Value for `k`.
+            :type k: tuple
+            :returns: Return value.
+            :rtype: list[tuple[int, float]]"""
             dist, loc, scale, off_min, off_max, amt_src = k
             tex = TemporalExchange(
                 distribution=dist,
@@ -3180,16 +3181,16 @@ class Trails:
         def _safe_filter_positions(
             pos: np.ndarray, keep: np.ndarray | None, row_len: int
         ) -> np.ndarray:
-            """ safe filter positions.
+            """safe filter positions.
 
-    :param pos: Value for `pos`.
-    :type pos: np.ndarray
-    :param keep: Value for `keep`.
-    :type keep: np.ndarray | None
-    :param row_len: Value for `row_len`.
-    :type row_len: int
-    :returns: Return value.
-    :rtype: np.ndarray"""
+            :param pos: Value for `pos`.
+            :type pos: np.ndarray
+            :param keep: Value for `keep`.
+            :type keep: np.ndarray | None
+            :param row_len: Value for `row_len`.
+            :type row_len: int
+            :returns: Return value.
+            :rtype: np.ndarray"""
             if pos.size == 0:
                 return pos
             # guard against stale/corrupt cached positions
@@ -3433,20 +3434,20 @@ class Trails:
         use_temporal_distributions: bool,
         debug: bool,
     ) -> None:
-        """ accumulate temporalized biosphere inventory core.
+        """accumulate temporalized biosphere inventory core.
 
-    :param ctx: Value for `ctx`.
-    :type ctx: _BioAccumulationContext
-    :param supply_by_activity: Value for `supply_by_activity`.
-    :type supply_by_activity: Dict[int, float]
-    :param min_amount: Value for `min_amount`.
-    :type min_amount: float
-    :param store_activity: Value for `store_activity`.
-    :type store_activity: int | None
-    :param use_temporal_distributions: Value for `use_temporal_distributions`.
-    :type use_temporal_distributions: bool
-    :param debug: Value for `debug`.
-    :type debug: bool"""
+        :param ctx: Value for `ctx`.
+        :type ctx: _BioAccumulationContext
+        :param supply_by_activity: Value for `supply_by_activity`.
+        :type supply_by_activity: Dict[int, float]
+        :param min_amount: Value for `min_amount`.
+        :type min_amount: float
+        :param store_activity: Value for `store_activity`.
+        :type store_activity: int | None
+        :param use_temporal_distributions: Value for `use_temporal_distributions`.
+        :type use_temporal_distributions: bool
+        :param debug: Value for `debug`.
+        :type debug: bool"""
         dbg = self._get_debug_flow_filters(debug=debug)
 
         if not supply_by_activity:
@@ -3475,10 +3476,10 @@ class Trails:
         def map_year_cached(raw_year: int) -> int:
             """Map year cached.
 
-    :param raw_year: Value for `raw_year`.
-    :type raw_year: int
-    :returns: Return value.
-    :rtype: int"""
+            :param raw_year: Value for `raw_year`.
+            :type raw_year: int
+            :returns: Return value.
+            :rtype: int"""
             y = year_map_cache.get(raw_year)
             if y is None:
                 y = int(map_year_to_scenario(raw_year))
@@ -3488,10 +3489,10 @@ class Trails:
         def td_key(tex: TemporalExchange) -> tuple:
             """Td key.
 
-    :param tex: Value for `tex`.
-    :type tex: TemporalExchange
-    :returns: Return value.
-    :rtype: tuple"""
+            :param tex: Value for `tex`.
+            :type tex: TemporalExchange
+            :returns: Return value.
+            :rtype: tuple"""
             return (
                 tex.distribution,
                 tex.loc,
@@ -3998,10 +3999,10 @@ class Trails:
                         )
 
     def _get_numba_ported_kernel(self) -> Callable | None:
-        """ get numba ported kernel.
+        """get numba ported kernel.
 
-    :returns: Return value.
-    :rtype: Callable | None"""
+        :returns: Return value.
+        :rtype: Callable | None"""
         if hasattr(self, "_numba_ported_kernel_checked"):
             return getattr(self, "_numba_ported_kernel", None)
 
@@ -4023,22 +4024,22 @@ class Trails:
             ported_weights: np_local.ndarray,
             base_year: int,
         ) -> tuple[np_local.ndarray, np_local.ndarray, np_local.ndarray]:
-            """ ported kernel.
+            """ported kernel.
 
-    :param flows_full: Value for `flows_full`.
-    :type flows_full: np_local.ndarray
-    :param scaled_full: Value for `scaled_full`.
-    :type scaled_full: np_local.ndarray
-    :param ported_flow_idx: Value for `ported_flow_idx`.
-    :type ported_flow_idx: np_local.ndarray
-    :param ported_offsets: Value for `ported_offsets`.
-    :type ported_offsets: np_local.ndarray
-    :param ported_weights: Value for `ported_weights`.
-    :type ported_weights: np_local.ndarray
-    :param base_year: Value for `base_year`.
-    :type base_year: int
-    :returns: Return value.
-    :rtype: tuple[np_local.ndarray, np_local.ndarray, np_local.ndarray]"""
+            :param flows_full: Value for `flows_full`.
+            :type flows_full: np_local.ndarray
+            :param scaled_full: Value for `scaled_full`.
+            :type scaled_full: np_local.ndarray
+            :param ported_flow_idx: Value for `ported_flow_idx`.
+            :type ported_flow_idx: np_local.ndarray
+            :param ported_offsets: Value for `ported_offsets`.
+            :type ported_offsets: np_local.ndarray
+            :param ported_weights: Value for `ported_weights`.
+            :type ported_weights: np_local.ndarray
+            :param base_year: Value for `base_year`.
+            :type base_year: int
+            :returns: Return value.
+            :rtype: tuple[np_local.ndarray, np_local.ndarray, np_local.ndarray]"""
             n = ported_flow_idx.size
             flows_out = np_local.empty(n, dtype=np_local.int64)
             years_out = np_local.empty(n, dtype=np_local.int64)
@@ -4054,10 +4055,10 @@ class Trails:
         return _ported_kernel
 
     def _get_numba_matrix_kernel(self) -> Callable | None:
-        """ get numba matrix kernel.
+        """get numba matrix kernel.
 
-    :returns: Return value.
-    :rtype: Callable | None"""
+        :returns: Return value.
+        :rtype: Callable | None"""
         if hasattr(self, "_numba_matrix_kernel_checked"):
             return getattr(self, "_numba_matrix_kernel", None)
 
@@ -4076,16 +4077,16 @@ class Trails:
             row_index_map: np_local.ndarray,
             row_vals: np_local.ndarray,
         ) -> tuple[np_local.ndarray, np_local.ndarray]:
-            """ matrix kernel.
+            """matrix kernel.
 
-    :param flows: Value for `flows`.
-    :type flows: np_local.ndarray
-    :param row_index_map: Value for `row_index_map`.
-    :type row_index_map: np_local.ndarray
-    :param row_vals: Value for `row_vals`.
-    :type row_vals: np_local.ndarray
-    :returns: Return value.
-    :rtype: tuple[np_local.ndarray, np_local.ndarray]"""
+            :param flows: Value for `flows`.
+            :type flows: np_local.ndarray
+            :param row_index_map: Value for `row_index_map`.
+            :type row_index_map: np_local.ndarray
+            :param row_vals: Value for `row_vals`.
+            :type row_vals: np_local.ndarray
+            :returns: Return value.
+            :rtype: tuple[np_local.ndarray, np_local.ndarray]"""
             n = flows.size
             vals = np_local.empty(n, dtype=np_local.float64)
             valid = np_local.zeros(n, dtype=np_local.bool_)
@@ -4107,18 +4108,18 @@ class Trails:
         min_amount: float,
         debug: bool,
     ) -> bool:
-        """ accumulate no td batch.
+        """accumulate no td batch.
 
-    :param ctx: Value for `ctx`.
-    :type ctx: _BioAccumulationContext
-    :param supplies: Value for `supplies`.
-    :type supplies: List[tuple[Dict[int, float], int | None]]
-    :param min_amount: Value for `min_amount`.
-    :type min_amount: float
-    :param debug: Value for `debug`.
-    :type debug: bool
-    :returns: Return value.
-    :rtype: bool"""
+        :param ctx: Value for `ctx`.
+        :type ctx: _BioAccumulationContext
+        :param supplies: Value for `supplies`.
+        :type supplies: List[tuple[Dict[int, float], int | None]]
+        :param min_amount: Value for `min_amount`.
+        :type min_amount: float
+        :param debug: Value for `debug`.
+        :type debug: bool
+        :returns: Return value.
+        :rtype: bool"""
         if not supplies:
             return True
 
@@ -4184,18 +4185,18 @@ class Trails:
     ) -> None:
         """Accumulate temporalized biosphere inventory.
 
-    :param base_year: Value for `base_year`.
-    :type base_year: int
-    :param supply_by_activity: Value for `supply_by_activity`.
-    :type supply_by_activity: Dict[int, float]
-    :param min_amount: Value for `min_amount`.
-    :type min_amount: float
-    :param store_activity: Value for `store_activity`.
-    :type store_activity: int | None
-    :param use_temporal_distributions: Value for `use_temporal_distributions`.
-    :type use_temporal_distributions: bool
-    :param debug: Value for `debug`.
-    :type debug: bool"""
+        :param base_year: Value for `base_year`.
+        :type base_year: int
+        :param supply_by_activity: Value for `supply_by_activity`.
+        :type supply_by_activity: Dict[int, float]
+        :param min_amount: Value for `min_amount`.
+        :type min_amount: float
+        :param store_activity: Value for `store_activity`.
+        :type store_activity: int | None
+        :param use_temporal_distributions: Value for `use_temporal_distributions`.
+        :type use_temporal_distributions: bool
+        :param debug: Value for `debug`.
+        :type debug: bool"""
         ctx = self._build_bio_accumulation_context(
             base_year,
             use_temporal_distributions=use_temporal_distributions,
@@ -4240,16 +4241,16 @@ class Trails:
     ) -> None:
         """Accumulate temporalized biosphere inventory batch.
 
-    :param base_year: Value for `base_year`.
-    :type base_year: int
-    :param supplies: Value for `supplies`.
-    :type supplies: List[tuple[Dict[int, float], int | None]]
-    :param min_amount: Value for `min_amount`.
-    :type min_amount: float
-    :param use_temporal_distributions: Value for `use_temporal_distributions`.
-    :type use_temporal_distributions: bool
-    :param debug: Value for `debug`.
-    :type debug: bool"""
+        :param base_year: Value for `base_year`.
+        :type base_year: int
+        :param supplies: Value for `supplies`.
+        :type supplies: List[tuple[Dict[int, float], int | None]]
+        :param min_amount: Value for `min_amount`.
+        :type min_amount: float
+        :param use_temporal_distributions: Value for `use_temporal_distributions`.
+        :type use_temporal_distributions: bool
+        :param debug: Value for `debug`.
+        :type debug: bool"""
         if not supplies:
             return
         ctx = self._build_bio_accumulation_context(
@@ -4304,22 +4305,22 @@ class Trails:
             )
 
     def _map_year_to_available(self, year: int) -> int:
-        """ map year to available.
+        """map year to available.
 
-    :param year: Value for `year`.
-    :type year: int
-    :returns: Return value.
-    :rtype: int"""
+        :param year: Value for `year`.
+        :type year: int
+        :returns: Return value.
+        :rtype: int"""
         return self._map_year_to_scenario_year(year)
 
     @staticmethod
     def _estimate_total_from_depth(max_depth: int) -> int | None:
-        """ estimate total from depth.
+        """estimate total from depth.
 
-    :param max_depth: Value for `max_depth`.
-    :type max_depth: int
-    :returns: Return value.
-    :rtype: int | None"""
+        :param max_depth: Value for `max_depth`.
+        :type max_depth: int
+        :returns: Return value.
+        :rtype: int | None"""
         DEPTH_TOTALS = {
             1: 10,
             2: 50,
@@ -4366,22 +4367,22 @@ class Trails:
         r: Optional[int],
         return_provenance: bool,
     ) -> None:
-        """ record frontier.
+        """record frontier.
 
-    :param frontier_total: Value for `frontier_total`.
-    :type frontier_total: dict[tuple[int, int], float]
-    :param provenance_roots: Value for `provenance_roots`.
-    :type provenance_roots: dict[tuple[int, int], dict[int, float]]
-    :param y: Value for `y`.
-    :type y: int
-    :param a: Value for `a`.
-    :type a: int
-    :param x: Value for `x`.
-    :type x: float
-    :param r: Value for `r`.
-    :type r: Optional[int]
-    :param return_provenance: Value for `return_provenance`.
-    :type return_provenance: bool"""
+        :param frontier_total: Value for `frontier_total`.
+        :type frontier_total: dict[tuple[int, int], float]
+        :param provenance_roots: Value for `provenance_roots`.
+        :type provenance_roots: dict[tuple[int, int], dict[int, float]]
+        :param y: Value for `y`.
+        :type y: int
+        :param a: Value for `a`.
+        :type a: int
+        :param x: Value for `x`.
+        :type x: float
+        :param r: Value for `r`.
+        :type r: Optional[int]
+        :param return_provenance: Value for `return_provenance`.
+        :type return_provenance: bool"""
         frontier_total[(int(y), int(a))] += float(x)
         if return_provenance and (r is not None):
             provenance_roots[(int(y), int(a))][int(r)] += float(x)
@@ -4396,22 +4397,22 @@ class Trails:
         r: Optional[int],
         return_provenance: bool,
     ) -> None:
-        """ record direct bio.
+        """record direct bio.
 
-    :param direct_bio_total: Value for `direct_bio_total`.
-    :type direct_bio_total: dict[tuple[int, int], float]
-    :param direct_bio_roots: Value for `direct_bio_roots`.
-    :type direct_bio_roots: dict[tuple[int, int], dict[int, float]]
-    :param y: Value for `y`.
-    :type y: int
-    :param a: Value for `a`.
-    :type a: int
-    :param x: Value for `x`.
-    :type x: float
-    :param r: Value for `r`.
-    :type r: Optional[int]
-    :param return_provenance: Value for `return_provenance`.
-    :type return_provenance: bool"""
+        :param direct_bio_total: Value for `direct_bio_total`.
+        :type direct_bio_total: dict[tuple[int, int], float]
+        :param direct_bio_roots: Value for `direct_bio_roots`.
+        :type direct_bio_roots: dict[tuple[int, int], dict[int, float]]
+        :param y: Value for `y`.
+        :type y: int
+        :param a: Value for `a`.
+        :type a: int
+        :param x: Value for `x`.
+        :type x: float
+        :param r: Value for `r`.
+        :type r: Optional[int]
+        :param return_provenance: Value for `return_provenance`.
+        :type return_provenance: bool"""
         direct_bio_total[(int(y), int(a))] += float(x)
         if return_provenance and (r is not None):
             direct_bio_roots[(int(y), int(a))][int(r)] += float(x)
@@ -4419,16 +4420,16 @@ class Trails:
     def _has_direct_biosphere(
         self, scenario_year: int, act: int, bio_cache: dict
     ) -> bool:
-        """ has direct biosphere.
+        """has direct biosphere.
 
-    :param scenario_year: Value for `scenario_year`.
-    :type scenario_year: int
-    :param act: Value for `act`.
-    :type act: int
-    :param bio_cache: Value for `bio_cache`.
-    :type bio_cache: dict
-    :returns: Return value.
-    :rtype: bool"""
+        :param scenario_year: Value for `scenario_year`.
+        :type scenario_year: int
+        :param act: Value for `act`.
+        :type act: int
+        :param bio_cache: Value for `bio_cache`.
+        :type bio_cache: dict
+        :returns: Return value.
+        :rtype: bool"""
         label = str(scenario_year)
         if label not in self.scenario_index or self.B is None:
             return False
@@ -4463,26 +4464,26 @@ class Trails:
     ) -> tuple[dict, dict] | tuple[dict, dict, dict, dict]:
         """Temporal traversal.
 
-    :param start_year: Value for `start_year`.
-    :type start_year: int
-    :param start_act_idx: Value for `start_act_idx`.
-    :type start_act_idx: int
-    :param amount: Value for `amount`.
-    :type amount: float
-    :param max_depth: Value for `max_depth`.
-    :type max_depth: int
-    :param min_amount: Value for `min_amount`.
-    :type min_amount: float
-    :param return_provenance: Value for `return_provenance`.
-    :type return_provenance: bool
-    :param show_progress: Value for `show_progress`.
-    :type show_progress: bool
-    :param use_temporal_distributions: Value for `use_temporal_distributions`.
-    :type use_temporal_distributions: bool
-    :param debug: Value for `debug`.
-    :type debug: bool
-    :returns: Return value.
-    :rtype: tuple[dict, dict] | tuple[dict, dict, dict, dict]"""
+        :param start_year: Value for `start_year`.
+        :type start_year: int
+        :param start_act_idx: Value for `start_act_idx`.
+        :type start_act_idx: int
+        :param amount: Value for `amount`.
+        :type amount: float
+        :param max_depth: Value for `max_depth`.
+        :type max_depth: int
+        :param min_amount: Value for `min_amount`.
+        :type min_amount: float
+        :param return_provenance: Value for `return_provenance`.
+        :type return_provenance: bool
+        :param show_progress: Value for `show_progress`.
+        :type show_progress: bool
+        :param use_temporal_distributions: Value for `use_temporal_distributions`.
+        :type use_temporal_distributions: bool
+        :param debug: Value for `debug`.
+        :type debug: bool
+        :returns: Return value.
+        :rtype: tuple[dict, dict] | tuple[dict, dict, dict, dict]"""
 
         if debug:
             logger.info(
@@ -4513,10 +4514,10 @@ class Trails:
         def estimate_total_from_branching(branching_samples: list[int]) -> int:
             """Estimate total from branching.
 
-    :param branching_samples: Value for `branching_samples`.
-    :type branching_samples: list[int]
-    :returns: Return value.
-    :rtype: int"""
+            :param branching_samples: Value for `branching_samples`.
+            :type branching_samples: list[int]
+            :returns: Return value.
+            :rtype: int"""
             if not branching_samples:
                 return 1
             s = sorted(branching_samples)
@@ -4559,8 +4560,7 @@ class Trails:
         #  - If we exceed total, expand total so the bar never runs beyond 100%.
         #  - At the end, snap total to exactly nodes_processed so the bar finishes at 100%.
         def _pbar_step() -> None:
-            """ pbar step.
-"""
+            """pbar step."""
             nonlocal nodes_processed, pbar
             nodes_processed += 1
             if pbar is None:
@@ -4580,8 +4580,7 @@ class Trails:
             pbar.update(1)
 
         def _pbar_finalize() -> None:
-            """ pbar finalize.
-"""
+            """pbar finalize."""
             nonlocal pbar
             if pbar is None:
                 return
@@ -4798,11 +4797,11 @@ class Trails:
     def frontier_to_demand_vectors(self, frontier: dict) -> dict[int, np.ndarray]:
         """Frontier to demand vectors.
 
-    :param frontier: Value for `frontier`.
-    :type frontier: dict
-    :returns: Return value.
-    :rtype: dict[int, np.ndarray]
-    :raises ValueError: If an error occurs."""
+        :param frontier: Value for `frontier`.
+        :type frontier: dict
+        :returns: Return value.
+        :rtype: dict[int, np.ndarray]
+        :raises ValueError: If an error occurs."""
         if self.A is None:
             raise ValueError("Cannot build demand vectors: A is None")
 
@@ -4852,18 +4851,18 @@ class Trails:
     ) -> dict[int, dict[tuple[tuple[int, int], tuple[int, int]], float]]:
         """Collect traversal edges.
 
-    :param start_year: Value for `start_year`.
-    :type start_year: int
-    :param start_act_idx: Value for `start_act_idx`.
-    :type start_act_idx: int
-    :param amount: Value for `amount`.
-    :type amount: float
-    :param max_depth: Value for `max_depth`.
-    :type max_depth: int
-    :param min_amount: Value for `min_amount`.
-    :type min_amount: float
-    :returns: Return value.
-    :rtype: dict[int, dict[tuple[tuple[int, int], tuple[int, int]], float]]"""
+        :param start_year: Value for `start_year`.
+        :type start_year: int
+        :param start_act_idx: Value for `start_act_idx`.
+        :type start_act_idx: int
+        :param amount: Value for `amount`.
+        :type amount: float
+        :param max_depth: Value for `max_depth`.
+        :type max_depth: int
+        :param min_amount: Value for `min_amount`.
+        :type min_amount: float
+        :returns: Return value.
+        :rtype: dict[int, dict[tuple[tuple[int, int], tuple[int, int]], float]]"""
 
         queue = deque()
         queue.append((int(start_year), int(start_act_idx), float(amount), 0))
@@ -4915,22 +4914,22 @@ class Trails:
         demand: dict[int, dict[int, float]],
         debug: bool,
     ) -> None:
-        """ apply temporal distribution matrix sourced to demand.
+        """apply temporal distribution matrix sourced to demand.
 
-    :param year: Value for `year`.
-    :type year: int
-    :param act_idx: Value for `act_idx`.
-    :type act_idx: int
-    :param product_index: Value for `product_index`.
-    :type product_index: int
-    :param parent_amount: Value for `parent_amount`.
-    :type parent_amount: float
-    :param tex: Value for `tex`.
-    :type tex: TemporalExchange
-    :param demand: Value for `demand`.
-    :type demand: dict[int, dict[int, float]]
-    :param debug: Value for `debug`.
-    :type debug: bool"""
+        :param year: Value for `year`.
+        :type year: int
+        :param act_idx: Value for `act_idx`.
+        :type act_idx: int
+        :param product_index: Value for `product_index`.
+        :type product_index: int
+        :param parent_amount: Value for `parent_amount`.
+        :type parent_amount: float
+        :param tex: Value for `tex`.
+        :type tex: TemporalExchange
+        :param demand: Value for `demand`.
+        :type demand: dict[int, dict[int, float]]
+        :param debug: Value for `debug`.
+        :type debug: bool"""
         if self.A is None:
             return
 
@@ -4984,22 +4983,22 @@ class Trails:
         demand: dict[int, dict[int, float]],
         debug: bool,
     ) -> None:
-        """ apply temporal distribution matrix sourced to demand offsets.
+        """apply temporal distribution matrix sourced to demand offsets.
 
-    :param year: Value for `year`.
-    :type year: int
-    :param act_idx: Value for `act_idx`.
-    :type act_idx: int
-    :param product_index: Value for `product_index`.
-    :type product_index: int
-    :param parent_amount: Value for `parent_amount`.
-    :type parent_amount: float
-    :param offsets_and_weights: Value for `offsets_and_weights`.
-    :type offsets_and_weights: list[tuple[int, float]]
-    :param demand: Value for `demand`.
-    :type demand: dict[int, dict[int, float]]
-    :param debug: Value for `debug`.
-    :type debug: bool"""
+        :param year: Value for `year`.
+        :type year: int
+        :param act_idx: Value for `act_idx`.
+        :type act_idx: int
+        :param product_index: Value for `product_index`.
+        :type product_index: int
+        :param parent_amount: Value for `parent_amount`.
+        :type parent_amount: float
+        :param offsets_and_weights: Value for `offsets_and_weights`.
+        :type offsets_and_weights: list[tuple[int, float]]
+        :param demand: Value for `demand`.
+        :type demand: dict[int, dict[int, float]]
+        :param debug: Value for `debug`.
+        :type debug: bool"""
         if self.A is None:
             return
 

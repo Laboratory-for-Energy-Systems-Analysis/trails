@@ -20,10 +20,10 @@ class TrailsContextFilter(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
         """Filter.
 
-    :param record: Value for `record`.
-    :type record: logging.LogRecord
-    :returns: Return value.
-    :rtype: bool"""
+        :param record: Value for `record`.
+        :type record: logging.LogRecord
+        :returns: Return value.
+        :rtype: bool"""
         record.run_id = _run_id.get()
         record.case = _case.get()
         record.year = _year.get()
@@ -68,23 +68,23 @@ def configure_trails_logging(
 
     # Helper to detect "our" handlers
     def _is_trails_file_handler(h: logging.Handler) -> bool:
-        """ is trails file handler.
+        """is trails file handler.
 
-    :param h: Value for `h`.
-    :type h: logging.Handler
-    :returns: Return value.
-    :rtype: bool"""
+        :param h: Value for `h`.
+        :type h: logging.Handler
+        :returns: Return value.
+        :rtype: bool"""
         return isinstance(h, logging.FileHandler) and getattr(
             h, "baseFilename", ""
         ) == str(log_path)
 
     def _is_console_handler(h: logging.Handler) -> bool:
-        """ is console handler.
+        """is console handler.
 
-    :param h: Value for `h`.
-    :type h: logging.Handler
-    :returns: Return value.
-    :rtype: bool"""
+        :param h: Value for `h`.
+        :type h: logging.Handler
+        :returns: Return value.
+        :rtype: bool"""
         # StreamHandler that is not a FileHandler
         return isinstance(h, logging.StreamHandler) and not isinstance(
             h, logging.FileHandler

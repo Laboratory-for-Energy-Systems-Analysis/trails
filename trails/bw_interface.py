@@ -10,7 +10,7 @@ if TYPE_CHECKING:
 
 
 def _ij_from_coords(X_t: Any) -> tuple[np.ndarray, np.ndarray]:
-    """ ij from coords.
+    """ij from coords.
 
     :param X_t: Value for `X_t`.
     :type X_t: Any
@@ -30,7 +30,7 @@ def _ij_from_coords(X_t: Any) -> tuple[np.ndarray, np.ndarray]:
 
 
 def _resolve_matrix_label(trails: Trails, year: int) -> tuple[str, int]:
-    """ resolve matrix label.
+    """resolve matrix label.
 
     :param trails: Value for `trails`.
     :type trails: Trails
@@ -49,7 +49,7 @@ def _resolve_matrix_label(trails: Trails, year: int) -> tuple[str, int]:
 
 
 def _select_metadata_label(trails: Trails, label_for_matrix: str) -> str:
-    """ select metadata label.
+    """select metadata label.
 
     :param trails: Value for `trails`.
     :type trails: Trails
@@ -63,7 +63,7 @@ def _select_metadata_label(trails: Trails, label_for_matrix: str) -> str:
 
 
 def _make_bw_indices_rowcol(row_idx: np.ndarray, col_idx: np.ndarray) -> np.ndarray:
-    """ make bw indices rowcol.
+    """make bw indices rowcol.
 
     :param row_idx: Value for `row_idx`.
     :type row_idx: np.ndarray
@@ -86,7 +86,7 @@ def _warn_on_missing_metadata(
     act_meta: dict[int, dict],
     bio_meta: dict[int, dict],
 ) -> None:
-    """ warn on missing metadata.
+    """warn on missing metadata.
 
     :param label_for_matrix: Value for `label_for_matrix`.
     :type label_for_matrix: str
@@ -133,7 +133,7 @@ def _warn_on_missing_metadata(
 def _build_metadata_indices(
     act_meta: dict[int, dict], bio_meta: dict[int, dict]
 ) -> tuple[dict[tuple, int], dict[tuple, int]]:
-    """ build metadata indices.
+    """build metadata indices.
 
     :param act_meta: Value for `act_meta`.
     :type act_meta: dict[int, dict]
@@ -165,7 +165,7 @@ def _build_metadata_indices(
 
 
 def _nearest_metadata_label_for_year(trails: Trails, year: int) -> str:
-    """ nearest metadata label for year.
+    """nearest metadata label for year.
 
     :param trails: Value for `trails`.
     :type trails: Trails
@@ -283,7 +283,7 @@ def build_datapackage_for_year_from_trails(
 def _reference_product_from_activity_id(
     lca_obj: Any, activity_id: int
 ) -> tuple[int, float]:
-    """ reference product from activity id.
+    """reference product from activity id.
 
     :param lca_obj: Value for `lca_obj`.
     :type lca_obj: Any
@@ -359,7 +359,7 @@ def _reference_product_from_activity_id(
 
 
 def _reference_product_id_from_activity_id(lca_obj: Any, activity_id: int) -> int:
-    """ reference product id from activity id.
+    """reference product id from activity id.
 
     :param lca_obj: Value for `lca_obj`.
     :type lca_obj: Any
@@ -377,7 +377,7 @@ def _extract_supply_fast_cached(
     positions: np.ndarray,
     min_amount: float,
 ) -> Dict[int, float]:
-    """ extract supply fast cached.
+    """extract supply fast cached.
 
     :param supply_array: Value for `supply_array`.
     :type supply_array: np.ndarray
@@ -402,7 +402,7 @@ def _extract_supply_fast_cached(
 
 
 def _extract_supply_fast(lca_obj: Any, min_amount: float) -> Dict[int, float]:
-    """ extract supply fast.
+    """extract supply fast.
 
     :param lca_obj: Value for `lca_obj`.
     :type lca_obj: Any
@@ -440,7 +440,7 @@ def _get_datapackage(
     zero_bio: bool,
     debug: bool,
 ) -> tuple[Any, dict[tuple, int], dict[tuple, int], list[tuple[int, int]]]:
-    """ get datapackage.
+    """get datapackage.
 
     :param dp_cache: Value for `dp_cache`.
     :type dp_cache: dict[tuple[int, bool], Any]

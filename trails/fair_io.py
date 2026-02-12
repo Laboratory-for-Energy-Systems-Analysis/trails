@@ -29,7 +29,7 @@ DEFAULT_PROPERTIES_CSV: Path | None = (
 def _extend_years_freeze_last(
     df: pd.DataFrame, *, target_year: int = 2500
 ) -> pd.DataFrame:
-    """ extend years freeze last.
+    """extend years freeze last.
 
     :param df: Value for `df`.
     :type df: pd.DataFrame
@@ -97,7 +97,7 @@ def load_species_mapping(
 
 
 def _candidate_paths(filename: str) -> list[Path]:
-    """ candidate paths.
+    """candidate paths.
 
     :param filename: Value for `filename`.
     :type filename: str
@@ -114,7 +114,7 @@ def _candidate_paths(filename: str) -> list[Path]:
 
 
 def _find_fair_repo_file(filename: str) -> Path | None:
-    """ find fair repo file.
+    """find fair repo file.
 
     :param filename: Value for `filename`.
     :type filename: str
@@ -127,7 +127,7 @@ def _find_fair_repo_file(filename: str) -> Path | None:
 
 
 def _find_any_fair_repo_file(filenames: list[str]) -> Path | None:
-    """ find any fair repo file.
+    """find any fair repo file.
 
     :param filenames: Value for `filenames`.
     :type filenames: list[str]
@@ -141,7 +141,7 @@ def _find_any_fair_repo_file(filenames: list[str]) -> Path | None:
 
 
 def _convert_kg_to_unit(values_kg: np.ndarray, unit: str) -> np.ndarray:
-    """ convert kg to unit.
+    """convert kg to unit.
 
     :param values_kg: Value for `values_kg`.
     :type values_kg: np.ndarray
@@ -163,7 +163,7 @@ def _convert_kg_to_unit(values_kg: np.ndarray, unit: str) -> np.ndarray:
 
 
 def _convert_unit_to_kg(values: np.ndarray, unit: str) -> np.ndarray:
-    """ convert unit to kg.
+    """convert unit to kg.
 
     :param values: Value for `values`.
     :type values: np.ndarray
@@ -179,7 +179,7 @@ def _convert_unit_to_kg(values: np.ndarray, unit: str) -> np.ndarray:
 
 
 def _normalize_emissions_columns(df: pd.DataFrame) -> pd.DataFrame:
-    """ normalize emissions columns.
+    """normalize emissions columns.
 
     :param df: Value for `df`.
     :type df: pd.DataFrame
@@ -208,7 +208,7 @@ def _normalize_emissions_columns(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _extract_year_columns(df: pd.DataFrame) -> tuple[list[str], list[float]]:
-    """ extract year columns.
+    """extract year columns.
 
     :param df: Value for `df`.
     :type df: pd.DataFrame
@@ -239,7 +239,7 @@ def _extract_year_columns(df: pd.DataFrame) -> tuple[list[str], list[float]]:
 
 
 def _default_properties_file() -> Path:
-    """ default properties file.
+    """default properties file.
 
     :returns: Return value.
     :rtype: Path"""

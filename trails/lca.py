@@ -31,8 +31,10 @@ warnings.filterwarnings("ignore", module="scikits")
 _CHAR_CACHE: dict = {}
 
 
-def _get_mapping_arrays(mapping: Any) -> tuple[np.ndarray, np.ndarray] | tuple[None, None]:
-    """ get mapping arrays.
+def _get_mapping_arrays(
+    mapping: Any,
+) -> tuple[np.ndarray, np.ndarray] | tuple[None, None]:
+    """get mapping arrays.
 
     :param mapping: Value for `mapping`.
     :type mapping: Any
@@ -52,7 +54,7 @@ def _map_activity_demands_to_products(
     lca_obj: Any,
     activity_demands: dict[int, float],
 ) -> dict[int, float]:
-    """ map activity demands to products.
+    """map activity demands to products.
 
     :param lca_obj: Value for `lca_obj`.
     :type lca_obj: Any
@@ -94,7 +96,7 @@ def _build_rhs_matrix_from_root_demands(
     n: int,
     min_amount: float,
 ) -> tuple[list[int], np.ndarray]:
-    """ build rhs matrix from root demands.
+    """build rhs matrix from root demands.
 
     :param per_root_demands: Value for `per_root_demands`.
     :type per_root_demands: dict[int, dict[int, float]]
@@ -798,12 +800,12 @@ def build_temporal_sankey_tree(
         )
 
     def _node_payload(node_key: tuple) -> dict[str, Any]:
-        """ node payload.
+        """node payload.
 
-    :param node_key: Value for `node_key`.
-    :type node_key: tuple
-    :returns: Return value.
-    :rtype: dict[str, Any]"""
+        :param node_key: Value for `node_key`.
+        :type node_key: tuple
+        :returns: Return value.
+        :rtype: dict[str, Any]"""
         data = graph.nodes[node_key]
         return {
             "key": node_key,
@@ -819,12 +821,12 @@ def build_temporal_sankey_tree(
         }
 
     def _build_tree(node_key: tuple) -> dict[str, Any]:
-        """ build tree.
+        """build tree.
 
-    :param node_key: Value for `node_key`.
-    :type node_key: tuple
-    :returns: Return value.
-    :rtype: dict[str, Any]"""
+        :param node_key: Value for `node_key`.
+        :type node_key: tuple
+        :returns: Return value.
+        :rtype: dict[str, Any]"""
         node_data = graph.nodes[node_key]
         depth = int(node_data.get("depth"))
         if max_depth is not None and depth >= int(max_depth):
@@ -902,12 +904,12 @@ def score_temporal_graph_nodes(
     supply_cache: dict[tuple[int, int], dict[int, float]] = {}
 
     def _char_row_for_year(year: int) -> np.ndarray:
-        """ char row for year.
+        """char row for year.
 
-    :param year: Value for `year`.
-    :type year: int
-    :returns: Return value.
-    :rtype: np.ndarray"""
+        :param year: Value for `year`.
+        :type year: int
+        :returns: Return value.
+        :rtype: np.ndarray"""
         context = trails._get_scenario_context(int(year))
         if context is None:
             return np.zeros(int(trails.A.shape[1]), dtype=np.float64)
@@ -922,16 +924,16 @@ def score_temporal_graph_nodes(
         return coeff
 
     def _score_direct_td(year: int, act: int, amount: float) -> float:
-        """ score direct td.
+        """score direct td.
 
-    :param year: Value for `year`.
-    :type year: int
-    :param act: Value for `act`.
-    :type act: int
-    :param amount: Value for `amount`.
-    :type amount: float
-    :returns: Return value.
-    :rtype: float"""
+        :param year: Value for `year`.
+        :type year: int
+        :param act: Value for `act`.
+        :type act: int
+        :param amount: Value for `amount`.
+        :type amount: float
+        :returns: Return value.
+        :rtype: float"""
         if amount == 0.0:
             return 0.0
 
@@ -947,16 +949,16 @@ def score_temporal_graph_nodes(
             *,
             root_activity: int | None = None,
         ) -> None:
-            """ capture append.
+            """capture append.
 
-    :param act_idx: Value for `act_idx`.
-    :type act_idx: int
-    :param _year_val: Value for `_year_val`.
-    :type _year_val: int
-    :param value: Value for `value`.
-    :type value: float
-    :param root_activity: Value for `root_activity`.
-    :type root_activity: int | None"""
+            :param act_idx: Value for `act_idx`.
+            :type act_idx: int
+            :param _year_val: Value for `_year_val`.
+            :type _year_val: int
+            :param value: Value for `value`.
+            :type value: float
+            :param root_activity: Value for `root_activity`.
+            :type root_activity: int | None"""
             nonlocal total
             total += float(value)
 
@@ -967,16 +969,16 @@ def score_temporal_graph_nodes(
             *,
             root_activity: int | None = None,
         ) -> None:
-            """ capture append bulk.
+            """capture append bulk.
 
-    :param act_idx: Value for `act_idx`.
-    :type act_idx: int
-    :param year_idx: Value for `year_idx`.
-    :type year_idx: int
-    :param value: Value for `value`.
-    :type value: float
-    :param root_activity: Value for `root_activity`.
-    :type root_activity: int | None"""
+            :param act_idx: Value for `act_idx`.
+            :type act_idx: int
+            :param year_idx: Value for `year_idx`.
+            :type year_idx: int
+            :param value: Value for `value`.
+            :type value: float
+            :param root_activity: Value for `root_activity`.
+            :type root_activity: int | None"""
             nonlocal total
             total += float(value)
 
@@ -1002,16 +1004,16 @@ def score_temporal_graph_nodes(
         return float(total)
 
     def _solve_supply(year: int, act: int, amount: float) -> dict[int, float]:
-        """ solve supply.
+        """solve supply.
 
-    :param year: Value for `year`.
-    :type year: int
-    :param act: Value for `act`.
-    :type act: int
-    :param amount: Value for `amount`.
-    :type amount: float
-    :returns: Return value.
-    :rtype: dict[int, float]"""
+        :param year: Value for `year`.
+        :type year: int
+        :param act: Value for `act`.
+        :type act: int
+        :param amount: Value for `amount`.
+        :type amount: float
+        :returns: Return value.
+        :rtype: dict[int, float]"""
         key = (int(year), int(act))
         if key in supply_cache:
             if amount == 1.0:
@@ -1058,16 +1060,16 @@ def score_temporal_graph_nodes(
         return {a: float(v) * float(amount) for a, v in supply_total.items()}
 
     def _score_frontier(year: int, act: int, amount: float) -> float:
-        """ score frontier.
+        """score frontier.
 
-    :param year: Value for `year`.
-    :type year: int
-    :param act: Value for `act`.
-    :type act: int
-    :param amount: Value for `amount`.
-    :type amount: float
-    :returns: Return value.
-    :rtype: float"""
+        :param year: Value for `year`.
+        :type year: int
+        :param act: Value for `act`.
+        :type act: int
+        :param amount: Value for `amount`.
+        :type amount: float
+        :returns: Return value.
+        :rtype: float"""
         if amount == 0.0:
             return 0.0
         supply = _solve_supply(year, act, amount)
@@ -1083,24 +1085,24 @@ def score_temporal_graph_nodes(
         return float(total)
 
     def _is_frontier(node_data: dict) -> bool:
-        """ is frontier.
+        """is frontier.
 
-    :param node_data: Value for `node_data`.
-    :type node_data: dict
-    :returns: Return value.
-    :rtype: bool"""
+        :param node_data: Value for `node_data`.
+        :type node_data: dict
+        :returns: Return value.
+        :rtype: bool"""
         frontier_amt = float(node_data.get("frontier_amount") or 0.0)
         if frontier_amt != 0.0:
             return True
         return False
 
     def _direct_amount(node_data: dict) -> float:
-        """ direct amount.
+        """direct amount.
 
-    :param node_data: Value for `node_data`.
-    :type node_data: dict
-    :returns: Return value.
-    :rtype: float"""
+        :param node_data: Value for `node_data`.
+        :type node_data: dict
+        :returns: Return value.
+        :rtype: float"""
         direct_amt = float(node_data.get("direct_bio_amount") or 0.0)
         if direct_amt != 0.0:
             return direct_amt

@@ -19,7 +19,7 @@ from .utils import _format_path_label
 
 
 def _build_activity_label_map(trails: Trails) -> dict[int, str]:
-    """ build activity label map.
+    """build activity label map.
 
     :param trails: Value for `trails`.
     :type trails: Trails
@@ -43,7 +43,7 @@ def _build_activity_label_map(trails: Trails) -> dict[int, str]:
 
 
 def _build_flow_label_map(trails: Trails) -> dict[int, str]:
-    """ build flow label map.
+    """build flow label map.
 
     :param trails: Value for `trails`.
     :type trails: Trails
@@ -99,7 +99,7 @@ def _select_years_from_results(
     results_by_year: dict[int, dict[str, Any]],
     year_range: tuple[int, int] | None,
 ) -> list[int]:
-    """ select years from results.
+    """select years from results.
 
     :param results_by_year: Value for `results_by_year`.
     :type results_by_year: dict[int, dict[str, Any]]
@@ -129,7 +129,7 @@ def _collect_root_scores(
     years: list[int],
     score_key: str,
 ) -> list[int]:
-    """ collect root scores.
+    """collect root scores.
 
     :param results_by_year: Value for `results_by_year`.
     :type results_by_year: dict[int, dict[str, Any]]
@@ -154,7 +154,7 @@ def _build_score_matrix(
     all_roots: list[int],
     score_key: str,
 ) -> np.ndarray:
-    """ build score matrix.
+    """build score matrix.
 
     :param results_by_year: Value for `results_by_year`.
     :type results_by_year: dict[int, dict[str, Any]]
@@ -185,7 +185,7 @@ def _add_root_traces(
     showlegend_roots: Optional[set[int]] = None,
     showhover_roots: Optional[set[int]] = None,
 ) -> None:
-    """ add root traces.
+    """add root traces.
 
     :param fig: Value for `fig`.
     :type fig: go.Figure
@@ -210,10 +210,10 @@ def _add_root_traces(
     def label_for_root(idx: Any) -> str:
         """Label for root.
 
-    :param idx: Value for `idx`.
-    :type idx: Any
-    :returns: Return value.
-    :rtype: str"""
+        :param idx: Value for `idx`.
+        :type idx: Any
+        :returns: Return value.
+        :rtype: str"""
         if idx in idx_to_label:
             return idx_to_label[idx]
         if isinstance(idx, str):
@@ -356,12 +356,12 @@ def plot_temporal_graph(
         ) from exc
 
     def _node_score(node: object) -> float:
-        """ node score.
+        """node score.
 
-    :param node: Value for `node`.
-    :type node: object
-    :returns: Return value.
-    :rtype: float"""
+        :param node: Value for `node`.
+        :type node: object
+        :returns: Return value.
+        :rtype: float"""
         if not node_scores:
             return 0.0
         if node in node_scores:
@@ -410,27 +410,27 @@ def plot_temporal_graph(
 
     # Relabel tuple node ids to strings for pyvis compatibility
     def _truncate(text: str, limit: int) -> str:
-        """ truncate.
+        """truncate.
 
-    :param text: Value for `text`.
-    :type text: str
-    :param limit: Value for `limit`.
-    :type limit: int
-    :returns: Return value.
-    :rtype: str"""
+        :param text: Value for `text`.
+        :type text: str
+        :param limit: Value for `limit`.
+        :type limit: int
+        :returns: Return value.
+        :rtype: str"""
         if len(text) <= limit:
             return text
         return text[:limit]
 
     def _label_node(node: tuple, data: dict) -> str:
-        """ label node.
+        """label node.
 
-    :param node: Value for `node`.
-    :type node: tuple
-    :param data: Value for `data`.
-    :type data: dict
-    :returns: Return value.
-    :rtype: str"""
+        :param node: Value for `node`.
+        :type node: tuple
+        :param data: Value for `data`.
+        :type data: dict
+        :returns: Return value.
+        :rtype: str"""
         year = data.get("year", "")
         depth = data.get("depth", "")
         name = data.get("name", "") or ""
@@ -475,12 +475,12 @@ def plot_temporal_graph(
     color_idx = 0
 
     def _branch_key(node: object) -> tuple[str, str, str]:
-        """ branch key.
+        """branch key.
 
-    :param node: Value for `node`.
-    :type node: object
-    :returns: Return value.
-    :rtype: tuple[str, str, str]"""
+        :param node: Value for `node`.
+        :type node: object
+        :returns: Return value.
+        :rtype: tuple[str, str, str]"""
         data = H.nodes[node]
         return (
             str(data.get("name", "")),
@@ -509,26 +509,26 @@ def plot_temporal_graph(
                         queue.append(nxt)
 
     def _edge_color(u: object, v: object) -> str:
-        """ edge color.
+        """edge color.
 
-    :param u: Value for `u`.
-    :type u: object
-    :param v: Value for `v`.
-    :type v: object
-    :returns: Return value.
-    :rtype: str"""
+        :param u: Value for `u`.
+        :type u: object
+        :param v: Value for `v`.
+        :type v: object
+        :returns: Return value.
+        :rtype: str"""
         src_depth = int(H.nodes[u].get("depth", 0))
         if src_depth == 0:
             return edge_colors.get((u, v), level0_edge_color)
         return node_branch_color.get(u, palette[0])
 
     def _node_color(n: object) -> Optional[str]:
-        """ node color.
+        """node color.
 
-    :param n: Value for `n`.
-    :type n: object
-    :returns: Return value.
-    :rtype: Optional[str]"""
+        :param n: Value for `n`.
+        :type n: object
+        :returns: Return value.
+        :rtype: Optional[str]"""
         depth = int(H.nodes[n].get("depth", 0))
         if depth == 0:
             return None
@@ -654,18 +654,18 @@ def plot_temporal_graph(
             amount: float,
             score: float | None = None,
         ) -> str:
-            """ edge title.
+            """edge title.
 
-    :param src_label: Value for `src_label`.
-    :type src_label: str
-    :param dst_label: Value for `dst_label`.
-    :type dst_label: str
-    :param amount: Value for `amount`.
-    :type amount: float
-    :param score: Value for `score`.
-    :type score: float | None
-    :returns: Return value.
-    :rtype: str"""
+            :param src_label: Value for `src_label`.
+            :type src_label: str
+            :param dst_label: Value for `dst_label`.
+            :type dst_label: str
+            :param amount: Value for `amount`.
+            :type amount: float
+            :param score: Value for `score`.
+            :type score: float | None
+            :returns: Return value.
+            :rtype: str"""
             src = src_label.split("\n", 1)[0]
             dst = dst_label.split("\n", 1)[0]
             if score is None:
@@ -765,18 +765,18 @@ def plot_temporal_graph(
             amount: float,
             score: float | None = None,
         ) -> str:
-            """ edge title.
+            """edge title.
 
-    :param src_label: Value for `src_label`.
-    :type src_label: str
-    :param dst_label: Value for `dst_label`.
-    :type dst_label: str
-    :param amount: Value for `amount`.
-    :type amount: float
-    :param score: Value for `score`.
-    :type score: float | None
-    :returns: Return value.
-    :rtype: str"""
+            :param src_label: Value for `src_label`.
+            :type src_label: str
+            :param dst_label: Value for `dst_label`.
+            :type dst_label: str
+            :param amount: Value for `amount`.
+            :type amount: float
+            :param score: Value for `score`.
+            :type score: float | None
+            :returns: Return value.
+            :rtype: str"""
             src = src_label.split("\n", 1)[0]
             dst = dst_label.split("\n", 1)[0]
             if score is None:
@@ -1209,7 +1209,7 @@ def _add_cumulative_trace(
     yaxis_type: str,
     log_eps: float,
 ) -> np.ndarray:
-    """ add cumulative trace.
+    """add cumulative trace.
 
     :param fig: Value for `fig`.
     :type fig: go.Figure
@@ -1258,7 +1258,7 @@ def _add_static_score_trace(
     static_score_color: str,
     method_label: str,
 ) -> None:
-    """ add static score trace.
+    """add static score trace.
 
     :param fig: Value for `fig`.
     :type fig: go.Figure
@@ -1300,7 +1300,7 @@ def _compute_layout_dimensions(
     legend_row_height: int,
     n_items: int,
 ) -> tuple[int, int]:
-    """ compute layout dimensions.
+    """compute layout dimensions.
 
     :param width: Value for `width`.
     :type width: int | None
@@ -1334,7 +1334,7 @@ def _apply_base_layout(
     static_score: float | None,
     cumulative_axis_label: str,
 ) -> None:
-    """ apply base layout.
+    """apply base layout.
 
     :param fig: Value for `fig`.
     :type fig: go.Figure
@@ -1423,7 +1423,7 @@ def _apply_linear_yaxis_alignment(
     y2_headroom: float,
     stacked: bool,
 ) -> None:
-    """ apply linear yaxis alignment.
+    """apply linear yaxis alignment.
 
     :param fig: Value for `fig`.
     :type fig: go.Figure
@@ -1514,7 +1514,7 @@ def _apply_xaxis_settings(
     years: list[int],
     show_year_grid: bool,
 ) -> None:
-    """ apply xaxis settings.
+    """apply xaxis settings.
 
     :param fig: Value for `fig`.
     :type fig: go.Figure
@@ -1536,7 +1536,7 @@ def _apply_xaxis_settings(
 
 
 def _add_reference_year_line(fig: go.Figure, reference_year: int | None) -> None:
-    """ add reference year line.
+    """add reference year line.
 
     :param fig: Value for `fig`.
     :type fig: go.Figure
@@ -1633,7 +1633,7 @@ def _characterized_inventory_to_results(
     characterized_inventory: xr.DataArray,
     by_flow: bool = False,
 ) -> Dict[int, Dict[str, Any]]:
-    """ characterized inventory to results.
+    """characterized inventory to results.
 
     :param characterized_inventory: Value for `characterized_inventory`.
     :type characterized_inventory: xr.DataArray
@@ -1700,7 +1700,7 @@ def _characterized_inventory_to_results(
 def _characterized_inventory_to_root_results(
     characterized_inventory: xr.DataArray,
 ) -> Dict[int, Dict[str, Any]]:
-    """ characterized inventory to root results.
+    """characterized inventory to root results.
 
     :param characterized_inventory: Value for `characterized_inventory`.
     :type characterized_inventory: xr.DataArray
@@ -1766,7 +1766,7 @@ def _characterized_inventory_to_root_results(
 
 
 def _wrap_hover_label(text: str, max_chars: int = 45) -> str:
-    """ wrap hover label.
+    """wrap hover label.
 
     :param text: Value for `text`.
     :type text: str
@@ -1810,7 +1810,7 @@ def _scores_to_results(
     *,
     by_flow: bool = False,
 ) -> Dict[int, Dict[str, Any]]:
-    """ scores to results.
+    """scores to results.
 
     :param scores: Value for `scores`.
     :type scores: xr.DataArray
@@ -1904,7 +1904,7 @@ def _aggregate_flow_results_by_name(
     results_by_year: Dict[int, Dict[str, Any]],
     trails: Trails,
 ) -> Dict[int, Dict[str, Any]]:
-    """ aggregate flow results by name.
+    """aggregate flow results by name.
 
     :param results_by_year: Value for `results_by_year`.
     :type results_by_year: Dict[int, Dict[str, Any]]
@@ -1968,7 +1968,7 @@ def _plot_results_by_year(
     *,
     flow_groupby_name: bool = False,
 ) -> go.Figure:
-    """ plot results by year.
+    """plot results by year.
 
     :param results_by_year: Value for `results_by_year`.
     :type results_by_year: Union[Dict[int, Dict[str, Any]], Dict[str, Any], xr.DataArray]
@@ -2543,7 +2543,7 @@ def plot_top_paths_for_year(
 
 
 def _collect_activity_meta(trails_local: Trails) -> Dict[int, Dict[str, Any]]:
-    """ collect activity meta.
+    """collect activity meta.
 
     :param trails_local: Value for `trails_local`.
     :type trails_local: Trails
@@ -2558,7 +2558,7 @@ def _collect_activity_meta(trails_local: Trails) -> Dict[int, Dict[str, Any]]:
 
 
 def _activity_label_from_meta(act_meta: Dict[int, Dict[str, Any]], act_idx: int) -> str:
-    """ activity label from meta.
+    """activity label from meta.
 
     :param act_meta: Value for `act_meta`.
     :type act_meta: Dict[int, Dict[str, Any]]
@@ -2583,7 +2583,7 @@ def _build_full_path_amounts(
     start_year: int,
     start_act_idx: int,
 ) -> Dict[Tuple[Tuple[int, int], ...], float]:
-    """ build full path amounts.
+    """build full path amounts.
 
     :param provenance: Value for `provenance`.
     :type provenance: Dict[tuple[int, int], Dict[tuple[int, ...], float]]
@@ -2614,7 +2614,7 @@ def _select_paths(
     full_path_amounts: Dict[Tuple[Tuple[int, int], ...], float],
     top_n_paths: int | None,
 ) -> list[tuple[tuple[tuple[int, int], ...], float]]:
-    """ select paths.
+    """select paths.
 
     :param full_path_amounts: Value for `full_path_amounts`.
     :type full_path_amounts: Dict[Tuple[Tuple[int, int], ...], float]
@@ -2634,7 +2634,7 @@ def _select_paths(
 def _build_depth_map(
     selected_paths: list[tuple[tuple[tuple[int, int], ...], float]],
 ) -> tuple[list[tuple[int, int]], dict[tuple[int, int], int]]:
-    """ build depth map.
+    """build depth map.
 
     :param selected_paths: Value for `selected_paths`.
     :type selected_paths: list[tuple[tuple[tuple[int, int], ...], float]]
@@ -2661,7 +2661,7 @@ def _aggregate_link_impacts(
     dict[tuple[tuple[int, int], tuple[int, int]], float],
     dict[tuple[tuple[int, int], tuple[int, int]], dict[int, float]],
 ]:
-    """ aggregate link impacts.
+    """aggregate link impacts.
 
     :param selected_paths: Value for `selected_paths`.
     :type selected_paths: list[tuple[tuple[tuple[int, int], ...], float]]
@@ -2711,7 +2711,7 @@ def _aggregate_link_impacts(
 def _build_agg_nodes(
     link_impact_agg: dict[tuple[tuple[int, int], tuple[int, int]], float],
 ) -> tuple[list[tuple[int, int]], dict[tuple[int, int], int]]:
-    """ build agg nodes.
+    """build agg nodes.
 
     :param link_impact_agg: Value for `link_impact_agg`.
     :type link_impact_agg: dict[tuple[tuple[int, int], tuple[int, int]], float]
@@ -2732,7 +2732,7 @@ def _build_agg_nodes(
 def _compute_node_totals(
     link_impact_agg: dict[tuple[tuple[int, int], tuple[int, int]], float],
 ) -> dict[tuple[int, int], float]:
-    """ compute node totals.
+    """compute node totals.
 
     :param link_impact_agg: Value for `link_impact_agg`.
     :type link_impact_agg: dict[tuple[tuple[int, int], tuple[int, int]], float]
@@ -2747,7 +2747,7 @@ def _compute_node_totals(
 def _compute_sankey_layout(
     agg_nodes: list[tuple[int, int]],
 ) -> tuple[list[float], list[float], list[int], list[int]]:
-    """ compute sankey layout.
+    """compute sankey layout.
 
     :param agg_nodes: Value for `agg_nodes`.
     :type agg_nodes: list[tuple[int, int]]
@@ -2781,7 +2781,7 @@ def _build_node_labels(
     node_total_impact: dict[tuple[int, int], float],
     amount_label: str,
 ) -> list[str]:
-    """ build node labels.
+    """build node labels.
 
     :param agg_nodes: Value for `agg_nodes`.
     :type agg_nodes: list[tuple[int, int]]
@@ -2801,7 +2801,7 @@ def _build_node_labels(
 
 
 def _assign_year_colors(years: list[int]) -> dict[int, str]:
-    """ assign year colors.
+    """assign year colors.
 
     :param years: Value for `years`.
     :type years: list[int]
@@ -2828,7 +2828,7 @@ def _build_link_arrays(
     amount_label: str,
     activity_label: Callable[[int], str],
 ) -> tuple[list[int], list[int], list[float], list[str], list[str]]:
-    """ build link arrays.
+    """build link arrays.
 
     :param link_impact_agg: Value for `link_impact_agg`.
     :type link_impact_agg: dict[tuple[tuple[int, int], tuple[int, int]], float]
@@ -3254,9 +3254,7 @@ def plot_temporal_sankey_graphlike(
             node_x = [min(0.88, max(0.08, x)) for x in node_x]
         # Apply padding to avoid truncation at bounds
         effective_pad = max(float(y_padding), 0.03)
-        node_y = [
-            min(1.0 - effective_pad, max(effective_pad, y)) for y in node_y
-        ]
+        node_y = [min(1.0 - effective_pad, max(effective_pad, y)) for y in node_y]
     else:
         node_x = [0.5 for _ in nodes]
         node_y = [0.5 for _ in nodes]
@@ -3264,14 +3262,14 @@ def plot_temporal_sankey_graphlike(
     act_meta = _collect_activity_meta(trails)
 
     def _shorten(text: str, limit: int) -> str:
-        """ shorten.
+        """shorten.
 
-    :param text: Value for `text`.
-    :type text: str
-    :param limit: Value for `limit`.
-    :type limit: int
-    :returns: Return value.
-    :rtype: str"""
+        :param text: Value for `text`.
+        :type text: str
+        :param limit: Value for `limit`.
+        :type limit: int
+        :returns: Return value.
+        :rtype: str"""
         if limit <= 0 or len(text) <= limit:
             return text
         return text[: max(0, limit - 1)] + "…"
@@ -3307,12 +3305,12 @@ def plot_temporal_sankey_graphlike(
     color_idx = 0
 
     def _branch_key(node: object) -> str:
-        """ branch key.
+        """branch key.
 
-    :param node: Value for `node`.
-    :type node: object
-    :returns: Return value.
-    :rtype: str"""
+        :param node: Value for `node`.
+        :type node: object
+        :returns: Return value.
+        :rtype: str"""
         data = G.nodes.get(node, {})
         meta = act_meta.get(int(data.get("act_idx", -1)), {})
         return str(meta.get("reference product") or "")
@@ -3338,14 +3336,14 @@ def plot_temporal_sankey_graphlike(
                         queue.append(nxt)
 
     def _edge_color(u: object, v: object) -> str:
-        """ edge color.
+        """edge color.
 
-    :param u: Value for `u`.
-    :type u: object
-    :param v: Value for `v`.
-    :type v: object
-    :returns: Return value.
-    :rtype: str"""
+        :param u: Value for `u`.
+        :type u: object
+        :param v: Value for `v`.
+        :type v: object
+        :returns: Return value.
+        :rtype: str"""
         src_depth = int(G.nodes.get(u, {}).get("depth", 0))
         if src_depth == 0:
             return edge_colors.get((u, v), "#999999")
@@ -3396,7 +3394,9 @@ def plot_temporal_sankey_graphlike(
             out = float(outgoing_sum.get(u, 0.0))
             if out > 0.0 and inc > 0.0:
                 scale = inc / out
-        adjusted_edges.append((u, v, float(val) * scale, abs(float(raw_amt)), float(score)))
+        adjusted_edges.append(
+            (u, v, float(val) * scale, abs(float(raw_amt)), float(score))
+        )
 
     link_sources = [node_ids[u] for u, _, _, _, _ in adjusted_edges]
     link_targets = [node_ids[v] for _, v, _, _, _ in adjusted_edges]
@@ -3421,17 +3421,19 @@ def plot_temporal_sankey_graphlike(
         if depth == 0:
             node_colors.append("#cccccc")
         else:
-            node_colors.append(incoming_color.get(n, node_branch_color.get(n, "#cccccc")))
+            node_colors.append(
+                incoming_color.get(n, node_branch_color.get(n, "#cccccc"))
+            )
 
     def _with_alpha(color: str, alpha: float) -> str:
-        """ with alpha.
+        """with alpha.
 
-    :param color: Value for `color`.
-    :type color: str
-    :param alpha: Value for `alpha`.
-    :type alpha: float
-    :returns: Return value.
-    :rtype: str"""
+        :param color: Value for `color`.
+        :type color: str
+        :param alpha: Value for `alpha`.
+        :type alpha: float
+        :returns: Return value.
+        :rtype: str"""
         if color.startswith("rgba"):
             parts = color.strip("rgba()").split(",")
             if len(parts) >= 3:
@@ -3444,7 +3446,7 @@ def plot_temporal_sankey_graphlike(
         return color
 
     customdata = []
-    for (u, v, _, amt, score) in adjusted_edges:
+    for u, v, _, amt, score in adjusted_edges:
         udata = G.nodes.get(u, {})
         vdata = G.nodes.get(v, {})
         u_act = int(udata.get("act_idx", -1))
@@ -3476,7 +3478,7 @@ def plot_temporal_sankey_graphlike(
 
     # Node-level amount (incoming) for hover, plus root amount from routing params
     node_amounts: dict[object, float] = defaultdict(float)
-    for (u, v, _raw_amt) in edges:
+    for u, v, _raw_amt in edges:
         node_amounts[v] += abs(float(_raw_amt))
     routing_params = getattr(trails, "_routing_params", {}) or {}
     if routing_params:
@@ -3558,17 +3560,18 @@ def plot_temporal_sankey_graphlike(
         font=dict(size=font_size),
     )
     if depth_dropdown:
-        max_depth = max(
-            int(G.nodes.get(n, {}).get("depth", 0)) for n in nodes
-        ) if nodes else 0
+        max_depth = (
+            max(int(G.nodes.get(n, {}).get("depth", 0)) for n in nodes) if nodes else 0
+        )
         max_depth = max(max_depth, 0)
-        def _depth_mask(level: int) -> tuple[list[str], list[str]]:
-            """ depth mask.
 
-    :param level: Value for `level`.
-    :type level: int
-    :returns: Return value.
-    :rtype: tuple[list[str], list[str]]"""
+        def _depth_mask(level: int) -> tuple[list[str], list[str]]:
+            """depth mask.
+
+            :param level: Value for `level`.
+            :type level: int
+            :returns: Return value.
+            :rtype: tuple[list[str], list[str]]"""
             node_colors_sel = []
             for n, c in zip(nodes, node_colors):
                 depth = int(G.nodes.get(n, {}).get("depth", 0))
@@ -3605,7 +3608,9 @@ def plot_temporal_sankey_graphlike(
         # Apply default depth level on init
         default_level = min(max(default_depth_level, 1), max_depth)
         init_node_colors, init_link_colors = _depth_mask(default_level)
-        fig.update_traces(node=dict(color=init_node_colors), link=dict(color=init_link_colors))
+        fig.update_traces(
+            node=dict(color=init_node_colors), link=dict(color=init_link_colors)
+        )
 
         fig.update_layout(
             updatemenus=[
@@ -3727,7 +3732,7 @@ def _write_sankey_html_with_year_slider(
     filename: str,
     div_id: str,
 ) -> None:
-    """ write sankey html with year slider.
+    """write sankey html with year slider.
 
     :param fig: Value for `fig`.
     :type fig: go.Figure
@@ -3864,12 +3869,12 @@ def build_sankey_arrays_from_tree(
         raise ValueError("Tree is empty or missing 'node' key.")
 
     def _default_label(node: dict[str, Any]) -> str:
-        """ default label.
+        """default label.
 
-    :param node: Value for `node`.
-    :type node: dict[str, Any]
-    :returns: Return value.
-    :rtype: str"""
+        :param node: Value for `node`.
+        :type node: dict[str, Any]
+        :returns: Return value.
+        :rtype: str"""
         name = node.get("name") or f"Activity {node.get('act_idx')}"
         rp = node.get("reference_product") or ""
         loc = node.get("location") or ""
@@ -3891,12 +3896,12 @@ def build_sankey_arrays_from_tree(
     edge_scores: list[float] = []
 
     def _node_key(node_payload: dict[str, Any]) -> Any:
-        """ node key.
+        """node key.
 
-    :param node_payload: Value for `node_payload`.
-    :type node_payload: dict[str, Any]
-    :returns: Return value.
-    :rtype: Any"""
+        :param node_payload: Value for `node_payload`.
+        :type node_payload: dict[str, Any]
+        :returns: Return value.
+        :rtype: Any"""
         key = node_payload.get("key")
         if key is None:
             return (
@@ -3936,10 +3941,10 @@ def build_sankey_arrays_from_tree(
     year_map: dict[int, int] = {}
 
     def _precompute_incoming(subtree: dict[str, Any]) -> None:
-        """ precompute incoming.
+        """precompute incoming.
 
-    :param subtree: Value for `subtree`.
-    :type subtree: dict[str, Any]"""
+        :param subtree: Value for `subtree`.
+        :type subtree: dict[str, Any]"""
         for child in subtree.get("children", []):
             edge_amt = float(child.get("edge_amount") or 0.0)
             child_payload = child.get("node") or {}
@@ -3957,12 +3962,12 @@ def build_sankey_arrays_from_tree(
                 year_map[y] = _nearest_year(score_years, y)
 
     def _get_node_id(node_payload: dict[str, Any]) -> int:
-        """ get node id.
+        """get node id.
 
-    :param node_payload: Value for `node_payload`.
-    :type node_payload: dict[str, Any]
-    :returns: Return value.
-    :rtype: int"""
+        :param node_payload: Value for `node_payload`.
+        :type node_payload: dict[str, Any]
+        :returns: Return value.
+        :rtype: int"""
         key = _node_key(node_payload)
         if key in node_index:
             return node_index[key]
@@ -3973,10 +3978,10 @@ def build_sankey_arrays_from_tree(
         return idx
 
     def _walk(subtree: dict[str, Any]) -> None:
-        """ walk.
+        """walk.
 
-    :param subtree: Value for `subtree`.
-    :type subtree: dict[str, Any]"""
+        :param subtree: Value for `subtree`.
+        :type subtree: dict[str, Any]"""
         parent_payload = subtree["node"]
         parent_id = _get_node_id(parent_payload)
         for child in subtree.get("children", []):
@@ -4019,7 +4024,7 @@ def build_sankey_arrays_from_tree(
 
 
 def _iter_tree_nodes(tree: dict[str, Any]) -> list[dict[str, Any]]:
-    """ iter tree nodes.
+    """iter tree nodes.
 
     :param tree: Value for `tree`.
     :type tree: dict[str, Any]
@@ -4028,10 +4033,10 @@ def _iter_tree_nodes(tree: dict[str, Any]) -> list[dict[str, Any]]:
     nodes: list[dict[str, Any]] = []
 
     def _walk(subtree: dict[str, Any]) -> None:
-        """ walk.
+        """walk.
 
-    :param subtree: Value for `subtree`.
-    :type subtree: dict[str, Any]"""
+        :param subtree: Value for `subtree`.
+        :type subtree: dict[str, Any]"""
         nodes.append(subtree["node"])
         for child in subtree.get("children", []):
             _walk(child)
@@ -4041,7 +4046,7 @@ def _iter_tree_nodes(tree: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def _nearest_year(years_sorted: list[int], target: int) -> int:
-    """ nearest year.
+    """nearest year.
 
     :param years_sorted: Value for `years_sorted`.
     :type years_sorted: list[int]
@@ -4064,7 +4069,7 @@ def _nearest_year(years_sorted: list[int], target: int) -> int:
 
 
 def _score_years_from_trails(trails: Trails) -> list[int]:
-    """ score years from trails.
+    """score years from trails.
 
     :param trails: Value for `trails`.
     :type trails: Trails
@@ -4080,7 +4085,7 @@ def _score_years_from_trails(trails: Trails) -> list[int]:
 
 
 def _node_scores_from_trails(trails: Trails) -> dict[tuple[int, int], float]:
-    """ node scores from trails.
+    """node scores from trails.
 
     :param trails: Value for `trails`.
     :type trails: Trails
@@ -4137,7 +4142,7 @@ def _node_scores_from_trails(trails: Trails) -> dict[tuple[int, int], float]:
 def _node_scores_from_characterized_inventory(
     characterized_inventory: xr.DataArray,
 ) -> dict[tuple[int, int], float]:
-    """ node scores from characterized inventory.
+    """node scores from characterized inventory.
 
     :param characterized_inventory: Value for `characterized_inventory`.
     :type characterized_inventory: xr.DataArray
@@ -4220,7 +4225,7 @@ def _node_scores_from_characterized_inventory(
 def _select_depths(
     edges_by_depth: dict[int, dict], depths: list[int] | None
 ) -> list[int]:
-    """ select depths.
+    """select depths.
 
     :param edges_by_depth: Value for `edges_by_depth`.
     :type edges_by_depth: dict[int, dict]
@@ -4246,7 +4251,7 @@ def _collect_activities(
     depths_list: list[int],
     include_all_activities: bool,
 ) -> list[int]:
-    """ collect activities.
+    """collect activities.
 
     :param edges_by_depth: Value for `edges_by_depth`.
     :type edges_by_depth: dict[int, dict]
@@ -4282,7 +4287,7 @@ def _collect_activities(
 def _collect_global_years(
     edges_by_depth: dict[int, dict], depths_list: list[int]
 ) -> tuple[int, int, list[int]]:
-    """ collect global years.
+    """collect global years.
 
     :param edges_by_depth: Value for `edges_by_depth`.
     :type edges_by_depth: dict[int, dict]
@@ -4310,7 +4315,7 @@ def _collect_global_years(
 
 
 def _init_flow_subplots(panel_labels: list[str], ncols: int) -> tuple[go.Figure, int]:
-    """ init flow subplots.
+    """init flow subplots.
 
     :param panel_labels: Value for `panel_labels`.
     :type panel_labels: list[str]
@@ -4514,12 +4519,12 @@ def plot_rf(
         q_high_data = rf_all.sel(quantile=float(q_high), drop=True)
 
         def _results_for(data: xr.DataArray) -> dict[int, dict[str, Any]]:
-            """ results for.
+            """results for.
 
-    :param data: Value for `data`.
-    :type data: xr.DataArray
-    :returns: Return value.
-    :rtype: dict[int, dict[str, Any]]"""
+            :param data: Value for `data`.
+            :type data: xr.DataArray
+            :returns: Return value.
+            :rtype: dict[int, dict[str, Any]]"""
             if by == "flow":
                 if "root activity" in data.dims:
                     data = data.sum(dim="root activity")
@@ -4537,14 +4542,14 @@ def plot_rf(
         years = _select_years_from_results(results_by_year, year_range)
 
         def _totals(res: dict[int, dict[str, Any]], years_seq: list[int]) -> np.ndarray:
-            """ totals.
+            """totals.
 
-    :param res: Value for `res`.
-    :type res: dict[int, dict[str, Any]]
-    :param years_seq: Value for `years_seq`.
-    :type years_seq: list[int]
-    :returns: Return value.
-    :rtype: np.ndarray"""
+            :param res: Value for `res`.
+            :type res: dict[int, dict[str, Any]]
+            :param years_seq: Value for `years_seq`.
+            :type years_seq: list[int]
+            :returns: Return value.
+            :rtype: np.ndarray"""
             out = np.zeros(len(years_seq), dtype=float)
             for i, y in enumerate(years_seq):
                 payload = res.get(int(y), {})
@@ -4788,14 +4793,14 @@ def plot_temp(
         years = _select_years_from_results(results_by_year, year_range)
 
         def _totals(res: dict[int, dict[str, Any]], years_seq: list[int]) -> np.ndarray:
-            """ totals.
+            """totals.
 
-    :param res: Value for `res`.
-    :type res: dict[int, dict[str, Any]]
-    :param years_seq: Value for `years_seq`.
-    :type years_seq: list[int]
-    :returns: Return value.
-    :rtype: np.ndarray"""
+            :param res: Value for `res`.
+            :type res: dict[int, dict[str, Any]]
+            :param years_seq: Value for `years_seq`.
+            :type years_seq: list[int]
+            :returns: Return value.
+            :rtype: np.ndarray"""
             out = np.zeros(len(years_seq), dtype=float)
             for i, y in enumerate(years_seq):
                 payload = res.get(int(y), {})
@@ -4832,12 +4837,12 @@ def plot_temp(
                 q_high_data = delta_t_all.sel(quantile=float(q_high), drop=True)
 
                 def _results_for(data: xr.DataArray) -> dict[int, dict[str, Any]]:
-                    """ results for.
+                    """results for.
 
-    :param data: Value for `data`.
-    :type data: xr.DataArray
-    :returns: Return value.
-    :rtype: dict[int, dict[str, Any]]"""
+                    :param data: Value for `data`.
+                    :type data: xr.DataArray
+                    :returns: Return value.
+                    :rtype: dict[int, dict[str, Any]]"""
                     if by == "flow":
                         if "root activity" in data.dims:
                             data = data.sum(dim="root activity")
@@ -4915,7 +4920,7 @@ def _configure_flow_axes(
     year_min: int,
     year_max: int,
 ) -> None:
-    """ configure flow axes.
+    """configure flow axes.
 
     :param fig: Value for `fig`.
     :type fig: go.Figure
@@ -4963,7 +4968,7 @@ def _configure_flow_axes(
 def _merge_all_edges(
     edges_by_depth: dict[int, dict], depths_list: list[int]
 ) -> dict[tuple[tuple[int, int], tuple[int, int]], float]:
-    """ merge all edges.
+    """merge all edges.
 
     :param edges_by_depth: Value for `edges_by_depth`.
     :type edges_by_depth: dict[int, dict]
@@ -4990,7 +4995,7 @@ def _add_flow_panel_traces(
     col: int,
     show_legend: bool,
 ) -> None:
-    """ add flow panel traces.
+    """add flow panel traces.
 
     :param fig: Value for `fig`.
     :type fig: go.Figure
@@ -5126,7 +5131,7 @@ def _add_flow_panel_traces(
 def _add_activity_legend(
     fig: go.Figure, acts: list[int], idx_to_label: dict[int, str]
 ) -> None:
-    """ add activity legend.
+    """add activity legend.
 
     :param fig: Value for `fig`.
     :type fig: go.Figure
@@ -5157,7 +5162,7 @@ def _add_activity_legend(
 def _apply_flow_layout(
     fig: go.Figure, title: str, base_width: int, base_height: int, nrows: int
 ) -> None:
-    """ apply flow layout.
+    """apply flow layout.
 
     :param fig: Value for `fig`.
     :type fig: go.Figure

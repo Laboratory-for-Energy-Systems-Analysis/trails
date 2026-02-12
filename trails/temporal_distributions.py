@@ -43,10 +43,10 @@ class TemporalDistribution:
     """Turn a TemporalExchange into discrete (offset, weight) pairs."""
 
     def __init__(self, tex: TemporalExchange) -> None:
-        """  init  .
+        """init  .
 
-    :param tex: Value for `tex`.
-    :type tex: TemporalExchange"""
+        :param tex: Value for `tex`.
+        :type tex: TemporalExchange"""
         self.tex = tex
 
     # ------------------------------------------------------------------
@@ -54,14 +54,14 @@ class TemporalDistribution:
     # ------------------------------------------------------------------
     @staticmethod
     def _default_sigma(offsets: np.ndarray, scale: Optional[float]) -> float:
-        """ default sigma.
+        """default sigma.
 
-    :param offsets: Value for `offsets`.
-    :type offsets: np.ndarray
-    :param scale: Value for `scale`.
-    :type scale: Optional[float]
-    :returns: Return value.
-    :rtype: float"""
+        :param offsets: Value for `offsets`.
+        :type offsets: np.ndarray
+        :param scale: Value for `scale`.
+        :type scale: Optional[float]
+        :returns: Return value.
+        :rtype: float"""
         if scale is not None and scale > 0:
             return float(scale)
 
@@ -73,14 +73,14 @@ class TemporalDistribution:
 
     @staticmethod
     def _triangular_weights(offsets: np.ndarray, loc: Optional[float]) -> np.ndarray:
-        """ triangular weights.
+        """triangular weights.
 
-    :param offsets: Value for `offsets`.
-    :type offsets: np.ndarray
-    :param loc: Value for `loc`.
-    :type loc: Optional[float]
-    :returns: Return value.
-    :rtype: np.ndarray"""
+        :param offsets: Value for `offsets`.
+        :type offsets: np.ndarray
+        :param loc: Value for `loc`.
+        :type loc: Optional[float]
+        :returns: Return value.
+        :rtype: np.ndarray"""
         if loc is None:
             # If no loc given, fall back to symmetric around the midpoint
             loc = 0.0
@@ -108,20 +108,20 @@ class TemporalDistribution:
         offset_min: int,
         offset_max: int,
     ) -> np.ndarray:
-        """ normal weights.
+        """normal weights.
 
-    :param offsets: Value for `offsets`.
-    :type offsets: np.ndarray
-    :param loc: Value for `loc`.
-    :type loc: float
-    :param scale: Value for `scale`.
-    :type scale: float
-    :param offset_min: Value for `offset_min`.
-    :type offset_min: int
-    :param offset_max: Value for `offset_max`.
-    :type offset_max: int
-    :returns: Return value.
-    :rtype: np.ndarray"""
+        :param offsets: Value for `offsets`.
+        :type offsets: np.ndarray
+        :param loc: Value for `loc`.
+        :type loc: float
+        :param scale: Value for `scale`.
+        :type scale: float
+        :param offset_min: Value for `offset_min`.
+        :type offset_min: int
+        :param offset_max: Value for `offset_max`.
+        :type offset_max: int
+        :returns: Return value.
+        :rtype: np.ndarray"""
         if scale is None or scale <= 0:
             scale = 1.0
 
@@ -136,10 +136,10 @@ class TemporalDistribution:
         def normal_cdf(x: float) -> float:
             """Normal cdf.
 
-    :param x: Value for `x`.
-    :type x: float
-    :returns: Return value.
-    :rtype: float"""
+            :param x: Value for `x`.
+            :type x: float
+            :returns: Return value.
+            :rtype: float"""
             return 0.5 * (1 + erf((x - loc) / (scale * sqrt(2))))
 
         # Continuous probability mass inside the allowed range
@@ -158,16 +158,16 @@ class TemporalDistribution:
     def _lognormal_weights(
         self, offsets: np.ndarray, loc: Optional[float], scale: Optional[float]
     ) -> np.ndarray:
-        """ lognormal weights.
+        """lognormal weights.
 
-    :param offsets: Value for `offsets`.
-    :type offsets: np.ndarray
-    :param loc: Value for `loc`.
-    :type loc: Optional[float]
-    :param scale: Value for `scale`.
-    :type scale: Optional[float]
-    :returns: Return value.
-    :rtype: np.ndarray"""
+        :param offsets: Value for `offsets`.
+        :type offsets: np.ndarray
+        :param loc: Value for `loc`.
+        :type loc: Optional[float]
+        :param scale: Value for `scale`.
+        :type scale: Optional[float]
+        :returns: Return value.
+        :rtype: np.ndarray"""
         x = offsets.astype(float)
         mask = x > 0
         if not mask.any():
@@ -194,14 +194,14 @@ class TemporalDistribution:
 
     @staticmethod
     def _discrete_weights(offsets: np.ndarray, loc: Optional[float]) -> np.ndarray:
-        """ discrete weights.
+        """discrete weights.
 
-    :param offsets: Value for `offsets`.
-    :type offsets: np.ndarray
-    :param loc: Value for `loc`.
-    :type loc: Optional[float]
-    :returns: Return value.
-    :rtype: np.ndarray"""
+        :param offsets: Value for `offsets`.
+        :type offsets: np.ndarray
+        :param loc: Value for `loc`.
+        :type loc: Optional[float]
+        :returns: Return value.
+        :rtype: np.ndarray"""
         if loc is None:
             # try to anchor at 0 if possible
             if offsets.min() <= 0 <= offsets.max():
@@ -224,11 +224,11 @@ class TemporalDistribution:
     ) -> Iterable[Tuple[int, float]]:
         """Iter offsets and weights.
 
-    :param debug: Value for `debug`.
-    :type debug: bool
-    :yields: Yielded values.
-    :returns: Return value.
-    :rtype: Iterable[Tuple[int, float]]"""
+        :param debug: Value for `debug`.
+        :type debug: bool
+        :yields: Yielded values.
+        :returns: Return value.
+        :rtype: Iterable[Tuple[int, float]]"""
         t = self.tex
 
         offsets = np.arange(int(t.offset_min), int(t.offset_max) + 1, dtype=int)
