@@ -626,9 +626,9 @@ def import_excel_inventory(
                 if ex_type in {"production", "technosphere"}:
                     for yk, val in year_amounts.items():
                         stored_val = val if ex_type == "production" else -val
-                        a_template_values.setdefault(tech_pair, {})[
-                            int(yk)
-                        ] = float(stored_val)
+                        a_template_values.setdefault(tech_pair, {})[int(yk)] = float(
+                            stored_val
+                        )
                 elif ex_type == "biosphere":
                     for yk, val in year_amounts.items():
                         b_template_values.setdefault((act_idx, flow_idx), {})[
@@ -700,18 +700,16 @@ def import_excel_inventory(
 
                     year_int = _label_to_year(label, t)
                     if year_int is not None and not year_amounts:
-                        amt_for_year = _amount_for_year(
-                            year_int, year_amounts, amount
-                        )
+                        amt_for_year = _amount_for_year(year_int, year_amounts, amount)
                         if amt_for_year is not None:
                             stored_val = (
                                 amt_for_year
                                 if ex_type == "production"
                                 else -amt_for_year
                             )
-                            a_template_values.setdefault(tech_pair, {})[
-                                year_int
-                            ] = float(stored_val)
+                            a_template_values.setdefault(tech_pair, {})[year_int] = (
+                                float(stored_val)
+                            )
                 elif ex_type == "biosphere":
                     year_int = _label_to_year(label, t)
                     if not apply_to_all_template_years:
@@ -729,9 +727,7 @@ def import_excel_inventory(
 
                     year_int = _label_to_year(label, t)
                     if year_int is not None and not year_amounts:
-                        amt_for_year = _amount_for_year(
-                            year_int, year_amounts, amount
-                        )
+                        amt_for_year = _amount_for_year(year_int, year_amounts, amount)
                         if amt_for_year is not None:
                             b_template_values.setdefault((act_idx, flow_idx), {})[
                                 year_int
