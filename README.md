@@ -32,10 +32,49 @@ At a high level, `TRAILS`:
 * Aggregates impacts by year, activity, and optional root attribution for analysis and plotting.
 
 TRAILS is initially designed to consume ``premise``-generated data packages, which provide
-year-specific background inventories and temporal distributions. This enables a single, 
+year-specific background inventories and temporal distributions. This enables a single,
 deeply-temporalized, technosphere representation.
 
 `TRAILS` is compatible with Frictionless data packages produced by `premise`.
+
+```mermaid
+flowchart TD
+  A[Start: trails.temporal_routing(start_year, start_act_idx, amount)] --> B[Initialize graph, frontier, and per-node metadata]
+  B --> C{Expand node?}
+  C -->|Depth < max_depth AND amount >= min_amount| D[Expand technosphere exchanges\n(A row for node-year)]
+  C -->|Else| E[Mark as frontier node\n(frontier amount)]
+  D --> F[Read temporal distribution metadata\n(temporal_distribution, loc, scale, min/max, source)]
+  F --> G[Map offsets to years:\nanchor_year + offset -> target_year\nClamp to scenario years if needed]
+  G --> H[Create child nodes (target_year, activity)\nwith shifted years]
+  H --> I[Accumulate frontier amounts\nand provenance (root attribution)]
+  D --> J[Direct biosphere?\nCheck B row for this node-year]
+  J -->|Yes| K[Store direct_bio_amount\n(and root attribution if enabled)]
+  J -->|No| C
+  H --> C
+  E --> L[Temporal routing complete\nGraph + frontier + direct biosphere]
+
+  L --> M[trails.lca(methods, compute_score, store_inventory)]
+  M --> N[For each solve year (frontier years):\nBuild demand vector]
+  N --> O[Build datapackage for year\n(technosphere + mappings)]
+  O --> P{attribute_to_roots?}
+  P -->|Yes| Q[Build RHS matrix per root]
+  P -->|No| R[Single RHS demand vector]
+  Q --> S[Solve A x = b (PARDISO/UMFPACK/SciPy)\nReuse factorization per year]
+  R --> S
+  S --> T[Supply arrays per root or total]
+  T --> U[Accumulate inventory:\n- technosphere-driven biosphere\n- add direct_bio_amount]
+  U --> V{compute_score?}
+  V -->|Yes| W[Apply CFs and aggregate\nscores by year/root]
+  V -->|No| X[Return inventory only]
+  W --> Y[Results stored on Trails:\ntrails.inventory / trails.scores]
+  X --> Y
+```
+
+**Caption:** Temporal distributions shift the **anchor year** by integer offsets to produce
+target years (e.g., `year + offset`). Offsets are clamped to available scenario years when
+needed. The field `temporal_amount_source` controls how amounts are applied over time:
+**`port`** uses the exchange amount directly (ported value), while **`matrix`** uses
+the values stored in the year-specific matrices for the target years.
 
 ---
 
