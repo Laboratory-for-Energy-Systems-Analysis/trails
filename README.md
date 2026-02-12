@@ -79,8 +79,9 @@ the values stored in the year-specific matrices for the target years.
 
 ## Example Outputs
 
-One gasoline-fueled passenger car driven 200,000 km, with a reference year of 2050, 
-using a prospective background scenario.
+Example output for a gasoline passenger car driven 200,000 km (reference year 2050)
+with a prospective background: the temporal supply-chain graph above, followed by
+the resulting GWP, radiative forcing, and temperature anomaly time series.
 
 <p align="center">
   <img src="assets/permanent/example_graph.png" width="900"/>
