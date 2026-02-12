@@ -41,13 +41,13 @@ deeply-temporalized, technosphere representation.
 flowchart TD
   A[Start with a functional unit<br>year, activity, amount] --> B[Create a routing graph and frontier buckets]
   B --> C{Should this node be expanded?}
-  C -->|Yes: depth limit and min amount allow it| D[Read technosphere exchanges for this node-year]
+  C -->|Yes: depth limit and min amount allow it| D[Read exchanges for this node-year]
   C -->|No| E[Stop expanding and record a frontier demand]
   D --> F[Apply temporal distributions<br>shift exchange years with offsets]
   F --> G[Create child nodes in their target years]
   G --> H[Accumulate frontier amounts and optional root attribution]
   D --> I[Check direct biosphere for this node-year]
-  I -->|Yes| J[Record direct emissions at this node-year]
+  I -->|Yes| J[Apply temporal distribution to direct emissions<br>and route them across years]
   I -->|No| C
   G --> C
   E --> K[Routing complete<br>frontier demands + direct emissions]
