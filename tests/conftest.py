@@ -14,9 +14,9 @@ import trails.trails as trails_module
 BASE = Path(os.environ.get("PYTEST_DEBUG_DIR", ".pytest-debug"))
 
 # Ensure tests directory is on sys.path for helper imports
-TESTS_DIR = Path(__file__).resolve().parent
-if str(TESTS_DIR) not in sys.path:
-    sys.path.insert(0, str(TESTS_DIR))
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 
 def _slug(s: str) -> str:
