@@ -19,21 +19,21 @@ Online documentation: [https://trails.readthedocs.io/en/latest/](https://trails.
 
 At a high level, `TRAILS`:
 
-* Loads **3D technosphere/biosphere matrices** (time, activity, products) from a
-  Frictionless data package.
-* Optionally **interpolates** scenario matrices to annual resolution.
-* Runs a **temporal traversal** of the supply chain from a functional unit to build
-  time-indexed demands.
 * Effortlessly handles **deep temporalization** — temporal distributions can occur
   at any level of the supply chain, not just the foreground model.
+* Loads **3D technosphere/biosphere matrices** (time, activity, products) from a
+  Frictionless data package.
+* **Interpolates** scenario matrices data points to annual resolution.
 * Solves the inventory **sequentially, year by year**, avoiding a single massive
   technosphere solve.
+* Runs a **temporal traversal** of the supply chain from a functional unit to build
+  time-indexed demands.
 * Solves year-specific systems and **routes impacts** through temporal distributions.
 * Aggregates impacts by year, activity, and optional root attribution for analysis and plotting.
 
-TRAILS was initially designed to consume **Premise-generated** data packages, which provide
-year-specific background inventories and temporal distributions. This enables a single,
-interconnected, deeply temporalized technosphere representation across scenarios.
+TRAILS is initially designed to consume ``premise``-generated data packages, which provide
+year-specific background inventories and temporal distributions. This enables a single, 
+deeply-temporalized, technosphere representation.
 
 `TRAILS` is compatible with Frictionless data packages produced by `premise`.
 
