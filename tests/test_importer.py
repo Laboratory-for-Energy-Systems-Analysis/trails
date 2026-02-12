@@ -6,6 +6,7 @@ import numpy as np
 import sparse
 
 from trails.importer import import_excel_inventory
+
 try:
     from tests.helpers import DummyTrails, _install_fake_bw2io, _sample_importer_data
 except ModuleNotFoundError:  # pragma: no cover - fallback for non-package runs
