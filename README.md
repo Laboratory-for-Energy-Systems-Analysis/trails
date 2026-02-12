@@ -126,6 +126,14 @@ trails.import_excel_inventory("path/to/inventory.xlsx")
 trails.import_excel_inventory("path/to/inventory.xlsx", year=2020)
 ```
 
+### Year-specific amounts
+
+You can provide **year-specific amounts** directly in the Excel exchanges by
+adding integer year columns (e.g., `2010`, `2020`, `2030`, `2050`). These values
+are written to the corresponding years in `A`/`B`, and TRAILS interpolates
+between them across annual years as usual. If no year-specific columns are
+present, the importer uses the standard `amount` field.
+
 
 ## FaIR Climate Model Integration
 

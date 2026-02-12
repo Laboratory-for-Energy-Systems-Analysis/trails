@@ -52,7 +52,13 @@ def import_excel_inventory(
         raise FileNotFoundError(f"Excel inventory file not found: {path}")
 
     importer = ExcelImporter(str(path))
-    importer.apply_strategies()
+    # Keep year-specific columns (e.g., 2010, 2020) by skipping csv_drop_unknown.
+    strategies = [
+        s
+        for s in importer.strategies
+        if getattr(s, "__name__", "") != "csv_drop_unknown"
+    ]
+    importer.apply_strategies(strategies=strategies)
 
     apply_to_all_template_years = scenario_label is None and year is None
 
@@ -159,6 +165,81 @@ def import_excel_inventory(
             offset_max=int(off_max),
             amount_source=amount_source,
         )
+
+    def _extract_year_amounts(exchange: dict) -> dict[int, float]:
+        """extract year amounts.
+
+        :param exchange: Value for `exchange`.
+        :type exchange: dict
+        :returns: Return value.
+        :rtype: dict[int, float]"""
+        year_amounts: dict[int, float] = {}
+        for key, value in exchange.items():
+            year_key = None
+            if isinstance(key, (int, np.integer)):
+                year_key = int(key)
+            elif isinstance(key, (float, np.floating)):
+                if float(key).is_integer():
+                    year_key = int(round(float(key)))
+            elif isinstance(key, str):
+                k = key.strip()
+                if k.isdigit():
+                    year_key = int(k)
+                else:
+                    try:
+                        fk = float(k)
+                    except (TypeError, ValueError):
+                        fk = None
+                    if fk is not None and float(fk).is_integer():
+                        year_key = int(round(float(fk)))
+            if year_key is None:
+                continue
+            try:
+                val = float(value)
+            except (TypeError, ValueError):
+                continue
+            year_amounts[int(year_key)] = val
+        return year_amounts
+
+    def _amount_for_year(
+        year_int: int | None, year_amounts: dict[int, float], fallback: float
+    ) -> float | None:
+        """amount for year.
+
+        :param year_int: Value for `year_int`.
+        :type year_int: int | None
+        :param year_amounts: Value for `year_amounts`.
+        :type year_amounts: dict[int, float]
+        :param fallback: Value for `fallback`.
+        :type fallback: float
+        :returns: Return value.
+        :rtype: float | None"""
+        if year_amounts:
+            if year_int is None:
+                return None
+            if year_int in year_amounts:
+                return float(year_amounts[year_int])
+            return None
+        return float(fallback)
+
+    def _label_to_year(label: str, t_idx: int) -> int | None:
+        """label to year.
+
+        :param label: Value for `label`.
+        :type label: str
+        :param t_idx: Value for `t_idx`.
+        :type t_idx: int
+        :returns: Return value.
+        :rtype: int | None"""
+        if label.isdigit():
+            return int(label)
+        try:
+            scen_label = str(trails.scenario_labels[int(t_idx)])
+        except Exception:
+            return None
+        if scen_label.isdigit():
+            return int(scen_label)
+        return None
 
     def _activity_key(
         name: object,
@@ -475,11 +556,12 @@ def import_excel_inventory(
         act_idx = dataset_act_indices[dataset_key]
         for exchange in dataset.get("exchanges", []) or []:
             ex_type = exchange.get("type")
+            year_amounts = _extract_year_amounts(exchange)
             try:
                 amount = float(exchange.get("amount", 0.0))
             except (TypeError, ValueError):
                 continue
-            if amount == 0.0:
+            if not year_amounts and amount == 0.0:
                 continue
 
             if ex_type == "production":
@@ -539,6 +621,20 @@ def import_excel_inventory(
             else:
                 continue
 
+            # If year-specific amounts are provided, store them directly for interpolation.
+            if year_amounts:
+                if ex_type in {"production", "technosphere"}:
+                    for yk, val in year_amounts.items():
+                        stored_val = val if ex_type == "production" else -val
+                        a_template_values.setdefault(tech_pair, {})[
+                            int(yk)
+                        ] = float(stored_val)
+                elif ex_type == "biosphere":
+                    for yk, val in year_amounts.items():
+                        b_template_values.setdefault((act_idx, flow_idx), {})[
+                            int(yk)
+                        ] = float(val)
+
             if ex_type in {"production", "technosphere"}:
                 if (
                     _norm(exchange.get("name")) == ""
@@ -583,9 +679,17 @@ def import_excel_inventory(
 
             for label, t in targets:
                 if ex_type in {"production", "technosphere"}:
+                    year_int = _label_to_year(label, t)
                     if not apply_to_all_template_years:
-                        a_coords.append((t, act_idx, prod_idx))
-                        a_data.append(stored_amount)
+                        amt_for_year = _amount_for_year(year_int, year_amounts, amount)
+                        if amt_for_year is not None and amt_for_year != 0.0:
+                            stored_val = (
+                                amt_for_year
+                                if ex_type == "production"
+                                else -amt_for_year
+                            )
+                            a_coords.append((t, act_idx, prod_idx))
+                            a_data.append(float(stored_val))
 
                     tex = _parse_temporal_exchange(exchange)
                     key = (label, int(act_idx), int(prod_idx))
@@ -594,15 +698,27 @@ def import_excel_inventory(
                     else:
                         trails.temporal_technosphere_exchanges[key] = tex
 
-                    year_int = int(label) if label.isdigit() else None
-                    if year_int is not None:
-                        a_template_values.setdefault(tech_pair, {})[
-                            year_int
-                        ] = stored_amount
+                    year_int = _label_to_year(label, t)
+                    if year_int is not None and not year_amounts:
+                        amt_for_year = _amount_for_year(
+                            year_int, year_amounts, amount
+                        )
+                        if amt_for_year is not None:
+                            stored_val = (
+                                amt_for_year
+                                if ex_type == "production"
+                                else -amt_for_year
+                            )
+                            a_template_values.setdefault(tech_pair, {})[
+                                year_int
+                            ] = float(stored_val)
                 elif ex_type == "biosphere":
+                    year_int = _label_to_year(label, t)
                     if not apply_to_all_template_years:
-                        b_coords.append((t, act_idx, flow_idx))
-                        b_data.append(stored_amount)
+                        amt_for_year = _amount_for_year(year_int, year_amounts, amount)
+                        if amt_for_year is not None and amt_for_year != 0.0:
+                            b_coords.append((t, act_idx, flow_idx))
+                            b_data.append(float(amt_for_year))
 
                     tex = _parse_temporal_exchange(exchange)
                     key = (label, int(act_idx), int(flow_idx))
@@ -611,11 +727,15 @@ def import_excel_inventory(
                     else:
                         trails.temporal_biosphere_exchanges[key] = tex
 
-                    year_int = int(label) if label.isdigit() else None
-                    if year_int is not None:
-                        b_template_values.setdefault((act_idx, flow_idx), {})[
-                            year_int
-                        ] = stored_amount
+                    year_int = _label_to_year(label, t)
+                    if year_int is not None and not year_amounts:
+                        amt_for_year = _amount_for_year(
+                            year_int, year_amounts, amount
+                        )
+                        if amt_for_year is not None:
+                            b_template_values.setdefault((act_idx, flow_idx), {})[
+                                year_int
+                            ] = float(amt_for_year)
 
     def _resize_sparse(
         matrix: sparse.COO, new_shape: tuple[int, int, int]
@@ -702,7 +822,13 @@ def import_excel_inventory(
             if xs.size == 1:
                 interp = np.full(years_sorted.shape, ys[0], dtype=float)
             else:
-                interp = np.interp(years_sorted, xs, ys)
+                interp = np.interp(
+                    years_sorted,
+                    xs,
+                    ys,
+                    left=float(ys[0]),
+                    right=float(ys[-1]),
+                )
             for year, value in zip(years_sorted, interp):
                 if value == 0.0:
                     continue

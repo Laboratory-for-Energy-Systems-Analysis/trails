@@ -51,10 +51,11 @@ When opening a PR, include:
 - Screenshots or plots for any changes affecting outputs or visualizations.
 
 ## Configuration & Environment Notes
-Python versions supported are `>=3.10` and `<3.13` (see `pyproject.toml`).
+Python versions supported are `>=3.10` and `<3.12` (see `pyproject.toml`).
 Project dependencies are defined in `requirements.txt`, loaded dynamically at build time.
-Runtime dependencies include Brightway (`bw2calc`, `bw_processing`), `scikits.umfpack`, `sparse`, `xarray`,
-`plotly`, and `datapackage`.
+Runtime dependencies include Brightway (`bw2calc`, `bw_processing`), `sparse`, `xarray`,
+`plotly`, and `datapackage`. `scikit-umfpack` is optional (`.[umfpack]`) and enables
+UMFPACK; otherwise the solver falls back to SciPy.
 
 ## Data Packages & Caching
 `trails` loads Frictionless datapackages with inventories under

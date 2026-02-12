@@ -2093,6 +2093,7 @@ class Trails:
                         "scale": getattr(tex, "scale", None),
                         "min": getattr(tex, "offset_min", None),
                         "max": getattr(tex, "offset_max", None),
+                        "td source": getattr(tex, "amount_source", None),
                     }
                     if flow_type == "prod":
                         prod_rows.append(entry)
@@ -2127,6 +2128,7 @@ class Trails:
                             "scale": getattr(tex, "scale", None),
                             "min": getattr(tex, "offset_min", None),
                             "max": getattr(tex, "offset_max", None),
+                            "td source": getattr(tex, "amount_source", None),
                         }
                     )
 
@@ -2183,6 +2185,7 @@ class Trails:
             "scale": 5,
             "min": 5,
             "max": 5,
+            "td source": 7,
         }
 
         headers = [
@@ -2196,6 +2199,7 @@ class Trails:
             "scale",
             "min",
             "max",
+            "td source",
         ]
 
         try:

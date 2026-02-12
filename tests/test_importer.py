@@ -205,3 +205,67 @@ def test_import_excel_inventory_single_year(tmp_path: Path) -> None:
     assert np.all(dense_a[2] == 0)
     assert np.all(dense_b[0] == 0)
     assert np.all(dense_b[2] == 0)
+
+
+def test_import_excel_inventory_year_specific_amounts(tmp_path: Path) -> None:
+    trails = DummyTrails()
+    data = [
+        {
+            "name": "A",
+            "reference product": "A",
+            "location": "GLO",
+            "unit": "kg",
+            "database": "db",
+            "code": "A",
+            "exchanges": [
+                {
+                    "type": "production",
+                    "name": "A",
+                    "reference product": "A",
+                    "location": "GLO",
+                    "amount": 0.0,
+                    "2000": 1.0,
+                    "2010": 3.0,
+                },
+                {
+                    "type": "technosphere",
+                    "name": "B",
+                    "reference product": "B",
+                    "location": "GLO",
+                    "amount": 0.0,
+                    "2000": 2.0,
+                    "2010": 4.0,
+                },
+            ],
+        },
+        {
+            "name": "B",
+            "reference product": "B",
+            "location": "GLO",
+            "unit": "kg",
+            "database": "db",
+            "code": "B",
+            "exchanges": [
+                {
+                    "type": "production",
+                    "name": "B",
+                    "reference product": "B",
+                    "location": "GLO",
+                    "amount": 1.0,
+                }
+            ],
+        },
+    ]
+    _install_fake_bw2io(data)
+
+    inv_path = tmp_path / "inv.xlsx"
+    inv_path.write_text("stub")
+
+    import_excel_inventory(trails, inv_path)
+
+    dense_a = trails.A.todense()
+
+    # Production exchange interpolated: 1.0 (2000) -> 3.0 (2010) => 2.0 at 2005
+    np.testing.assert_allclose(dense_a[:, 0, 0], np.array([1.0, 2.0, 3.0]))
+    # Technosphere exchange interpolated and sign-flipped
+    np.testing.assert_allclose(dense_a[:, 0, 1], np.array([-2.0, -3.0, -4.0]))
