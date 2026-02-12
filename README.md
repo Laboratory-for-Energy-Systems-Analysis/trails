@@ -1,8 +1,7 @@
 # `TRAILS`: Temporal Routing and Aggregation of Impacts across Life-cycle Systems
 
-<p align="center">
-  <img src="https://github.com/romainsacchi/trails/blob/main/assets/permanent/trails_logo_grey_on_white.png" height="110"/>
-</p>
+
+[Temporal GWP example](assets/permanent/trails_logo_grey_on_white.png)
 
 [![PyPI version](https://badge.fury.io/py/trails.svg)](https://badge.fury.io/py/trails)
 
@@ -77,6 +76,12 @@ Tutorial notebooks are available under `examples/`:
 
 These walk through a full workflow (data loading, routing, LCA, plotting, and
 FaIR-based climate metrics).
+
+## Example Outputs
+
+![Temporal GWP example](assets/permanent/example_gwp.png)
+![Radiative forcing example](assets/permanent/example_rf.png)
+![Temperature anomaly example](assets/permanent/example_temp.png)
 
 ---
 
