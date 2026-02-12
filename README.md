@@ -56,6 +56,17 @@ using a prospective background scenario.
 
 ---
 
+## Example Notebooks
+
+Tutorial notebooks are available under `examples/`:
+
+- `examples/1. simple numerical example.ipynb`
+- `examples/2. premise and imported lci example.ipynb`
+
+These walk through a full workflow (data loading, routing, LCA, plotting, and
+FaIR-based climate metrics).
+
+---
 
 ## Usage
 
@@ -100,22 +111,10 @@ fig.show()
 
 ---
 
-## Example Notebooks
-
-Tutorial notebooks are available under `examples/`:
-
-- `examples/1. simple numerical example.ipynb`
-- `examples/2. premise and imported lci example.ipynb`
-
-These walk through a full workflow (data loading, routing, LCA, plotting, and
-FaIR-based climate metrics).
 
 ## Importing Excel Inventories
 
-You can import user-provided inventories from Excel using ``bw2io``. When you
-omit ``year`` and ``scenario_label``, the exchanges are applied to all template
-years and interpolated across annual years.
-
+You can import user-provided inventories from Excel using ``bw2io``.
 ```python
 from trails import Trails
 
