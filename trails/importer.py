@@ -53,12 +53,14 @@ def import_excel_inventory(
 
     importer = ExcelImporter(str(path))
     # Keep year-specific columns (e.g., 2010, 2020) by skipping csv_drop_unknown.
-    strategies = [
-        s
-        for s in importer.strategies
-        if getattr(s, "__name__", "") != "csv_drop_unknown"
-    ]
-    importer.apply_strategies(strategies=strategies)
+    strategies = getattr(importer, "strategies", None)
+    if strategies:
+        strategies = [
+            s for s in strategies if getattr(s, "__name__", "") != "csv_drop_unknown"
+        ]
+        importer.apply_strategies(strategies=strategies)
+    else:
+        importer.apply_strategies()
 
     apply_to_all_template_years = scenario_label is None and year is None
 
