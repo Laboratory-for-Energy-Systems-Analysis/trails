@@ -15,14 +15,14 @@ build:
 
 requirements:
   host:
-    - python >=3.10, <3.13
+    - python >=3.10, <3.12
     - pip
     - setuptools
     - bw2calc
     - bw2data
 
   run:
-    - python >=3.10, <3.13
+    - python >=3.10, <3.12
     - numpy
     - pandas
     - scipy
