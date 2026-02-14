@@ -2425,7 +2425,10 @@ def plot_temporal_scores(
             static_score = float(static_score[0])
         else:
             raise ValueError(
-                "Multiple static scores provided; pass method=... to select one."
+                "Multiple static scores provided but plotting data has no "
+                "'method' dimension. Run trails.lca(..., store_inventory=True) "
+                "to retain per-method characterized inventory, or pass "
+                "method=... with a single static score."
             )
 
     return _plot_results_by_year(

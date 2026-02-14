@@ -287,6 +287,7 @@ class Trails:
         self,
         *,
         attribute_to_roots: bool = False,
+        methods: list[str] | None = None,
     ) -> None:
         """Reset scores.
 
@@ -305,16 +306,19 @@ class Trails:
         self._score_years = years
         self._score_year_index = {int(y): int(i) for i, y in enumerate(years)}
         self._scores_has_root = bool(attribute_to_roots)
+        self._score_methods = list(methods) if methods else None
 
         self._score_chunk_act = []
         self._score_chunk_year = []
         self._score_chunk_root = []
+        self._score_chunk_method = []
         self._score_chunk_value = []
 
         # Bulk score builder (vectorized appends)
         self._score_bulk_act = []
         self._score_bulk_year = []
         self._score_bulk_root = []
+        self._score_bulk_method = []
         self._score_bulk_value = []
 
         self.scores = None
@@ -409,6 +413,7 @@ class Trails:
         yearidx_to_value: dict[int, float],
         *,
         root_activity: int | None = None,
+        method_idx: int | None = None,
     ) -> None:
         """append scores from yearidx map.
 
@@ -431,6 +436,14 @@ class Trails:
         self._score_chunk_year.extend([int(yidx) for yidx, _ in items])
         self._score_chunk_value.extend([float(v) for _, v in items])
 
+        methods = getattr(self, "_score_methods", None)
+        if methods is not None:
+            if method_idx is None:
+                raise ValueError(
+                    "method_idx must be provided when scores have method dimension."
+                )
+            self._score_chunk_method.extend([int(method_idx)] * n)
+
         if getattr(self, "_scores_has_root", False):
             if root_activity is None:
                 root_activity = int(act_idx)
@@ -441,6 +454,7 @@ class Trails:
         *,
         attribute_to_roots: bool = False,
         reset_scores: bool = True,
+        score_methods: list[str] | None = None,
     ) -> None:
         """Reset inventory.
 
@@ -498,15 +512,18 @@ class Trails:
             self._score_years = self._inventory_years
             self._score_year_index = self._inventory_year_index
             self._scores_has_root = bool(attribute_to_roots)
+            self._score_methods = list(score_methods) if score_methods else None
 
             self._score_chunk_act = []
             self._score_chunk_year = []
             self._score_chunk_root = []
+            self._score_chunk_method = []
             self._score_chunk_value = []
 
             self._score_bulk_act = []
             self._score_bulk_year = []
             self._score_bulk_root = []
+            self._score_bulk_method = []
             self._score_bulk_value = []
 
             self.scores = None
@@ -548,6 +565,7 @@ class Trails:
         value: float,
         *,
         root_activity: int | None = None,
+        method_idx: int | None = None,
     ) -> None:
         """append score entry.
 
@@ -578,6 +596,14 @@ class Trails:
         self._score_chunk_year.append(int(year_idx))
         self._score_chunk_value.append(v)
 
+        methods = getattr(self, "_score_methods", None)
+        if methods is not None:
+            if method_idx is None:
+                raise ValueError(
+                    "method_idx must be provided when scores have method dimension."
+                )
+            self._score_chunk_method.append(int(method_idx))
+
         if getattr(self, "_scores_has_root", False):
             if root_activity is None:
                 root_activity = int(act_idx)
@@ -597,12 +623,29 @@ class Trails:
 
         n_activities = int(self.A.shape[1])
         has_root = bool(self._scores_has_root)
+        methods = getattr(self, "_score_methods", None)
+        has_method = methods is not None
 
         has_any = bool(self._score_chunk_act) or bool(
             getattr(self, "_score_bulk_act", [])
         )
         if not has_any:
-            if has_root:
+            if has_root and has_method:
+                arr = sparse.zeros(
+                    (len(methods), n_activities, len(years), n_activities),
+                    dtype=self.value_dtype,
+                )
+                self.scores = xr.DataArray(
+                    arr,
+                    dims=("method", "activity", "year", "root activity"),
+                    coords={
+                        "method": np.asarray(methods, dtype=object),
+                        "activity": np.arange(n_activities, dtype=int),
+                        "year": years,
+                        "root activity": np.arange(n_activities, dtype=int),
+                    },
+                )
+            elif has_root:
                 arr = sparse.zeros(
                     (n_activities, len(years), n_activities), dtype=self.value_dtype
                 )
@@ -613,6 +656,19 @@ class Trails:
                         "activity": np.arange(n_activities, dtype=int),
                         "year": years,
                         "root activity": np.arange(n_activities, dtype=int),
+                    },
+                )
+            elif has_method:
+                arr = sparse.zeros(
+                    (len(methods), n_activities, len(years)), dtype=self.value_dtype
+                )
+                self.scores = xr.DataArray(
+                    arr,
+                    dims=("method", "activity", "year"),
+                    coords={
+                        "method": np.asarray(methods, dtype=object),
+                        "activity": np.arange(n_activities, dtype=int),
+                        "year": years,
                     },
                 )
             else:
@@ -630,6 +686,7 @@ class Trails:
         coords_parts = []
         data_parts = []
         root_parts = []
+        method_parts = []
 
         # Chunk parts
         if self._score_chunk_act:
@@ -638,6 +695,9 @@ class Trails:
             data_c = np.asarray(self._score_chunk_value, dtype=self.value_dtype)
             coords_parts.append((act_c, yr_c))
             data_parts.append(data_c)
+            if has_method:
+                method_c = np.asarray(self._score_chunk_method, dtype=np.int64)
+                method_parts.append(method_c)
             if has_root:
                 root_c = np.asarray(self._score_chunk_root, dtype=np.int64)
                 root_parts.append(root_c)
@@ -652,6 +712,11 @@ class Trails:
 
             coords_parts.append((act_b, yr_b))
             data_parts.append(data_b)
+            if has_method:
+                method_b = np.concatenate(self._score_bulk_method).astype(
+                    np.int64, copy=False
+                )
+                method_parts.append(method_b)
             if has_root:
                 root_b = np.concatenate(self._score_bulk_root).astype(
                     np.int64, copy=False
@@ -662,7 +727,26 @@ class Trails:
         yr = np.concatenate([p[1] for p in coords_parts])
         data = np.concatenate(data_parts).astype(self.value_dtype, copy=False)
 
-        if has_root:
+        if has_root and has_method:
+            method_idx = np.concatenate(method_parts).astype(np.int64, copy=False)
+            root = np.concatenate(root_parts).astype(np.int64, copy=False)
+            coords = np.vstack([method_idx, act, yr, root])
+            arr = sparse.COO(
+                coords,
+                data,
+                shape=(len(methods), n_activities, len(years), n_activities),
+            )
+            self.scores = xr.DataArray(
+                arr,
+                dims=("method", "activity", "year", "root activity"),
+                coords={
+                    "method": np.asarray(methods, dtype=object),
+                    "activity": np.arange(n_activities, dtype=int),
+                    "year": years,
+                    "root activity": np.arange(n_activities, dtype=int),
+                },
+            )
+        elif has_root:
             root = np.concatenate(root_parts).astype(np.int64, copy=False)
             coords = np.vstack([act, yr, root])
             arr = sparse.COO(
@@ -676,6 +760,19 @@ class Trails:
                     "activity": np.arange(n_activities, dtype=int),
                     "year": years,
                     "root activity": np.arange(n_activities, dtype=int),
+                },
+            )
+        elif has_method:
+            method_idx = np.concatenate(method_parts).astype(np.int64, copy=False)
+            coords = np.vstack([method_idx, act, yr])
+            arr = sparse.COO(coords, data, shape=(len(methods), n_activities, len(years)))
+            self.scores = xr.DataArray(
+                arr,
+                dims=("method", "activity", "year"),
+                coords={
+                    "method": np.asarray(methods, dtype=object),
+                    "activity": np.arange(n_activities, dtype=int),
+                    "year": years,
                 },
             )
         else:
@@ -820,6 +917,7 @@ class Trails:
         values: np.ndarray,
         *,
         root_activity: np.ndarray | None = None,
+        method_idx: int | np.ndarray | None = None,
     ) -> None:
         """append scores bulk.
 
@@ -863,6 +961,21 @@ class Trails:
         self._score_bulk_act.append(a)
         self._score_bulk_year.append(y)
         self._score_bulk_value.append(v)
+
+        methods = getattr(self, "_score_methods", None)
+        if methods is not None:
+            if method_idx is None:
+                raise ValueError(
+                    "method_idx must be provided when scores have method dimension."
+                )
+            if np.isscalar(method_idx):
+                method_arr = np.full(a.shape, int(method_idx), dtype=np.int64)
+            else:
+                method_arr = np.asarray(method_idx)
+                if method_arr.shape != a.shape:
+                    raise ValueError("method_idx must match act_idx shape")
+                method_arr = method_arr[m].astype(np.int64, copy=False)
+            self._score_bulk_method.append(method_arr)
 
         if getattr(self, "_scores_has_root", False):
             if root_activity is None:
@@ -2604,6 +2717,7 @@ class Trails:
         min_amount: float = 0.0,
         use_temporal_distributions: bool = True,
         debug: bool = False,
+        method_idx: int | None = None,
     ) -> None:
         """Accumulate temporalized biosphere score matrix.
 
@@ -2633,7 +2747,10 @@ class Trails:
         if not hasattr(self, "_score_year_index") or not hasattr(
             self, "_score_bulk_value"
         ):
-            self.reset_scores(attribute_to_roots=True)
+            self.reset_scores(
+                attribute_to_roots=True,
+                methods=getattr(self, "_score_methods", None),
+            )
 
         # Resolve B slice
         biosphere_slice = self._get_biosphere_slice(base_year, debug)
@@ -2733,6 +2850,7 @@ class Trails:
                 year_idx=year_all,
                 values=val_all,
                 root_activity=root_all,
+                method_idx=method_idx,
             )
             return
 
@@ -3026,7 +3144,13 @@ class Trails:
             root = np.concatenate(out_root)
             val = np.concatenate(out_val).astype(np.float64, copy=False)
 
-            self._append_scores_bulk(act, yr, val, root_activity=root)
+            self._append_scores_bulk(
+                act,
+                yr,
+                val,
+                root_activity=root,
+                method_idx=method_idx,
+            )
 
     def accumulate_temporalized_biosphere_score(
         self,
@@ -3038,6 +3162,7 @@ class Trails:
         store_activity: int | None = None,
         use_temporal_distributions: bool = True,
         debug: bool = False,
+        method_idx: int | None = None,
     ) -> None:
         """Accumulate temporalized biosphere score.
 
@@ -3061,7 +3186,8 @@ class Trails:
             self, "_score_chunk_value"
         ):
             self.reset_scores(
-                attribute_to_roots=bool(getattr(self, "_scores_has_root", False))
+                attribute_to_roots=bool(getattr(self, "_scores_has_root", False)),
+                methods=getattr(self, "_score_methods", None),
             )
 
         if not supply_by_activity:
@@ -3243,7 +3369,10 @@ class Trails:
 
                 if score != 0.0:
                     self._append_scores_from_yearidx_map(
-                        score_act, {base_year_idx: score}, root_activity=root_activity
+                        score_act,
+                        {base_year_idx: score},
+                        root_activity=root_activity,
+                        method_idx=method_idx,
                     )
                 continue
 
@@ -3425,7 +3554,10 @@ class Trails:
 
             if acc_yearidx:
                 self._append_scores_from_yearidx_map(
-                    score_act, acc_yearidx, root_activity=root_activity
+                    score_act,
+                    acc_yearidx,
+                    root_activity=root_activity,
+                    method_idx=method_idx,
                 )
 
     def _accumulate_temporalized_biosphere_inventory_core(

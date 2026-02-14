@@ -367,7 +367,7 @@ def lca(
     trails: Trails,
     methods: List[str] | None = None,
     show_progress: bool = True,
-    attribute_to_roots: bool = True,
+    attribute_to_roots: bool | None = None,
     *,
     store_inventory: bool = False,
     compute_score: bool = True,
@@ -381,8 +381,10 @@ def lca(
     :type methods: List[str] | None
     :param show_progress: Value for `show_progress`.
     :type show_progress: bool
-    :param attribute_to_roots: Value for `attribute_to_roots`.
-    :type attribute_to_roots: bool
+    :param attribute_to_roots: Value for `attribute_to_roots`. If ``None``,
+        reuse the value used in ``trails.temporal_routing(...)``; if routing
+        metadata is unavailable, defaults to ``True``.
+    :type attribute_to_roots: bool | None
     :param store_inventory: Value for `store_inventory`.
     :type store_inventory: bool
     :param compute_score: Value for `compute_score`.
@@ -393,23 +395,51 @@ def lca(
     :raises ValueError: If an error occurs."""
     debug = bool(getattr(trails, "debug", False))
 
-    trails.reset_inventory(attribute_to_roots=attribute_to_roots)
+    # Routing must be run explicitly before LCA.
+    graph = getattr(trails, "graph", None)
+    if graph is None:
+        raise RuntimeError(
+            "Temporal routing not initialized; run trails.temporal_routing(...) "
+            "before trails.lca()."
+        )
+
+    routing_params = getattr(trails, "_routing_params", {}) or {}
+    routing_attr_to_roots = getattr(trails, "_routing_attribute_to_roots", None)
+
+    if attribute_to_roots is None:
+        if routing_attr_to_roots is not None:
+            attribute_to_roots = bool(routing_attr_to_roots)
+        else:
+            attribute_to_roots = True
+
+    score_methods = (
+        methods
+        if (compute_score and methods and len(methods) > 1 and not store_inventory)
+        else None
+    )
+    trails.reset_inventory(
+        attribute_to_roots=attribute_to_roots,
+        score_methods=score_methods,
+    )
 
     umfpack_cache: dict | None = (
         {} if (attribute_to_roots and SOLVER == "umfpack") else None
     )
 
-    cf = None
+    cf_vectors: list[np.ndarray] | None = None
     if compute_score:
         if not methods:
             raise ValueError("methods must be provided when compute_score=True.")
-        cf = get_cf_vector(
-            trails=trails,
-            methods=methods,
-            char_cache=_CHAR_CACHE,
-            debug=debug,
-            ei_version=ei_version,
-        )
+        cf_vectors = [
+            get_cf_vector(
+                trails=trails,
+                methods=[method_name],
+                char_cache=_CHAR_CACHE,
+                debug=debug,
+                ei_version=ei_version,
+            )
+            for method_name in methods
+        ]
 
     # Ensure inventory builders are ready when we intend to store inventory data.
     if store_inventory:
@@ -426,16 +456,6 @@ def lca(
                 "chunk-based inventory builders."
             )
 
-    # Routing must be run explicitly before LCA.
-    graph = getattr(trails, "graph", None)
-    if graph is None:
-        raise RuntimeError(
-            "Temporal routing not initialized; run trails.temporal_routing(...) "
-            "before trails.lca()."
-        )
-
-    routing_params = getattr(trails, "_routing_params", {}) or {}
-    routing_attr_to_roots = getattr(trails, "_routing_attribute_to_roots", None)
     if routing_attr_to_roots is not None and routing_attr_to_roots != bool(
         attribute_to_roots
     ):
@@ -699,48 +719,56 @@ def lca(
 
         # ---- Scores ----
         if compute_score:
+            assert cf_vectors is not None
             # Build dense supply matrix (n_acts, n_roots_this_year).
             # Injected supplies remain dictionary-based because they are usually small.
             if attribute_to_roots:
                 # Only call the matrix scorer when we solved a multi-RHS system
                 # and the root ordering matches the solution columns.
                 if root_ids is not None and root_supply_matrix is not None:
-                    trails.accumulate_temporalized_biosphere_score_matrix(
-                        base_year=solve_year,
-                        supply_matrix=root_supply_matrix,
-                        root_activities=root_ids,
-                        cf=cf,
-                        min_amount=float(min_amount),
-                        use_temporal_distributions=True,
-                        debug=debug,
-                    )
+                    for method_idx, cf_vec in enumerate(cf_vectors):
+                        trails.accumulate_temporalized_biosphere_score_matrix(
+                            base_year=solve_year,
+                            supply_matrix=root_supply_matrix,
+                            root_activities=root_ids,
+                            cf=cf_vec,
+                            min_amount=float(min_amount),
+                            use_temporal_distributions=True,
+                            debug=debug,
+                            method_idx=method_idx,
+                        )
 
                 # Injected supplies: keep cheap dict scoring (usually small)
                 per_root_injected = root_injected_by_year.get(solve_year, {})
                 for root_act, injected_supply in per_root_injected.items():
                     if not injected_supply:
                         continue
-                    trails.accumulate_temporalized_biosphere_score(
-                        base_year=solve_year,
-                        supply_by_activity=injected_supply,
-                        cf=cf,
-                        min_amount=float(min_amount),
-                        store_activity=int(root_act),
-                        debug=debug,
-                    )
+                    for method_idx, cf_vec in enumerate(cf_vectors):
+                        trails.accumulate_temporalized_biosphere_score(
+                            base_year=solve_year,
+                            supply_by_activity=injected_supply,
+                            cf=cf_vec,
+                            min_amount=float(min_amount),
+                            store_activity=int(root_act),
+                            debug=debug,
+                            method_idx=method_idx,
+                        )
             else:
-                # Non-root mode: single column supply array already exists
-                # Use the dict path to keep the scorer simple.
-                supply_total = supplies[0][0] if supplies else {}
-                if supply_total:
-                    trails.accumulate_temporalized_biosphere_score(
-                        base_year=solve_year,
-                        supply_by_activity=supply_total,
-                        cf=cf,
-                        min_amount=float(min_amount),
-                        store_activity=None,
-                        debug=debug,
-                    )
+                # Non-root mode: score all supply blocks for the year
+                # (solved supply + injected direct additions).
+                for supply_dict, _ in supplies:
+                    if not supply_dict:
+                        continue
+                    for method_idx, cf_vec in enumerate(cf_vectors):
+                        trails.accumulate_temporalized_biosphere_score(
+                            base_year=solve_year,
+                            supply_by_activity=supply_dict,
+                            cf=cf_vec,
+                            min_amount=float(min_amount),
+                            store_activity=None,
+                            debug=debug,
+                            method_idx=method_idx,
+                        )
 
         if pbar is not None:
             pbar.update(1)

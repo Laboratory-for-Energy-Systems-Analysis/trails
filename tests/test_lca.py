@@ -1,8 +1,11 @@
 import importlib
 import numpy as np
 import sparse
+import pytest
 
+from datapackage import Package
 from trails.bw_interface import _nearest_metadata_label_for_year
+from trails.lcia import get_lcia_method_names
 from trails.trails import Trails
 
 lca_module = importlib.import_module("trails.lca")
@@ -149,3 +152,107 @@ def test_lca_static_mode(example_trails: Trails) -> None:
         attribute_to_roots=False,
     )
     assert example_trails.scores is None
+
+
+def test_lca_uses_routing_attribute_to_roots_default(example_trails: Trails) -> None:
+    """LCA should inherit routing root-attribution mode when omitted.
+
+    :param example_trails: Trails fixture initialized from example datapackage.
+    :type example_trails: trails.trails.Trails
+    :returns: None.
+    :rtype: None
+    """
+    activity_indices = next(iter(example_trails.activity_indices.values()))
+    start_act_idx = next(iter(activity_indices.keys()))
+
+    example_trails.temporal_routing(
+        start_year=2005,
+        start_act_idx=start_act_idx,
+        max_depth=1,
+        min_amount=0.0,
+        show_progress=False,
+        attribute_to_roots=False,
+        debug=False,
+    )
+
+    lca_module.lca(
+        trails=example_trails,
+        show_progress=False,
+        compute_score=False,
+        store_inventory=False,
+    )
+    assert example_trails.scores is None
+    assert example_trails._scores_has_root is False
+
+
+def test_lca_multi_method_scores_without_inventory(example_trails: Trails) -> None:
+    """Multi-method scores should retain method dimension without inventory.
+
+    :param example_trails: Trails fixture initialized from example datapackage.
+    :type example_trails: trails.trails.Trails
+    :returns: None.
+    :rtype: None
+    """
+    activity_indices = next(iter(example_trails.activity_indices.values()))
+    start_act_idx = next(iter(activity_indices.keys()))
+    methods = get_lcia_method_names(ei_version="3.11")[:2]
+    assert len(methods) == 2
+
+    example_trails.temporal_routing(
+        start_year=2005,
+        start_act_idx=start_act_idx,
+        max_depth=1,
+        min_amount=0.0,
+        show_progress=False,
+        attribute_to_roots=False,
+        debug=False,
+    )
+
+    lca_module.lca(
+        trails=example_trails,
+        methods=methods,
+        show_progress=False,
+        compute_score=True,
+        store_inventory=False,
+        attribute_to_roots=False,
+    )
+
+    assert example_trails.scores is not None
+    assert "method" in example_trails.scores.dims
+    assert example_trails.scores.coords["method"].values.tolist() == methods
+
+
+def test_lca_total_invariant_to_root_attribution(example_package: Package) -> None:
+    """Total score should not depend on root-attribution bookkeeping mode."""
+    methods = get_lcia_method_names(ei_version="3.11")[:1]
+    assert methods
+
+    def run_case(attribute_to_roots: bool) -> float:
+        trails = Trails(example_package, interpolate_annual=False)
+        activity_indices = next(iter(trails.activity_indices.values()))
+        start_act_idx = next(iter(activity_indices.keys()))
+
+        trails.temporal_routing(
+            start_year=2005,
+            start_act_idx=start_act_idx,
+            max_depth=1,
+            min_amount=0.0,
+            show_progress=False,
+            attribute_to_roots=attribute_to_roots,
+            debug=False,
+        )
+
+        lca_module.lca(
+            trails=trails,
+            methods=methods,
+            show_progress=False,
+            compute_score=True,
+            store_inventory=False,
+            attribute_to_roots=attribute_to_roots,
+        )
+        assert trails.scores is not None
+        return float(trails.scores.data.sum())
+
+    total_false = run_case(False)
+    total_true = run_case(True)
+    assert total_false == pytest.approx(total_true, rel=1e-10, abs=1e-12)
