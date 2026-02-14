@@ -765,7 +765,9 @@ class Trails:
         elif has_method:
             method_idx = np.concatenate(method_parts).astype(np.int64, copy=False)
             coords = np.vstack([method_idx, act, yr])
-            arr = sparse.COO(coords, data, shape=(len(methods), n_activities, len(years)))
+            arr = sparse.COO(
+                coords, data, shape=(len(methods), n_activities, len(years))
+            )
             self.scores = xr.DataArray(
                 arr,
                 dims=("method", "activity", "year"),
