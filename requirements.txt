@@ -1,8 +1,8 @@
-numpy==1.24.4
+numpy>=1.24.4,<2.4
 pandas
-scipy
+scipy>=1.10,<1.16
 pyyaml
-sparse >=0.13.0
+sparse>=0.13.0,<0.18
 datapackage
 bw2calc
 bw2io
