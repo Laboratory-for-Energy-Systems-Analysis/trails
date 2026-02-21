@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 import sys
 import types
+import warnings
 from typing import Any
 
 import numpy as np
@@ -12,7 +13,7 @@ import sparse
 import xarray as xr
 
 from trails.cache_interpolation import cache_dir_for_package
-from trails.fair_rf import run_fair_delta_rf
+from trails.fair_rf import _sanitize_emissions_year_values, run_fair_delta_rf
 from trails.lca import lca_static
 from trails.plotting import plot_temporal_sankey_graphlike
 
@@ -355,6 +356,108 @@ def test_fair_quantile_dimensions(monkeypatch: pytest.MonkeyPatch) -> None:
     )
     assert rf.shape[0] == 5
     assert int(getattr(rf.data, "nnz", 0)) > 0
+
+
+def test_sanitize_emissions_year_values_fills_missing() -> None:
+    df = pd.DataFrame(
+        {
+            "scenario": ["s"],
+            "region": ["World"],
+            "variable": ["CH4"],
+            "unit": ["Mt CH4/yr"],
+            "2000.5": [1.0],
+            "2001.5": [np.nan],
+            "2002.5": ["3.5"],
+        }
+    )
+
+    out = _sanitize_emissions_year_values(df)
+
+    assert float(out.loc[0, "2000.5"]) == pytest.approx(1.0)
+    assert float(out.loc[0, "2001.5"]) == pytest.approx(0.0)
+    assert float(out.loc[0, "2002.5"]) == pytest.approx(3.5)
+
+
+def test_fair_quantiles_suppress_all_nan_warning(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    trails = DummyTrailsFair()
+
+    def fake_load_emissions_csv(*args: Any, **kwargs: Any) -> pd.DataFrame:
+        return pd.DataFrame(
+            {
+                "scenario": ["s"],
+                "region": ["World"],
+                "variable": ["CO2"],
+                "unit": ["Gt CO2/yr"],
+                "2000.5": [0.0],
+                "2001.5": [0.0],
+            }
+        )
+
+    def fake_load_species_mapping(
+        *args: Any, **kwargs: Any
+    ) -> tuple[dict[object, str], dict[object, float]]:
+        return {("CO2", "air", ""): "CO2"}, {}
+
+    class DummyFairRunWithNaN:
+        def __init__(self, scenario: str, config_names: list[str], baseline: bool) -> None:
+            timebounds = np.array([2000.5, 2001.5], dtype=float)
+            if baseline:
+                vals = np.array([[0.0, np.nan], [0.0, np.nan]], dtype=float)
+            else:
+                vals = np.array([[1.0, np.nan], [2.0, np.nan]], dtype=float)
+            forcing = xr.DataArray(
+                vals[None, :, :, None],
+                dims=("scenario", "config", "timebounds", "specie"),
+                coords={
+                    "scenario": [scenario],
+                    "config": config_names,
+                    "timebounds": timebounds,
+                    "specie": ["CO2"],
+                },
+            )
+            temperature = xr.DataArray(
+                vals[None, :, :],
+                dims=("scenario", "config", "timebounds"),
+                coords={
+                    "scenario": [scenario],
+                    "config": config_names,
+                    "timebounds": timebounds,
+                },
+            )
+            self.forcing = forcing
+            self.temperature = temperature
+
+    call_state = {"count": 0}
+
+    def fake_run_fair_emissions(*args: Any, **kwargs: Any) -> DummyFairRunWithNaN:
+        scenario = kwargs.get("scenario") or args[1]
+        config_names = kwargs.get("config_names") or ["c1", "c2"]
+        baseline = call_state["count"] == 0
+        call_state["count"] += 1
+        return DummyFairRunWithNaN(str(scenario), list(config_names), baseline=baseline)
+
+    monkeypatch.setattr("trails.fair_rf.load_emissions_csv", fake_load_emissions_csv)
+    monkeypatch.setattr(
+        "trails.fair_rf.load_species_mapping", fake_load_species_mapping
+    )
+    monkeypatch.setattr("trails.fair_rf._run_fair_emissions", fake_run_fair_emissions)
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        run_fair_delta_rf(
+            trails,
+            scenario="s",
+            config_names=["c1", "c2"],
+            per_species_runs=True,
+            validate_emissions_delta=False,
+            scale_factor=1.0,
+        )
+
+    assert not any(
+        "All-NaN slice encountered" in str(w.message) for w in caught
+    )
 
 
 def test_sankey_graphlike_writes_html(tmp_path: Path) -> None:
