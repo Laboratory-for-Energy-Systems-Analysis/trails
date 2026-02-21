@@ -32,6 +32,33 @@ from .fair_io import (
 )
 
 
+def _sanitize_emissions_year_values(df: pd.DataFrame) -> pd.DataFrame:
+    """Coerce emissions year columns to numeric and replace missing with zero."""
+    year_cols, _ = _extract_year_columns(df)
+    if not year_cols:
+        return df
+    out = df.copy()
+    out.loc[:, year_cols] = (
+        out.loc[:, year_cols].apply(pd.to_numeric, errors="coerce").fillna(0.0)
+    )
+    return out
+
+
+def _safe_nanpercentile(values: np.ndarray, quantiles: list[float]) -> np.ndarray:
+    """Percentiles that avoid warnings on all-NaN slices by treating them as zero."""
+    arr = np.asarray(values, dtype=float)
+    if arr.ndim == 1:
+        arr = arr[None, :]
+    if arr.size == 0:
+        return np.zeros((len(quantiles), 0), dtype=float)
+    all_nan_by_time = np.all(np.isnan(arr), axis=0)
+    if np.any(all_nan_by_time):
+        arr = arr.copy()
+        arr[:, all_nan_by_time] = 0.0
+    out = np.nanpercentile(arr, quantiles, axis=0)
+    return np.nan_to_num(out, nan=0.0)
+
+
 def _inventory_emissions_by_fair_species(
     trails: Any,
     species_map: dict[object, str],
@@ -169,6 +196,7 @@ def _run_fair_emissions(
 
     meta_cols = ["scenario", "region", "variable", "unit"]
     df = df[list(meta_cols) + year_cols]
+    df = _sanitize_emissions_year_values(df)
     years = year_vals
     start_year = min(years)
     end_year = max(years)
@@ -1063,11 +1091,9 @@ def run_fair_delta_rf(
                         rf_series = _extract_fair_timeseries_by_config(
                             delta_forcing.sel(specie=alias)
                         )
-                        rf_quant = np.nanpercentile(rf_series, quantiles, axis=0)
-                        rf_quant = np.nan_to_num(rf_quant, nan=0.0)
+                        rf_quant = _safe_nanpercentile(rf_series, quantiles)
                         temp_series = _extract_fair_timeseries_by_config(delta_temp)
-                        temp_quant = np.nanpercentile(temp_series, quantiles, axis=0)
-                        temp_quant = np.nan_to_num(temp_quant, nan=0.0)
+                        temp_quant = _safe_nanpercentile(temp_series, quantiles)
                     else:
                         rf_series = np.asarray(
                             delta_forcing.sel(specie=alias).values, dtype=float
@@ -1136,11 +1162,9 @@ def run_fair_delta_rf(
                         rf_series = _extract_fair_timeseries_by_config(
                             delta_forcing.sel(specie=alias)
                         )
-                        rf_quant = np.nanpercentile(rf_series, quantiles, axis=0)
-                        rf_quant = np.nan_to_num(rf_quant, nan=0.0)
+                        rf_quant = _safe_nanpercentile(rf_series, quantiles)
                         temp_series = _extract_fair_timeseries_by_config(delta_temp)
-                        temp_quant = np.nanpercentile(temp_series, quantiles, axis=0)
-                        temp_quant = np.nan_to_num(temp_quant, nan=0.0)
+                        temp_quant = _safe_nanpercentile(temp_series, quantiles)
                     else:
                         rf_series = np.asarray(
                             delta_forcing.sel(specie=alias).values, dtype=float
@@ -1206,11 +1230,9 @@ def run_fair_delta_rf(
                 rf_series = _extract_fair_timeseries_by_config(
                     delta_forcing.sel(specie=specie)
                 )
-                rf_quant = np.nanpercentile(rf_series, quantiles, axis=0)
-                rf_quant = np.nan_to_num(rf_quant, nan=0.0)
+                rf_quant = _safe_nanpercentile(rf_series, quantiles)
                 temp_series = _extract_fair_timeseries_by_config(delta_temp)
-                temp_quant = np.nanpercentile(temp_series, quantiles, axis=0)
-                temp_quant = np.nan_to_num(temp_quant, nan=0.0)
+                temp_quant = _safe_nanpercentile(temp_series, quantiles)
             else:
                 rf_series = np.asarray(
                     delta_forcing.sel(specie=specie).values, dtype=float
