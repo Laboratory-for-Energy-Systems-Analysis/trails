@@ -401,7 +401,9 @@ def test_fair_quantiles_suppress_all_nan_warning(
         return {("CO2", "air", ""): "CO2"}, {}
 
     class DummyFairRunWithNaN:
-        def __init__(self, scenario: str, config_names: list[str], baseline: bool) -> None:
+        def __init__(
+            self, scenario: str, config_names: list[str], baseline: bool
+        ) -> None:
             timebounds = np.array([2000.5, 2001.5], dtype=float)
             if baseline:
                 vals = np.array([[0.0, np.nan], [0.0, np.nan]], dtype=float)
@@ -455,9 +457,7 @@ def test_fair_quantiles_suppress_all_nan_warning(
             scale_factor=1.0,
         )
 
-    assert not any(
-        "All-NaN slice encountered" in str(w.message) for w in caught
-    )
+    assert not any("All-NaN slice encountered" in str(w.message) for w in caught)
 
 
 def test_sankey_graphlike_writes_html(tmp_path: Path) -> None:
