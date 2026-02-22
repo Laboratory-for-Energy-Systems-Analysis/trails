@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import logging
+import json
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -158,6 +159,10 @@ def import_excel_inventory(
         off_min = _parse_intish_or_none(exchange.get("temporal_min")) or 0
         off_max = _parse_intish_or_none(exchange.get("temporal_max")) or 0
         amount_source = _parse_amount_source(exchange.get("temporal_amount_source"))
+        offsets = _parse_json_number_list(exchange.get("temporal_offsets"), integer=True)
+        weights = _parse_json_number_list(
+            exchange.get("temporal_weights"), integer=False
+        )
 
         return TemporalExchange(
             distribution=int(dist_code),
@@ -166,7 +171,52 @@ def import_excel_inventory(
             offset_min=int(off_min),
             offset_max=int(off_max),
             amount_source=amount_source,
+            offsets=offsets,
+            weights=weights,
         )
+
+    def _parse_json_number_list(
+        value: object, *, integer: bool
+    ) -> list[int] | list[float] | None:
+        """parse json number list.
+
+        :param value: Value for `value`.
+        :type value: object
+        :param integer: Value for `integer`.
+        :type integer: bool
+        :returns: Return value.
+        :rtype: list[int] | list[float] | None"""
+        if value is None:
+            return None
+        if isinstance(value, str):
+            s = value.strip()
+            if s == "":
+                return None
+            try:
+                parsed = json.loads(s)
+            except json.JSONDecodeError:
+                return None
+        elif isinstance(value, (list, tuple, np.ndarray)):
+            parsed = value
+        else:
+            return None
+
+        if not isinstance(parsed, (list, tuple)):
+            return None
+
+        out: list[int] | list[float] = []
+        for item in parsed:
+            try:
+                num = float(item)
+            except (TypeError, ValueError):
+                continue
+            if not np.isfinite(num):
+                continue
+            if integer:
+                out.append(int(round(num)))
+            else:
+                out.append(float(num))
+        return out if out else None
 
     def _extract_year_amounts(exchange: dict) -> dict[int, float]:
         """extract year amounts.

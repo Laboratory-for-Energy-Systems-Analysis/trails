@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from pathlib import PurePosixPath
 from typing import Any, Dict, Iterable, Iterator, List, Mapping, Sequence, Tuple
+import json
 
 import numpy as np
 import sparse
@@ -112,6 +113,8 @@ TEMPORAL_COLS = [
     "temporal_min",
     "temporal_max",
     "temporal_amount_source",
+    "temporal_offsets",
+    "temporal_weights",
 ]
 
 # For B you likely have "index of biosphere flow" instead of "index of product"
@@ -314,6 +317,8 @@ def _parse_temporal_exchange_row(
     scale = _parse_float_or_none(row.get("temporal_scale"))
     off_min = _parse_intish_or_none(row.get("temporal_min")) or 0
     off_max = _parse_intish_or_none(row.get("temporal_max")) or 0
+    offsets = _parse_json_number_list(row.get("temporal_offsets"), integer=True)
+    weights = _parse_json_number_list(row.get("temporal_weights"), integer=False)
 
     amount_source = _parse_amount_source(row.get("temporal_amount_source"))
 
@@ -324,7 +329,48 @@ def _parse_temporal_exchange_row(
         offset_min=int(off_min),
         offset_max=int(off_max),
         amount_source=amount_source,
+        offsets=offsets,
+        weights=weights,
     )
+
+
+def _parse_json_number_list(
+    value: object,
+    *,
+    integer: bool,
+) -> list[int] | list[float] | None:
+    """Parse a JSON list of numbers from a CSV cell."""
+    if value is None:
+        return None
+    if isinstance(value, str):
+        s = value.strip()
+        if s == "":
+            return None
+        try:
+            parsed = json.loads(s)
+        except json.JSONDecodeError:
+            return None
+    elif isinstance(value, (list, tuple, np.ndarray)):
+        parsed = value
+    else:
+        return None
+
+    if not isinstance(parsed, (list, tuple)):
+        return None
+
+    out: list[int] | list[float] = []
+    for item in parsed:
+        try:
+            v = float(item)
+        except (TypeError, ValueError):
+            continue
+        if not np.isfinite(v):
+            continue
+        if integer:
+            out.append(int(round(v)))
+        else:
+            out.append(float(v))
+    return out if out else None
 
 
 def _build_sparse_matrix(
@@ -548,6 +594,8 @@ def load_matrices_from_package(
         off_min: Any,
         off_max: Any,
         amount_source: Any,
+        offsets: Any,
+        weights: Any,
     ) -> TemporalExchange | None:
         """parse td fields.
 
@@ -563,6 +611,10 @@ def load_matrices_from_package(
         :type off_max: Any
         :param amount_source: Value for `amount_source`.
         :type amount_source: Any
+        :param offsets: Value for `offsets`.
+        :type offsets: Any
+        :param weights: Value for `weights`.
+        :type weights: Any
         :returns: Return value.
         :rtype: TemporalExchange | None
         :raises ValueError: If an error occurs."""
@@ -675,6 +727,8 @@ def load_matrices_from_package(
             offset_min=_to_int(off_min, 0),
             offset_max=_to_int(off_max, 0),
             amount_source=src,
+            offsets=_parse_json_number_list(offsets, integer=True),
+            weights=_parse_json_number_list(weights, integer=False),
         )
 
     # ---------- Load all A_matrix.csv ----------
@@ -752,6 +806,16 @@ def load_matrices_from_package(
                     if "temporal_amount_source" in df.columns
                     else None
                 )
+                offsets_td = (
+                    df.loc[mask_td, "temporal_offsets"].to_numpy(copy=False)
+                    if "temporal_offsets" in df.columns
+                    else None
+                )
+                weights_td = (
+                    df.loc[mask_td, "temporal_weights"].to_numpy(copy=False)
+                    if "temporal_weights" in df.columns
+                    else None
+                )
 
                 for irow in range(act_td.size):
                     tex = _parse_td_fields(
@@ -761,6 +825,8 @@ def load_matrices_from_package(
                         None if min_td is None else min_td[irow],
                         None if max_td is None else max_td[irow],
                         None if src_td is None else src_td[irow],
+                        None if offsets_td is None else offsets_td[irow],
+                        None if weights_td is None else weights_td[irow],
                     )
                     if tex is not None:
                         temporal_exchanges[
@@ -830,6 +896,16 @@ def load_matrices_from_package(
                     if "temporal_amount_source" in df.columns
                     else None
                 )
+                offsets_td = (
+                    df.loc[mask_td, "temporal_offsets"].to_numpy(copy=False)
+                    if "temporal_offsets" in df.columns
+                    else None
+                )
+                weights_td = (
+                    df.loc[mask_td, "temporal_weights"].to_numpy(copy=False)
+                    if "temporal_weights" in df.columns
+                    else None
+                )
 
                 for irow in range(act_td.size):
                     tex = _parse_td_fields(
@@ -839,6 +915,8 @@ def load_matrices_from_package(
                         None if min_td is None else min_td[irow],
                         None if max_td is None else max_td[irow],
                         None if src_td is None else src_td[irow],
+                        None if offsets_td is None else offsets_td[irow],
+                        None if weights_td is None else weights_td[irow],
                     )
                     if tex is not None:
                         temporal_biosphere_exchanges[
