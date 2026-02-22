@@ -140,6 +140,8 @@ Exchange table columns (from the header row):
 * ``temporal_loc``: location parameter (mean/median/mode depending on distribution).
 * ``temporal_scale``: scale parameter (e.g., stddev/sigma).
 * ``temporal_min`` / ``temporal_max``: integer offsets defining the support.
+* ``temporal_offsets``: JSON list of integer offsets (used by discrete empirical).
+* ``temporal_weights``: JSON list of pulse weights (used by discrete empirical).
 * ``temporal_amount_source``: either ``port`` or ``matrix``:
   ``port`` applies the **ported exchange amount** over time; ``matrix`` uses
   the **matrix-stored values** in other years.
@@ -151,9 +153,12 @@ TRAILS-specific temporal fields
 The temporal columns correspond directly to ``TemporalExchange``:
 
 * ``temporal_distribution``: distribution code (1=discrete, 2=lognormal,
-  3=normal, 4=uniform, 5=triangular).
+  3=normal, 4=uniform, 5=triangular, 6=discrete empirical).
 * ``temporal_loc`` and ``temporal_scale``: distribution parameters.
 * ``temporal_min`` and ``temporal_max``: inclusive integer offsets.
+* ``temporal_offsets`` and ``temporal_weights``:
+  JSON-list pulse definitions for ``distribution=6``. Example:
+  ``[0, 5, 12]`` and ``[0.5, 0.3, 0.2]``.
 * ``temporal_amount_source``:
   - ``port``: uses the exchange amount for all years (ported value).
   - ``matrix``: uses the matrix values for the selected years.

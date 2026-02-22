@@ -106,6 +106,9 @@ Excel column meanings (from the exchanges table):
 * ``temporal_distribution``: temporal distribution code.
 * ``temporal_loc`` / ``temporal_scale``: distribution parameters.
 * ``temporal_min`` / ``temporal_max``: integer offset bounds.
+* ``temporal_offsets`` / ``temporal_weights``: JSON lists used for
+  ``temporal_distribution=6`` (discrete empirical), e.g.
+  ``[0, 5, 12]`` and ``[0.5, 0.3, 0.2]``.
 * ``temporal_amount_source``: ``port`` (ported amount) or ``matrix`` (use matrix values).
 * ``comment``: optional notes.
 

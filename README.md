@@ -233,7 +233,8 @@ plot_temp(trails, year_range=(2000, 2100))
 ## Method Overview
 
 `TRAILS` extends classic LCA by making time an explicit dimension. Temporal exchanges are
-encoded using distributions (e.g., discrete, normal, lognormal, uniform, triangular)
+encoded using distributions (e.g., discrete, normal, lognormal, uniform, triangular,
+discrete empirical)
 and expanded into year offsets during traversal. For each calendar year that becomes active
 in the traversal frontier, the system matrix is solved, and biosphere flows are accumulated
 at their respective years. Impacts are then characterized using LCIA methods bundled with
@@ -300,7 +301,8 @@ Impacts can be aggregated or compared across:
   `index of activity`, `index of product` / `index of biosphere flow`, `value`, and
   uncertainty fields (`loc`, `scale`, `shape`, `minimum`, `maximum`, `negative`, `flip`).
 * **Temporal columns** (optional): `temporal_distribution`, `temporal_loc`,
-  `temporal_scale`, `temporal_min`, `temporal_max`, `temporal_amount_source`.
+  `temporal_scale`, `temporal_min`, `temporal_max`, `temporal_amount_source`,
+  `temporal_offsets`, `temporal_weights`.
 * **Metadata**: activity and biosphere indices per scenario label (year).
 
 Packages exported by the `premise.TrailsDataPackage` class follow this structure out of the box.
@@ -320,6 +322,11 @@ Core modules and responsibilities:
 **What is a temporal exchange?**  
 An exchange with a distribution over year offsets (e.g., lognormal), expanded into
 discrete year pulses during traversal.
+
+**How do I encode explicit pulses in specific years?**  
+Use `temporal_distribution=6` with JSON-list columns:
+`temporal_offsets` (e.g., `[0, 5, 12]`) and
+`temporal_weights` (e.g., `[0.5, 0.3, 0.2]`).
 
 **How are years handled?**  
 Scenario labels are treated as calendar years. When a year is requested that does not
