@@ -98,3 +98,26 @@ def test_load_indices_from_package(example_package: Package) -> None:
     )
     assert activity_indices["2005"][0]["name"] == "battery electric vehicle, production"
     assert biosphere_indices["2005"][0]["name"] == "Carbon dioxide, fossil"
+
+
+def test_parse_temporal_exchange_row_with_explicit_pulses() -> None:
+    """Verify parsing of JSON pulse lists for temporal distributions.
+
+    :returns: None.
+    :rtype: None
+    """
+    row = {
+        "temporal_distribution": "6",
+        "temporal_loc": "",
+        "temporal_scale": "",
+        "temporal_min": "0",
+        "temporal_max": "10",
+        "temporal_amount_source": "port",
+        "temporal_offsets": "[0, 5, 10]",
+        "temporal_weights": "[0.5, 0.25, 0.25]",
+    }
+    tex = datapackage._parse_temporal_exchange_row(row)
+    assert tex is not None
+    assert tex.distribution == 6
+    assert tex.offsets == [0, 5, 10]
+    assert tex.weights == [0.5, 0.25, 0.25]

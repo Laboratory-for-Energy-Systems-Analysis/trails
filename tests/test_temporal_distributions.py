@@ -123,3 +123,47 @@ def test_scale_factor_modes_and_clip() -> None:
     td = TemporalDistribution(tex)
     results = list(td.iter_offsets_and_weights())
     assert results == [(0, pytest.approx(1.0))]
+
+
+def test_discrete_empirical_distribution() -> None:
+    """Verify explicit discrete pulses with normalization.
+
+    :returns: None.
+    :rtype: None
+    """
+    tex = TemporalExchange(
+        distribution=6,
+        loc=None,
+        scale=None,
+        offset_min=0,
+        offset_max=3,
+        offsets=[0, 2, 2, 3],
+        weights=[0.2, 0.3, 0.1, 0.4],
+    )
+    td = TemporalDistribution(tex)
+    results = list(td.iter_offsets_and_weights())
+    assert results == [
+        (0, pytest.approx(0.2)),
+        (2, pytest.approx(0.4)),
+        (3, pytest.approx(0.4)),
+    ]
+
+
+def test_discrete_empirical_uses_explicit_offsets_not_min_max() -> None:
+    """Verify explicit pulse offsets are used even if min/max differ.
+
+    :returns: None.
+    :rtype: None
+    """
+    tex = TemporalExchange(
+        distribution=6,
+        loc=None,
+        scale=None,
+        offset_min=0,
+        offset_max=0,
+        offsets=[-1, 9],
+        weights=[0.5, 0.5],
+    )
+    td = TemporalDistribution(tex)
+    results = list(td.iter_offsets_and_weights())
+    assert results == [(-1, pytest.approx(0.5)), (9, pytest.approx(0.5))]

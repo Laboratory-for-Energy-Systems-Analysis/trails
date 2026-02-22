@@ -3,7 +3,7 @@ import pytest
 
 from trails.trails import Trails
 
-from trails.temporal_distributions import TemporalDistribution
+from trails.temporal_distributions import TemporalDistribution, TemporalExchange
 
 
 def test_map_year_helpers(example_trails: Trails) -> None:
@@ -55,6 +55,84 @@ def test_get_temporal_distribution(example_trails: Trails) -> None:
     """
     td = example_trails.get_temporal_distribution(2005, 2, 0)
     assert isinstance(td, TemporalDistribution)
+
+
+def test_interpolate_temporal_exchange_keeps_explicit_pulses(
+    example_trails: Trails,
+) -> None:
+    """Verify interpolation preserves explicit pulse definitions.
+
+    :param example_trails: Trails fixture under test.
+    :type example_trails: trails.trails.Trails
+    :returns: None.
+    :rtype: None
+    """
+    exchanges = {
+        ("2005", 1, 2): TemporalExchange(
+            distribution=6,
+            loc=None,
+            scale=None,
+            offset_min=0,
+            offset_max=0,
+            amount_source="port",
+            offsets=[-1, 9],
+            weights=[0.5, 0.5],
+        ),
+        ("2020", 1, 2): TemporalExchange(
+            distribution=6,
+            loc=None,
+            scale=None,
+            offset_min=0,
+            offset_max=0,
+            amount_source="port",
+            offsets=[-1, 9],
+            weights=[0.5, 0.5],
+        ),
+    }
+    tex = example_trails._interpolate_temporal_exchange(2010, 1, 2, exchanges)
+    assert tex is not None
+    assert tex.offsets == [-1, 9]
+    assert tex.weights == [0.5, 0.5]
+    assert list(TemporalDistribution(tex).iter_offsets_and_weights()) == [
+        (-1, pytest.approx(0.5)),
+        (9, pytest.approx(0.5)),
+    ]
+
+
+def test_td_offsets_cache_distinguishes_explicit_pulse_sets(
+    example_trails: Trails,
+) -> None:
+    """Verify TD cache key includes explicit pulse vectors.
+
+    :param example_trails: Trails fixture under test.
+    :type example_trails: trails.trails.Trails
+    :returns: None.
+    :rtype: None
+    """
+    tex_a = TemporalExchange(
+        distribution=6,
+        loc=None,
+        scale=None,
+        offset_min=0,
+        offset_max=0,
+        amount_source="port",
+        offsets=[-1, 9],
+        weights=[0.5, 0.5],
+    )
+    tex_b = TemporalExchange(
+        distribution=6,
+        loc=None,
+        scale=None,
+        offset_min=0,
+        offset_max=0,
+        amount_source="port",
+        offsets=[0, 1],
+        weights=[0.9, 0.1],
+    )
+    out_a = example_trails._get_td_offsets(tex=tex_a, debug=False)
+    out_b = example_trails._get_td_offsets(tex=tex_b, debug=False)
+    assert out_a == [(-1, pytest.approx(0.5)), (9, pytest.approx(0.5))]
+    assert out_b == [(0, pytest.approx(0.9)), (1, pytest.approx(0.1))]
 
 
 def test_expand_temporal_exchanges_without_temporal_distributions(

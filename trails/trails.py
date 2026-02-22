@@ -1250,6 +1250,10 @@ class Trails:
                     or tex0.offset_max != tex1.offset_max
                     or getattr(tex0, "amount_source", "port")
                     != getattr(tex1, "amount_source", "port")
+                    or tuple(getattr(tex0, "offsets", ()) or ())
+                    != tuple(getattr(tex1, "offsets", ()) or ())
+                    or tuple(getattr(tex0, "weights", ()) or ())
+                    != tuple(getattr(tex1, "weights", ()) or ())
                 ):
                     return tex0 if (year - y0) <= (y1 - year) else tex1
 
@@ -1275,6 +1279,8 @@ class Trails:
                     offset_min=tex0.offset_min,
                     offset_max=tex0.offset_max,
                     amount_source=getattr(tex0, "amount_source", "port"),
+                    offsets=getattr(tex0, "offsets", None),
+                    weights=getattr(tex0, "weights", None),
                 )
 
         return None
@@ -1452,6 +1458,9 @@ class Trails:
             float(tex.scale) if tex.scale is not None else None,
             int(tex.offset_min),
             int(tex.offset_max),
+            getattr(tex, "amount_source", "port"),
+            tuple(getattr(tex, "offsets", ()) or ()),
+            tuple(getattr(tex, "weights", ()) or ()),
         )
         cached = self._td_offsets_cache.get(key)
         if cached is not None:
@@ -2208,6 +2217,8 @@ class Trails:
                         "scale": getattr(tex, "scale", None),
                         "min": getattr(tex, "offset_min", None),
                         "max": getattr(tex, "offset_max", None),
+                        "offsets": getattr(tex, "offsets", None),
+                        "weights": getattr(tex, "weights", None),
                         "td source": getattr(tex, "amount_source", None),
                     }
                     if flow_type == "prod":
@@ -2243,6 +2254,8 @@ class Trails:
                             "scale": getattr(tex, "scale", None),
                             "min": getattr(tex, "offset_min", None),
                             "max": getattr(tex, "offset_max", None),
+                            "offsets": getattr(tex, "offsets", None),
+                            "weights": getattr(tex, "weights", None),
                             "td source": getattr(tex, "amount_source", None),
                         }
                     )
@@ -2300,6 +2313,8 @@ class Trails:
             "scale": 5,
             "min": 5,
             "max": 5,
+            "offsets": 18,
+            "weights": 18,
             "td source": 7,
         }
 
@@ -2314,6 +2329,8 @@ class Trails:
             "scale",
             "min",
             "max",
+            "offsets",
+            "weights",
             "td source",
         ]
 
@@ -2327,6 +2344,7 @@ class Trails:
             dist_table.add_row([3, "normal"])
             dist_table.add_row([4, "uniform"])
             dist_table.add_row([5, "triangular"])
+            dist_table.add_row([6, "discrete empirical (explicit pulses)"])
             print("Temporal distribution codes:")
             print(dist_table)
 
@@ -2339,6 +2357,8 @@ class Trails:
             fields_table.add_row(["temporal_scale", "scale parameter (stddev/sigma)"])
             fields_table.add_row(["temporal_min", "minimum integer offset (inclusive)"])
             fields_table.add_row(["temporal_max", "maximum integer offset (inclusive)"])
+            fields_table.add_row(["temporal_offsets", "JSON list of pulse offsets"])
+            fields_table.add_row(["temporal_weights", "JSON list of pulse weights"])
             fields_table.add_row(["temporal_amount_source", "ported value or matrix"])
             print("Temporal distribution fields:")
             print(fields_table)
@@ -2889,6 +2909,8 @@ class Trails:
                 tex.offset_min,
                 tex.offset_max,
                 getattr(tex, "amount_source", "port"),
+                tuple(getattr(tex, "offsets", ()) or ()),
+                tuple(getattr(tex, "weights", ()) or ()),
             )
 
         def pulses_from_key(k: tuple) -> list[tuple[int, float]]:
@@ -2898,7 +2920,7 @@ class Trails:
             :type k: tuple
             :returns: Return value.
             :rtype: list[tuple[int, float]]"""
-            dist, loc, scale, off_min, off_max, amt_src = k
+            dist, loc, scale, off_min, off_max, amt_src, offsets, weights = k
             tex = TemporalExchange(
                 distribution=dist,
                 loc=loc,
@@ -2906,6 +2928,8 @@ class Trails:
                 offset_min=off_min,
                 offset_max=off_max,
                 amount_source=amt_src,
+                offsets=offsets,
+                weights=weights,
             )
             return [
                 (int(o), float(w))
@@ -3282,6 +3306,8 @@ class Trails:
                 tex.offset_min,
                 tex.offset_max,
                 getattr(tex, "amount_source", "port"),
+                tuple(getattr(tex, "offsets", ()) or ()),
+                tuple(getattr(tex, "weights", ()) or ()),
             )
 
         def pulses_from_key(k: tuple) -> list[tuple[int, float]]:
@@ -3291,7 +3317,7 @@ class Trails:
             :type k: tuple
             :returns: Return value.
             :rtype: list[tuple[int, float]]"""
-            dist, loc, scale, off_min, off_max, amt_src = k
+            dist, loc, scale, off_min, off_max, amt_src, offsets, weights = k
             tex = TemporalExchange(
                 distribution=dist,
                 loc=loc,
@@ -3299,6 +3325,8 @@ class Trails:
                 offset_min=off_min,
                 offset_max=off_max,
                 amount_source=amt_src,
+                offsets=offsets,
+                weights=weights,
             )
             return [
                 (int(o), float(w))
@@ -3638,6 +3666,8 @@ class Trails:
                 tex.offset_min,
                 tex.offset_max,
                 getattr(tex, "amount_source", "port"),
+                tuple(getattr(tex, "offsets", ()) or ()),
+                tuple(getattr(tex, "weights", ()) or ()),
             )
 
         if not use_temporal_distributions:
@@ -3893,7 +3923,16 @@ class Trails:
                     pulses = pulse_cache.get(k)
                     if pulses is None:
                         # Reconstruct a TemporalExchange from td_key tuple (your existing convention)
-                        dist, loc, scale, off_min, off_max, amt_src = k
+                        (
+                            dist,
+                            loc,
+                            scale,
+                            off_min,
+                            off_max,
+                            amt_src,
+                            offsets,
+                            weights,
+                        ) = k
                         tex0 = TemporalExchange(
                             distribution=dist,
                             loc=loc,
@@ -3901,6 +3940,8 @@ class Trails:
                             offset_min=off_min,
                             offset_max=off_max,
                             amount_source=amt_src,
+                            offsets=offsets,
+                            weights=weights,
                         )
                         pulses = [
                             (int(o), float(w))
