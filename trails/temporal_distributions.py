@@ -1,7 +1,7 @@
 # temporal_distributions.py
 
 from dataclasses import dataclass
-from typing import Optional, Iterable, Tuple
+from typing import Optional, Iterable, Tuple, Sequence
 import numpy as np
 
 import numpy as np
@@ -23,6 +23,7 @@ class TemporalExchange:
     - 3: normal
     - 4: uniform
     - 5: triangular
+    - 6: discrete empirical (explicit offsets + weights)
     :param loc: Location parameter (mean, median, or mode depending on distribution).
     :param scale: Scale parameter (stddev for normal, sigma for lognormal).
     :param offset_min: Minimum integer offset (inclusive).
@@ -37,6 +38,8 @@ class TemporalExchange:
     # "port" (default): use CSV row value scaled by weights
     # "matrix": ignore CSV row value; at each pulse year use interpolated A/B[t, i, j] or B[t, i, f]
     amount_source: str = "port"
+    offsets: Optional[Sequence[int]] = None
+    weights: Optional[Sequence[float]] = None
 
 
 class TemporalDistribution:
@@ -219,6 +222,43 @@ class TemporalDistribution:
         w[idx] = 1.0
         return w
 
+    @staticmethod
+    def _discrete_empirical_weights(
+        offsets: np.ndarray,
+        pulse_offsets: Optional[Sequence[int]],
+        pulse_weights: Optional[Sequence[float]],
+        *,
+        fallback_loc: Optional[float],
+    ) -> np.ndarray:
+        """Build explicit discrete pulse weights over integer offsets."""
+        if pulse_offsets is None or pulse_weights is None:
+            return TemporalDistribution._discrete_weights(offsets, fallback_loc)
+        if len(pulse_offsets) == 0 or len(pulse_weights) == 0:
+            return TemporalDistribution._discrete_weights(offsets, fallback_loc)
+
+        if len(pulse_offsets) != len(pulse_weights):
+            return TemporalDistribution._discrete_weights(offsets, fallback_loc)
+
+        w = np.zeros_like(offsets, dtype=float)
+        offset_to_idx = {int(off): idx for idx, off in enumerate(offsets.tolist())}
+
+        for off, wei in zip(pulse_offsets, pulse_weights):
+            try:
+                off_i = int(off)
+                wei_f = float(wei)
+            except Exception:
+                continue
+            if not np.isfinite(wei_f) or wei_f < 0.0:
+                continue
+            idx = offset_to_idx.get(off_i)
+            if idx is None:
+                continue
+            w[idx] += wei_f
+
+        if not np.isfinite(w).any() or w.sum() <= 0:
+            return TemporalDistribution._discrete_weights(offsets, fallback_loc)
+        return w
+
     def iter_offsets_and_weights(
         self, debug: bool = False
     ) -> Iterable[Tuple[int, float]]:
@@ -231,11 +271,23 @@ class TemporalDistribution:
         :rtype: Iterable[Tuple[int, float]]"""
         t = self.tex
 
-        offsets = np.arange(int(t.offset_min), int(t.offset_max) + 1, dtype=int)
+        dist = int(t.distribution)
+
+        # For discrete empirical distributions, explicit pulse offsets define support.
+        if dist == 6 and getattr(t, "offsets", None):
+            try:
+                explicit_offsets = [int(round(float(o))) for o in t.offsets]  # type: ignore[arg-type]
+            except Exception:
+                explicit_offsets = []
+            if explicit_offsets:
+                offsets = np.array(sorted(set(explicit_offsets)), dtype=int)
+            else:
+                offsets = np.arange(int(t.offset_min), int(t.offset_max) + 1, dtype=int)
+        else:
+            offsets = np.arange(int(t.offset_min), int(t.offset_max) + 1, dtype=int)
+
         if offsets.size == 0:
             return iter(())
-
-        dist = int(t.distribution)
 
         # 1) Base (unnormalized) weights
         if dist == 5:
@@ -254,6 +306,13 @@ class TemporalDistribution:
             weights = np.ones_like(offsets, dtype=float)
         elif dist == 1:
             weights = self._discrete_weights(offsets, t.loc)
+        elif dist == 6:
+            weights = self._discrete_empirical_weights(
+                offsets,
+                getattr(t, "offsets", None),
+                getattr(t, "weights", None),
+                fallback_loc=t.loc,
+            )
         else:
             # Unknown distribution -> uniform fallback
             weights = np.ones_like(offsets, dtype=float)
