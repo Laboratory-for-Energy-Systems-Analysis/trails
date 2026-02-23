@@ -15,7 +15,7 @@ import xarray as xr
 from trails.cache_interpolation import cache_dir_for_package
 from trails.fair_rf import _sanitize_emissions_year_values, run_fair_delta_rf
 from trails.lca import lca_static
-from trails.plotting import plot_temporal_sankey_graphlike
+from trails.plotting import plot_temporal_sankey_graphlike, plot_temporal_scores
 
 
 class DummyTrails:
@@ -141,6 +141,29 @@ class DummyTrailsSankey:
             }
         }
         self.characterized_inventory = None
+
+
+class DummyTrailsScores:
+    """Minimal Trails stub for temporal score plotting."""
+
+    def __init__(self) -> None:
+        years = np.array([2000, 2001, 2002, 2003, 2004, 2005, 2006], dtype=int)
+        vals = np.array([[0.0, 0.0, 0.0, 2.0, 3.0, 0.0, 0.0]], dtype=float)
+        self.scores = xr.DataArray(
+            vals,
+            dims=("activity", "year"),
+            coords={"activity": [0], "year": years},
+        )
+        self.characterized_inventory = None
+        self.activity_indices = {
+            "2005": {
+                0: {
+                    "name": "A0",
+                    "reference product": "P0",
+                    "location": "GLO",
+                }
+            }
+        }
 
 
 class DummyFairRun:
@@ -476,6 +499,23 @@ def test_sankey_graphlike_writes_html(tmp_path: Path) -> None:
     assert out.exists()
     html = out.read_text()
     assert "nouislider" in html.lower()
+
+
+def test_plot_temporal_scores_auto_trims_year_window() -> None:
+    trails = DummyTrailsScores()
+    fig = plot_temporal_scores(
+        trails=trails,
+        year_range=None,
+        show_flow_contributions=False,
+        show_cumulative_axis=False,
+        legend_top_n=1,
+    )
+
+    assert fig is not None
+    assert len(fig.data) >= 1
+    x = list(fig.data[0].x)
+    assert x[0] == 2003
+    assert x[-1] == 2004
 
 
 def test_cache_dir_uses_short_hash(example_package: Any) -> None:

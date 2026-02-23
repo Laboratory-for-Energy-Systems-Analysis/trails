@@ -190,6 +190,20 @@ def test_accumulate_temporalized_biosphere_inventory(example_trails: Trails) -> 
     assert np.isclose(float(value), 30000.0)
 
 
+def test_reset_inventory_uses_inventory_offset_bounds(example_trails: Trails) -> None:
+    """Verify inventory year axis uses both technosphere and biosphere offsets."""
+    min_inv, max_inv = example_trails._inventory_offset_bounds()
+    min_bio, _ = example_trails._biosphere_offset_bounds()
+
+    example_trails.reset_inventory()
+
+    years = example_trails._inventory_years
+    assert years is not None and years.size > 0
+    assert int(years[0]) == int(example_trails.min_year) + int(min_inv)
+    assert int(years[-1]) == int(example_trails.max_year) + int(max_inv) + 500
+    assert int(years[0]) <= int(example_trails.min_year) + int(min_bio)
+
+
 def test_temporal_traversal_basic(example_trails: Trails) -> None:
     """Verify basic temporal traversal behavior.
 
