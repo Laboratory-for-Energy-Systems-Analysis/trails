@@ -1053,6 +1053,7 @@ def plot_temporal_graph(
     var baseDepthScale = {base_depth_scale};
     var autoDepthScale = {str(auto_depth_flag).lower()};
     var yearScale = {year_scale_val};
+    var yearMidFixed = {float(year_mid)};
     var sel = document.createElement('select');
     sel.id = 'trail-depth-selector';
     var maxDepth = 0;
@@ -1134,15 +1135,7 @@ def plot_temporal_graph(
           bandOffsets[depthStr + '|' + k] = off;
         }});
       }});
-      // recompute centers
-      var minYear = null, maxYear = null;
-      nodesFiltered.forEach(function(n) {{
-        var y = n.year || 0;
-        if (minYear === null || y < minYear) minYear = y;
-        if (maxYear === null || y > maxYear) maxYear = y;
-      }});
-      if (minYear === null) {{ minYear = 0; maxYear = 0; }}
-      var yearMid = (minYear + maxYear) / 2.0;
+      // Keep year origin fixed so node x-positions remain aligned with the year overlay.
       var depthMid = 0.0;
       window.trailDepthScale = depthScale;
       window.trailDepthMid = depthMid;
@@ -1150,7 +1143,7 @@ def plot_temporal_graph(
       nodesFiltered.forEach(function(n) {{
         var bandKey = String(n.depth) + '|' + String(n.band_key || '');
         var bandOffset = bandOffsets[bandKey] || 0.0;
-        n.x = (n.year - yearMid) * yearScale;
+        n.x = (n.year - yearMidFixed) * yearScale;
         n.y = -((n.depth || 0) - depthMid) * depthScale + bandOffset;
       }});
       var edgesFiltered = [];
