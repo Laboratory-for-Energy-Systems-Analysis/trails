@@ -2092,6 +2092,16 @@ def _plot_results_by_year(
     all_roots = _collect_root_scores(results_by_year, years, score_key)
 
     Y_raw = _build_score_matrix(results_by_year, years, all_roots, score_key)
+    if year_range is None and Y_raw.size:
+        max_abs = float(np.max(np.abs(Y_raw)))
+        tol = np.finfo(float).eps * max(1.0, max_abs) * 10.0
+        active_rows = np.any(np.abs(Y_raw) > tol, axis=1)
+        if np.any(active_rows):
+            first = int(np.argmax(active_rows))
+            last = int(len(active_rows) - 1 - np.argmax(active_rows[::-1]))
+            years = years[first : last + 1]
+            Y_raw = Y_raw[first : last + 1, :]
+
     if cumulative:
         Y = np.cumsum(Y_raw, axis=0)
     else:
