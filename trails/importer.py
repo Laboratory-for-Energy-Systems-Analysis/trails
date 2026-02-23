@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from pathlib import Path
 import logging
 import json
@@ -20,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 def import_excel_inventory(
     trails: "Trails",
-    path: str | Path,
+    path: str | Path | list[str | Path],
     *,
     year: int | None = None,
     scenario_label: str | None = None,
@@ -31,7 +32,7 @@ def import_excel_inventory(
     :param trails: Value for `trails`.
     :type trails: 'Trails'
     :param path: Value for `path`.
-    :type path: str | Path
+    :type path: str | Path | list[str | Path]
     :param year: Value for `year`.
     :type year: int | None
     :param scenario_label: Value for `scenario_label`.
@@ -48,20 +49,34 @@ def import_excel_inventory(
 
     from bw2io.importers.excel import ExcelImporter
 
-    path = Path(path)
-    if not path.exists():
-        raise FileNotFoundError(f"Excel inventory file not found: {path}")
-
-    importer = ExcelImporter(str(path))
-    # Keep year-specific columns (e.g., 2010, 2020) by skipping csv_drop_unknown.
-    strategies = getattr(importer, "strategies", None)
-    if strategies:
-        strategies = [
-            s for s in strategies if getattr(s, "__name__", "") != "csv_drop_unknown"
-        ]
-        importer.apply_strategies(strategies=strategies)
+    paths: list[Path]
+    if isinstance(path, (str, Path)):
+        paths = [Path(path)]
+    elif isinstance(path, Sequence):
+        paths = [Path(p) for p in path]
     else:
-        importer.apply_strategies()
+        raise TypeError("path must be a filepath or list of filepaths")
+
+    if not paths:
+        raise ValueError("path list is empty")
+
+    for p in paths:
+        if not p.exists():
+            raise FileNotFoundError(f"Excel inventory file not found: {p}")
+
+    datasets: list[dict] = []
+    for p in paths:
+        importer = ExcelImporter(str(p))
+        # Keep year-specific columns (e.g., 2010, 2020) by skipping csv_drop_unknown.
+        strategies = getattr(importer, "strategies", None)
+        if strategies:
+            strategies = [
+                s for s in strategies if getattr(s, "__name__", "") != "csv_drop_unknown"
+            ]
+            importer.apply_strategies(strategies=strategies)
+        else:
+            importer.apply_strategies()
+        datasets.extend(getattr(importer, "data", []) or [])
 
     apply_to_all_template_years = scenario_label is None and year is None
 
@@ -576,8 +591,6 @@ def import_excel_inventory(
 
     dataset_act_indices: dict[tuple[str, str, str], int] = {}
     affected_acts: set[int] = set()
-    datasets = getattr(importer, "data", []) or []
-
     for dataset in datasets:
         act_idx = _activity_index_for_dataset(dataset)
         dataset_key = _activity_key(

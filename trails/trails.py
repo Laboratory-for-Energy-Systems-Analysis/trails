@@ -530,7 +530,7 @@ class Trails:
 
     def import_excel_inventory(
         self,
-        path: str | Path,
+        path: str | Path | list[str | Path],
         *,
         year: int | None = None,
         scenario_label: str | None = None,
@@ -539,7 +539,7 @@ class Trails:
         """Import excel inventory.
 
         :param path: Value for `path`.
-        :type path: str | Path
+        :type path: str | Path | list[str | Path]
         :param year: Value for `year`.
         :type year: int | None
         :param scenario_label: Value for `scenario_label`.

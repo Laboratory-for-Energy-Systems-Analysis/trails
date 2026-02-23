@@ -57,22 +57,28 @@ class DummyTrails:
         return year, label, self.scenario_index[label]
 
 
-def _install_fake_bw2io(data: list[dict]) -> None:
+def _install_fake_bw2io(
+    data: list[dict] | None = None,
+    *,
+    data_by_path: dict[str, list[dict]] | None = None,
+) -> None:
     bw2io = types.ModuleType("bw2io")
     importers = types.ModuleType("bw2io.importers")
     excel = types.ModuleType("bw2io.importers.excel")
 
     class ExcelImporter:
         _data: list[dict] = []
+        _data_by_path: dict[str, list[dict]] = {}
 
         def __init__(self, path: str) -> None:
             self.path = Path(path)
-            self.data = list(self._data)
+            self.data = list(self._data_by_path.get(str(self.path), self._data))
 
         def apply_strategies(self) -> None:
             return None
 
-    ExcelImporter._data = data
+    ExcelImporter._data = data or []
+    ExcelImporter._data_by_path = data_by_path or {}
 
     excel.ExcelImporter = ExcelImporter
     importers.excel = excel
@@ -269,3 +275,73 @@ def test_import_excel_inventory_year_specific_amounts(tmp_path: Path) -> None:
     np.testing.assert_allclose(dense_a[:, 0, 0], np.array([1.0, 2.0, 3.0]))
     # Technosphere exchange interpolated and sign-flipped
     np.testing.assert_allclose(dense_a[:, 0, 1], np.array([-2.0, -3.0, -4.0]))
+
+
+def test_import_excel_inventory_multiple_files_concatenated(tmp_path: Path) -> None:
+    trails = DummyTrails()
+
+    inv1_path = tmp_path / "inv1.xlsx"
+    inv2_path = tmp_path / "inv2.xlsx"
+    inv1_path.write_text("stub")
+    inv2_path.write_text("stub")
+
+    data_by_path = {
+        str(inv1_path): [
+            {
+                "name": "X",
+                "reference product": "X",
+                "location": "GLO",
+                "unit": "kg",
+                "database": "db",
+                "code": "X",
+                "exchanges": [
+                    {
+                        "type": "production",
+                        "name": "X",
+                        "reference product": "X",
+                        "location": "GLO",
+                        "amount": 1.0,
+                    },
+                    {
+                        "type": "technosphere",
+                        "name": "Y",
+                        "reference product": "Y",
+                        "location": "GLO",
+                        "amount": 2.0,
+                    },
+                ],
+            }
+        ],
+        str(inv2_path): [
+            {
+                "name": "Y",
+                "reference product": "Y",
+                "location": "GLO",
+                "unit": "kg",
+                "database": "db",
+                "code": "Y",
+                "exchanges": [
+                    {
+                        "type": "production",
+                        "name": "Y",
+                        "reference product": "Y",
+                        "location": "GLO",
+                        "amount": 1.0,
+                    }
+                ],
+            }
+        ],
+    }
+    _install_fake_bw2io(data_by_path=data_by_path)
+
+    result = import_excel_inventory(trails, [str(inv1_path), str(inv2_path)], year=2005)
+
+    assert result["unlinked"] == 0
+    assert result["new_activities"] == 2
+    assert result["production"] == 2
+    assert result["technosphere"] == 1
+
+    dense_a = trails.A.todense()
+    np.testing.assert_allclose(dense_a[1, 0, 0], 1.0)  # X production
+    np.testing.assert_allclose(dense_a[1, 0, 1], -2.0)  # X -> Y technosphere
+    np.testing.assert_allclose(dense_a[1, 1, 1], 1.0)  # Y production
