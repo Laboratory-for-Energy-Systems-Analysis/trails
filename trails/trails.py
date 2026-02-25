@@ -81,6 +81,8 @@ class Trails:
         package: Any,
         interpolate_annual: bool = True,
         cache_interpolation: bool = True,
+        interpolation_start_year_offset: int = -1,
+        interpolation_end_year_offset: int = 1,
         value_dtype: np.dtype = np.float32,
         index_dtype: np.dtype = np.int32,
         debug: bool = False,
@@ -93,6 +95,10 @@ class Trails:
         :type interpolate_annual: bool
         :param cache_interpolation: Value for `cache_interpolation`.
         :type cache_interpolation: bool
+        :param interpolation_start_year_offset: Offset from min inventory year.
+        :type interpolation_start_year_offset: int
+        :param interpolation_end_year_offset: Offset from max inventory year.
+        :type interpolation_end_year_offset: int
         :param value_dtype: Value for `value_dtype`.
         :type value_dtype: np.dtype
         :param index_dtype: Value for `index_dtype`.
@@ -103,6 +109,8 @@ class Trails:
         self.value_dtype = value_dtype
         self.index_dtype = index_dtype
         self.debug = debug
+        self.interpolation_start_year_offset = int(interpolation_start_year_offset)
+        self.interpolation_end_year_offset = int(interpolation_end_year_offset)
 
         # If a zip archive is provided, Frictionless unpacks it to a temp basepath.
         pkg_path = getattr(self.package, "path", None)
@@ -140,6 +148,8 @@ class Trails:
                 self.package,
                 value_dtype=str(self.value_dtype),
                 index_dtype=str(self.index_dtype),
+                interpolation_start_year_offset=self.interpolation_start_year_offset,
+                interpolation_end_year_offset=self.interpolation_end_year_offset,
             )
             if (
                 A_cached is not None
@@ -232,6 +242,8 @@ class Trails:
                 self.B,
                 self.scenario_labels,
                 value_dtype=self.value_dtype,
+                start_year_offset=self.interpolation_start_year_offset,
+                end_year_offset=self.interpolation_end_year_offset,
                 debug=debug,
             )
 
@@ -248,6 +260,10 @@ class Trails:
                         self.package,
                         value_dtype=str(self.value_dtype),
                         index_dtype=str(self.index_dtype),
+                        interpolation_start_year_offset=(
+                            self.interpolation_start_year_offset
+                        ),
+                        interpolation_end_year_offset=self.interpolation_end_year_offset,
                         A=self.A,
                         B=self.B,
                         scenario_labels=self.scenario_labels,
@@ -293,7 +309,7 @@ class Trails:
 
         :param attribute_to_roots: Value for `attribute_to_roots`.
         :type attribute_to_roots: bool"""
-        min_offset, max_offset = self._biosphere_offset_bounds()
+        min_offset, max_offset = self._inventory_offset_bounds()
         # Extend the inventory time axis to allow biosphere emissions to spread/decay
         # beyond the matrix years (e.g., for long-lived gases).
         tail_years = 500
@@ -475,7 +491,7 @@ class Trails:
                 )
             self.min_year = int(years_int.min())
             self.max_year = int(years_int.max())
-        min_offset, max_offset = self._biosphere_offset_bounds()
+        min_offset, max_offset = self._inventory_offset_bounds()
         tail_years = 500
         years = np.arange(
             int(self.min_year) + int(min_offset),
