@@ -1048,6 +1048,12 @@ def import_excel_inventory(
             trails.package,
             value_dtype=str(trails.value_dtype),
             index_dtype=str(trails.index_dtype),
+            interpolation_start_year_offset=int(
+                getattr(trails, "interpolation_start_year_offset", -1)
+            ),
+            interpolation_end_year_offset=int(
+                getattr(trails, "interpolation_end_year_offset", 1)
+            ),
             A=trails.A,
             B=trails.B,
             scenario_labels=trails.scenario_labels,
