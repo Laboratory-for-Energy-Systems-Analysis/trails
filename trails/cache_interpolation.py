@@ -16,6 +16,8 @@ def _cache_key(
     value_dtype: str,
     index_dtype: str,
     interpolate_annual: bool = True,
+    interpolation_start_year_offset: int = -1,
+    interpolation_end_year_offset: int = 1,
 ) -> str:
     """cache key.
 
@@ -58,12 +60,21 @@ def _cache_key(
         "value_dtype": value_dtype,
         "index_dtype": index_dtype,
         "interpolate_annual": interpolate_annual,
+        "interpolation_start_year_offset": interpolation_start_year_offset,
+        "interpolation_end_year_offset": interpolation_end_year_offset,
     }
     blob = json.dumps(payload, sort_keys=True, default=str).encode("utf-8")
     return hashlib.sha256(blob).hexdigest()
 
 
-def cache_dir_for_package(package: Any, *, value_dtype: str, index_dtype: str) -> Path:
+def cache_dir_for_package(
+    package: Any,
+    *,
+    value_dtype: str,
+    index_dtype: str,
+    interpolation_start_year_offset: int = -1,
+    interpolation_end_year_offset: int = 1,
+) -> Path:
     """Cache dir for package.
 
     :param package: Value for `package`.
@@ -80,13 +91,20 @@ def cache_dir_for_package(package: Any, *, value_dtype: str, index_dtype: str) -
         value_dtype=value_dtype,
         index_dtype=index_dtype,
         interpolate_annual=True,
+        interpolation_start_year_offset=interpolation_start_year_offset,
+        interpolation_end_year_offset=interpolation_end_year_offset,
     )
     short_key = key[:12]
     return cache_base / "cache" / f"interp_{short_key}"
 
 
 def load_cached_interpolation(
-    package: Any, *, value_dtype: str, index_dtype: str
+    package: Any,
+    *,
+    value_dtype: str,
+    index_dtype: str,
+    interpolation_start_year_offset: int = -1,
+    interpolation_end_year_offset: int = 1,
 ) -> tuple[
     Optional[sparse.COO],
     Optional[sparse.COO],
@@ -109,7 +127,11 @@ def load_cached_interpolation(
     :rtype: tuple[Optional[sparse.COO], Optional[sparse.COO], list[str], list[str], Optional[dict], Optional[dict], Optional[dict], Path]
     """
     cache_dir = cache_dir_for_package(
-        package, value_dtype=value_dtype, index_dtype=index_dtype
+        package,
+        value_dtype=value_dtype,
+        index_dtype=index_dtype,
+        interpolation_start_year_offset=interpolation_start_year_offset,
+        interpolation_end_year_offset=interpolation_end_year_offset,
     )
     meta_path = cache_dir / "meta.json"
     a_path = cache_dir / "A.npz"
@@ -122,9 +144,13 @@ def load_cached_interpolation(
         with open(meta_path, "r", encoding="utf-8") as f:
             meta = json.load(f)
         if (
-            meta.get("version") != 4
+            meta.get("version") != 5
             or meta.get("value_dtype") != value_dtype
             or meta.get("index_dtype") != index_dtype
+            or meta.get("interpolation_start_year_offset", -1)
+            != interpolation_start_year_offset
+            or meta.get("interpolation_end_year_offset", 1)
+            != interpolation_end_year_offset
         ):
             return None, None, [], [], None, None, None, cache_dir
         A = sparse.load_npz(a_path)
@@ -161,6 +187,8 @@ def save_cached_interpolation(
     *,
     value_dtype: str,
     index_dtype: str,
+    interpolation_start_year_offset: int = -1,
+    interpolation_end_year_offset: int = 1,
     A: sparse.COO,
     B: sparse.COO,
     scenario_labels: list[str],
@@ -197,15 +225,21 @@ def save_cached_interpolation(
     :returns: Return value.
     :rtype: Path"""
     cache_dir = cache_dir_for_package(
-        package, value_dtype=value_dtype, index_dtype=index_dtype
+        package,
+        value_dtype=value_dtype,
+        index_dtype=index_dtype,
+        interpolation_start_year_offset=interpolation_start_year_offset,
+        interpolation_end_year_offset=interpolation_end_year_offset,
     )
     cache_dir.mkdir(parents=True, exist_ok=True)
     sparse.save_npz(cache_dir / "A.npz", A, compressed=False)
     sparse.save_npz(cache_dir / "B.npz", B, compressed=False)
     meta = {
-        "version": 4,
+        "version": 5,
         "value_dtype": value_dtype,
         "index_dtype": index_dtype,
+        "interpolation_start_year_offset": interpolation_start_year_offset,
+        "interpolation_end_year_offset": interpolation_end_year_offset,
         "scenario_labels": scenario_labels,
         "template_labels": template_labels,
         "compressed": False,
