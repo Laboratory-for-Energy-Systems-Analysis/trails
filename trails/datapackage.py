@@ -1062,6 +1062,8 @@ def interpolate_to_annual(
     B: sparse.COO,
     scenario_labels: Sequence[str],
     value_dtype: np.dtype = np.float32,
+    start_year_offset: int = -1,
+    end_year_offset: int = 1,
     debug: bool = False,
 ) -> tuple[sparse.COO, sparse.COO, list[str], dict[str, int]]:
     """Interpolate to annual.
@@ -1074,6 +1076,10 @@ def interpolate_to_annual(
     :type scenario_labels: Sequence[str]
     :param value_dtype: Value for `value_dtype`.
     :type value_dtype: np.dtype
+    :param start_year_offset: Offset applied to earliest inventory year.
+    :type start_year_offset: int
+    :param end_year_offset: Offset applied to latest inventory year.
+    :type end_year_offset: int
     :param debug: Value for `debug`.
     :type debug: bool
     :returns: Return value.
@@ -1089,11 +1095,21 @@ def interpolate_to_annual(
     new_Bs: list[sparse.COO] = []
     new_labels: list[str] = []
 
-    # First anchor
+    # Left padding: duplicate earliest available inventory year.
     i0 = int(order[0])
-    new_As.append(A[i0].astype(value_dtype))
-    new_Bs.append(B[i0].astype(value_dtype))
-    new_labels.append(str(int(years_sorted[0])))
+    first_year = int(years_sorted[0])
+    first_A = A[i0].astype(value_dtype)
+    first_B = B[i0].astype(value_dtype)
+    left_start = int(first_year + int(start_year_offset))
+    for y in range(left_start, first_year):
+        new_As.append(first_A)
+        new_Bs.append(first_B)
+        new_labels.append(str(y))
+
+    # First anchor (original earliest year)
+    new_As.append(first_A)
+    new_Bs.append(first_B)
+    new_labels.append(str(first_year))
 
     for k in range(len(years_sorted) - 1):
         y0 = int(years_sorted[k])
@@ -1119,6 +1135,17 @@ def interpolate_to_annual(
                 _interp_slice_union_vectorized(B0, B1, w, idx_dtype, value_dtype)
             )
             new_labels.append(str(y))
+
+    # Right padding: duplicate latest available inventory year.
+    last_year = int(years_sorted[-1])
+    i_last = int(order[-1])
+    last_A = A[i_last].astype(value_dtype)
+    last_B = B[i_last].astype(value_dtype)
+    right_end = int(last_year + int(end_year_offset))
+    for y in range(last_year + 1, right_end + 1):
+        new_As.append(last_A)
+        new_Bs.append(last_B)
+        new_labels.append(str(y))
 
     A_interp = sparse.stack(new_As, axis=0).astype(value_dtype)
     B_interp = sparse.stack(new_Bs, axis=0).astype(value_dtype)
