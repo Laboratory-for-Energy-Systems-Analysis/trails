@@ -688,24 +688,6 @@ def lca(
             if supply_total:
                 supplies.append((supply_total, None))
 
-        # Injected supply (direct additions outside the solved system).
-        if attribute_to_roots:
-            per_root_injected = root_injected_by_year.get(solve_year, {})
-            for root_act, injected_supply in per_root_injected.items():
-                if not injected_supply:
-                    continue
-                supplies.append((injected_supply, int(root_act)))
-        else:
-            injected_supply: Dict[int, float] = {}
-            for (y, a), v in injected_supply_by_year_act.items():
-                if int(y) != solve_year:
-                    continue
-                v = float(v)
-                injected_supply[int(a)] = injected_supply.get(int(a), 0.0) + v
-
-            if injected_supply:
-                supplies.append((injected_supply, None))
-
         # ---- Inventory ----
         if supplies and store_inventory:
             for supply_dict, root_act in supplies:
@@ -738,21 +720,6 @@ def lca(
                             method_idx=method_idx,
                         )
 
-                # Injected supplies: keep cheap dict scoring (usually small)
-                per_root_injected = root_injected_by_year.get(solve_year, {})
-                for root_act, injected_supply in per_root_injected.items():
-                    if not injected_supply:
-                        continue
-                    for method_idx, cf_vec in enumerate(cf_vectors):
-                        trails.accumulate_temporalized_biosphere_score(
-                            base_year=solve_year,
-                            supply_by_activity=injected_supply,
-                            cf=cf_vec,
-                            min_amount=float(min_amount),
-                            store_activity=int(root_act),
-                            debug=debug,
-                            method_idx=method_idx,
-                        )
             else:
                 # Non-root mode: score all supply blocks for the year
                 # (solved supply + injected direct additions).
@@ -774,6 +741,72 @@ def lca(
             pbar.update(1)
     if pbar is not None:
         pbar.close()
+
+    # Injected/direct biosphere supplies should keep their raw calendar year,
+    # while technosphere solving remains scenario-mapped.
+    if attribute_to_roots:
+        if store_inventory:
+            for raw_year, per_root_injected in root_injected_by_year.items():
+                for root_act, injected_supply in per_root_injected.items():
+                    if not injected_supply:
+                        continue
+                    trails.accumulate_temporalized_biosphere_inventory(
+                        base_year=int(raw_year),
+                        supply_by_activity=injected_supply,
+                        min_amount=float(min_amount),
+                        store_activity=int(root_act),
+                        debug=debug,
+                    )
+        if compute_score:
+            assert cf_vectors is not None
+            for raw_year, per_root_injected in root_injected_by_year.items():
+                for root_act, injected_supply in per_root_injected.items():
+                    if not injected_supply:
+                        continue
+                    for method_idx, cf_vec in enumerate(cf_vectors):
+                        trails.accumulate_temporalized_biosphere_score(
+                            base_year=int(raw_year),
+                            supply_by_activity=injected_supply,
+                            cf=cf_vec,
+                            min_amount=float(min_amount),
+                            store_activity=int(root_act),
+                            debug=debug,
+                            method_idx=method_idx,
+                        )
+    else:
+        injected_by_raw_year: dict[int, dict[int, float]] = {}
+        for (raw_year, act_idx), v in injected_supply_by_year_act.items():
+            y = int(raw_year)
+            a = int(act_idx)
+            bucket = injected_by_raw_year.setdefault(y, {})
+            bucket[a] = bucket.get(a, 0.0) + float(v)
+
+        if store_inventory:
+            for raw_year, injected_supply in injected_by_raw_year.items():
+                if not injected_supply:
+                    continue
+                trails.accumulate_temporalized_biosphere_inventory(
+                    base_year=int(raw_year),
+                    supply_by_activity=injected_supply,
+                    min_amount=float(min_amount),
+                    store_activity=None,
+                    debug=debug,
+                )
+        if compute_score:
+            assert cf_vectors is not None
+            for raw_year, injected_supply in injected_by_raw_year.items():
+                if not injected_supply:
+                    continue
+                for method_idx, cf_vec in enumerate(cf_vectors):
+                    trails.accumulate_temporalized_biosphere_score(
+                        base_year=int(raw_year),
+                        supply_by_activity=injected_supply,
+                        cf=cf_vec,
+                        min_amount=float(min_amount),
+                        store_activity=None,
+                        debug=debug,
+                        method_idx=method_idx,
+                    )
 
     if store_inventory:
         trails.finalize_inventory()
