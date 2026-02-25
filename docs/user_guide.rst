@@ -29,8 +29,17 @@ Loading TRAILS
 
     package = Package("path/to/datapackage.json")
 
-    # interpolate_annual=True expands scenario slices to full annual resolution
+    # interpolate_annual=True expands scenario slices to annual resolution.
+    # Default annual bounds are [min_year-1, max_year+1].
     trails = Trails(package, interpolate_annual=True)
+
+    # Optional: widen interpolation bounds for endpoint duplication
+    # trails = Trails(
+    #     package,
+    #     interpolate_annual=True,
+    #     interpolation_start_year_offset=-20,
+    #     interpolation_end_year_offset=20,
+    # )
 
 After initialization, you can access scenario labels and metadata:
 
@@ -39,6 +48,13 @@ After initialization, you can access scenario labels and metadata:
     print(trails.scenario_labels)
     activity_indices = next(iter(trails.activity_indices.values()))
     print(list(activity_indices.items())[:5])
+
+Interpolation boundary behavior:
+
+* Between provided inventory years, TRAILS uses linear interpolation.
+* Before the earliest year and after the latest year, TRAILS duplicates the
+  nearest endpoint year according to
+  ``interpolation_start_year_offset`` / ``interpolation_end_year_offset``.
 
 Selecting activities
 --------------------

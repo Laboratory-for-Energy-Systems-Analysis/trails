@@ -138,8 +138,18 @@ from trails import Trails, lca, get_lcia_method_names, plot_temporal_scores
 # Load a Frictionless data package exported by premise (or compatible tooling)
 package = Package("path/to/datapackage.json")
 
-# Initialize the TRAILS wrapper (with optional annual interpolation)
+# Initialize TRAILS with annual interpolation.
+# By default, annual years are extended by one year on each side
+# (min_year-1 to max_year+1) using endpoint duplication.
 trails = Trails(package, interpolate_annual=True)
+
+# Optional: wider padding, e.g., 20 years before/after
+# trails = Trails(
+#     package,
+#     interpolate_annual=True,
+#     interpolation_start_year_offset=-20,
+#     interpolation_end_year_offset=20,
+# )
 
 # Pick an activity index from the metadata
 activity_indices = next(iter(trails.activity_indices.values()))

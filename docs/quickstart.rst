@@ -33,8 +33,18 @@ Run a temporal LCA
     # Load a Frictionless data package exported by premise (or compatible tooling)
     package = Package("path/to/datapackage.json")
 
-    # Initialize the TRAILS wrapper (annual interpolation is optional)
+    # Initialize TRAILS (annual interpolation is optional).
+    # Default interpolation bounds are [min_year-1, max_year+1], where
+    # out-of-range years duplicate the nearest endpoint inventory.
     trails = Trails(package, interpolate_annual=True)
+
+    # Optional: widen interpolation bounds (e.g., +/-20 years)
+    # trails = Trails(
+    #     package,
+    #     interpolate_annual=True,
+    #     interpolation_start_year_offset=-20,
+    #     interpolation_end_year_offset=20,
+    # )
 
     # Pick an activity index from the metadata
     activity_indices = next(iter(trails.activity_indices.values()))
