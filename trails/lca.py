@@ -520,6 +520,10 @@ def lca(
     iterative_restart: int | None = 50,
     iterative_maxiter: int | None = 300,
     iterative_use_guess: bool = True,
+    iterative_preconditioner: Literal["jacobi", "ilu", "none"] = "jacobi",
+    iterative_ilu_drop_tol: float = 1e-4,
+    iterative_ilu_fill_factor: float = 10.0,
+    inventory_workers: int | None = None,
 ) -> None:
     """Lca.
 
@@ -551,11 +555,23 @@ def lca(
     :type iterative_maxiter: int | None
     :param iterative_use_guess: Value for `iterative_use_guess`.
     :type iterative_use_guess: bool
+    :param iterative_preconditioner: Iterative preconditioner mode.
+    :type iterative_preconditioner: Literal["jacobi", "ilu", "none"]
+    :param iterative_ilu_drop_tol: ILU drop tolerance (if ILU is selected).
+    :type iterative_ilu_drop_tol: float
+    :param iterative_ilu_fill_factor: ILU fill factor (if ILU is selected).
+    :type iterative_ilu_fill_factor: float
+    :param inventory_workers: Optional worker count for no-TD inventory batching.
+    :type inventory_workers: int | None
     :raises RuntimeError: If an error occurs.
     :raises ValueError: If an error occurs."""
     if solver_mode not in ("bw2calc", "direct", "iterative"):
         raise ValueError(
             "solver_mode must be one of {'bw2calc', 'direct', 'iterative'}"
+        )
+    if iterative_preconditioner not in {"jacobi", "ilu", "none"}:
+        raise ValueError(
+            "iterative_preconditioner must be one of {'jacobi', 'ilu', 'none'}"
         )
 
     debug = bool(getattr(trails, "debug", False))
@@ -802,6 +818,9 @@ def lca(
                             restart=iterative_restart,
                             maxiter=iterative_maxiter,
                             use_guess=bool(iterative_use_guess),
+                            preconditioner_mode=iterative_preconditioner,
+                            ilu_drop_tol=float(iterative_ilu_drop_tol),
+                            ilu_fill_factor=float(iterative_ilu_fill_factor),
                         )
                     else:
                         root_supply_matrix = solve_many_rhs_umfpack_factorized(
@@ -831,6 +850,9 @@ def lca(
                         restart=iterative_restart,
                         maxiter=iterative_maxiter,
                         use_guess=bool(iterative_use_guess),
+                        preconditioner_mode=iterative_preconditioner,
+                        ilu_drop_tol=float(iterative_ilu_drop_tol),
+                        ilu_fill_factor=float(iterative_ilu_fill_factor),
                     )
                 else:
                     X = solve_many_rhs_umfpack_factorized(A_csc, rhs, cache=None)
@@ -984,6 +1006,7 @@ def lca(
                 min_amount=float(min_amount),
                 use_temporal_distributions=True,
                 debug=debug,
+                workers=inventory_workers,
             )
 
         # ---- Scores ----
@@ -1047,6 +1070,7 @@ def lca(
                     min_amount=float(min_amount),
                     use_temporal_distributions=True,
                     debug=debug,
+                    workers=inventory_workers,
                 )
         if compute_score:
             assert cf_vectors is not None
