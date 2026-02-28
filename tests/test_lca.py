@@ -405,11 +405,11 @@ def test_lca_total_invariant_to_root_attribution(example_package: Package) -> No
 
 
 def test_lca_direct_solver_matches_bw2calc_total(example_package: Package) -> None:
-    """Direct technosphere solver should match bw2calc totals."""
+    """Direct/iterative technosphere solvers should match bw2calc totals."""
     methods = get_lcia_method_names(ei_version="3.11")[:1]
     assert methods
 
-    def run_case(mode: str) -> float:
+    def run_case(mode: str, **kwargs: object) -> float:
         trails = Trails(example_package, interpolate_annual=False)
         activity_indices = next(iter(trails.activity_indices.values()))
         start_act_idx = next(iter(activity_indices.keys()))
@@ -432,13 +432,20 @@ def test_lca_direct_solver_matches_bw2calc_total(example_package: Package) -> No
             store_inventory=False,
             attribute_to_roots=False,
             solver_mode=mode,
+            **kwargs,
         )
         assert trails.scores is not None
         return float(trails.scores.data.sum())
 
     total_bw = run_case("bw2calc")
     total_direct = run_case("direct")
+    total_iterative = run_case(
+        "iterative",
+        iterative_rtol=1e-6,
+        iterative_maxiter=500,
+    )
     assert total_direct == pytest.approx(total_bw, rel=1e-10, abs=1e-12)
+    assert total_iterative == pytest.approx(total_bw, rel=1e-5, abs=1e-8)
 
 
 def test_lca_invalid_solver_mode_raises(example_trails: Trails) -> None:

@@ -35,5 +35,6 @@ trails.lca(
     show_progress=True,
     compute_score=True,
     store_inventory=True,
-    solver_mode="direct"
+    solver_mode="iterative",
+    iterative_rtol=1e-4,
 )

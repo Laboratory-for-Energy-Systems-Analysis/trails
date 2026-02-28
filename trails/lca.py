@@ -17,6 +17,7 @@ from .bw_interface import (
     _reference_product_from_activity_id,
     build_datapackage_for_year_from_trails,
 )
+from .iterative_solver import solve_many_rhs_jacobi_gmres
 from .characterization import build_characterized_inventory
 from .characterization import get_cf_vector
 
@@ -513,7 +514,12 @@ def lca(
     store_inventory: bool = False,
     compute_score: bool = True,
     ei_version: str = "3.11",
-    solver_mode: Literal["bw2calc", "direct"] = "bw2calc",
+    solver_mode: Literal["bw2calc", "direct", "iterative"] = "bw2calc",
+    iterative_rtol: float = 1e-6,
+    iterative_atol: float = 0.0,
+    iterative_restart: int | None = 50,
+    iterative_maxiter: int | None = 300,
+    iterative_use_guess: bool = True,
 ) -> None:
     """Lca.
 
@@ -534,11 +540,23 @@ def lca(
     :param ei_version: Value for `ei_version`.
     :type ei_version: str
     :param solver_mode: Value for `solver_mode`.
-    :type solver_mode: Literal["bw2calc", "direct"]
+    :type solver_mode: Literal["bw2calc", "direct", "iterative"]
+    :param iterative_rtol: Value for `iterative_rtol`.
+    :type iterative_rtol: float
+    :param iterative_atol: Value for `iterative_atol`.
+    :type iterative_atol: float
+    :param iterative_restart: Value for `iterative_restart`.
+    :type iterative_restart: int | None
+    :param iterative_maxiter: Value for `iterative_maxiter`.
+    :type iterative_maxiter: int | None
+    :param iterative_use_guess: Value for `iterative_use_guess`.
+    :type iterative_use_guess: bool
     :raises RuntimeError: If an error occurs.
     :raises ValueError: If an error occurs."""
-    if solver_mode not in ("bw2calc", "direct"):
-        raise ValueError("solver_mode must be one of {'bw2calc', 'direct'}")
+    if solver_mode not in ("bw2calc", "direct", "iterative"):
+        raise ValueError(
+            "solver_mode must be one of {'bw2calc', 'direct', 'iterative'}"
+        )
 
     debug = bool(getattr(trails, "debug", False))
 
@@ -737,7 +755,8 @@ def lca(
         need_supply_dicts = bool(store_inventory) or (
             bool(compute_score) and not bool(attribute_to_roots)
         )
-        use_direct_solver = bool(solver_mode == "direct")
+        use_direct_solver = bool(solver_mode in {"direct", "iterative"})
+        use_iterative_solver = bool(solver_mode == "iterative")
 
         if use_direct_solver:
             A_csc, product_dict, ref_prod_cache = _build_direct_technosphere_for_year(
@@ -774,9 +793,20 @@ def lca(
                 )
 
                 if roots:
-                    root_supply_matrix = solve_many_rhs_umfpack_factorized(
-                        A_csc, rhs_matrix, cache=umfpack_cache
-                    )
+                    if use_iterative_solver:
+                        root_supply_matrix = solve_many_rhs_jacobi_gmres(
+                            A_csc,
+                            rhs_matrix,
+                            rtol=float(iterative_rtol),
+                            atol=float(iterative_atol),
+                            restart=iterative_restart,
+                            maxiter=iterative_maxiter,
+                            use_guess=bool(iterative_use_guess),
+                        )
+                    else:
+                        root_supply_matrix = solve_many_rhs_umfpack_factorized(
+                            A_csc, rhs_matrix, cache=umfpack_cache
+                        )
                     root_ids = np.asarray(roots, dtype=np.int64)
                     if need_supply_dicts:
                         for j, root_act in enumerate(roots):
@@ -792,7 +822,18 @@ def lca(
                 rhs = np.zeros((A_csc.shape[0], 1), dtype=np.float64)
                 for prod_id, v in functional_unit_demand.items():
                     rhs[int(product_dict[int(prod_id)]), 0] += float(v)
-                X = solve_many_rhs_umfpack_factorized(A_csc, rhs, cache=None)
+                if use_iterative_solver:
+                    X = solve_many_rhs_jacobi_gmres(
+                        A_csc,
+                        rhs,
+                        rtol=float(iterative_rtol),
+                        atol=float(iterative_atol),
+                        restart=iterative_restart,
+                        maxiter=iterative_maxiter,
+                        use_guess=bool(iterative_use_guess),
+                    )
+                else:
+                    X = solve_many_rhs_umfpack_factorized(A_csc, rhs, cache=None)
                 supply_vec = X[:, 0]
                 if need_supply_dicts:
                     supply_total = _extract_supply_fast_direct(
