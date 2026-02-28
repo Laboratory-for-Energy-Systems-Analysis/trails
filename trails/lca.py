@@ -629,6 +629,9 @@ def lca(
             A_csc = A_csc.tocsc()
 
         supplies: list[tuple[Dict[int, float], int | None]] = []
+        need_supply_dicts = bool(store_inventory) or (
+            bool(compute_score) and not bool(attribute_to_roots)
+        )
 
         if attribute_to_roots:
             # Build one dense RHS matrix for all roots in this year
@@ -655,14 +658,15 @@ def lca(
                         root_demand = per_root_demands[root_act]
                         lca_obj.build_demand_array(root_demand)
                         lca_obj.supply_array = lca_obj.solve_linear_system()
-                        if act_ids is None or positions is None:
-                            supply_total = _extract_supply_fast(lca_obj, min_amount)
-                        else:
-                            supply_total = _extract_supply_fast_cached(
-                                lca_obj.supply_array, act_ids, positions, min_amount
-                            )
-                        if supply_total:
-                            supplies.append((supply_total, int(root_act)))
+                        if need_supply_dicts:
+                            if act_ids is None or positions is None:
+                                supply_total = _extract_supply_fast(lca_obj, min_amount)
+                            else:
+                                supply_total = _extract_supply_fast_cached(
+                                    lca_obj.supply_array, act_ids, positions, min_amount
+                                )
+                            if supply_total:
+                                supplies.append((supply_total, int(root_act)))
                 else:
                     # UMFPACK/SciPy: factorize once and solve all RHS vectors.
                     root_supply_matrix = solve_many_rhs_umfpack_factorized(
@@ -672,18 +676,19 @@ def lca(
                         roots, dtype=np.int64
                     )  # Column order of RHS and solution.
 
-                    for j, root_act in enumerate(roots):
-                        supply_vec = root_supply_matrix[:, j]
-                        if act_ids is None or positions is None:
-                            # Fallback: emulate lca_obj.supply_array for extractor
-                            lca_obj.supply_array = supply_vec
-                            supply_total = _extract_supply_fast(lca_obj, min_amount)
-                        else:
-                            supply_total = _extract_supply_fast_cached(
-                                supply_vec, act_ids, positions, min_amount
-                            )
-                        if supply_total:
-                            supplies.append((supply_total, int(root_act)))
+                    if need_supply_dicts:
+                        for j, root_act in enumerate(roots):
+                            supply_vec = root_supply_matrix[:, j]
+                            if act_ids is None or positions is None:
+                                # Fallback: emulate lca_obj.supply_array for extractor
+                                lca_obj.supply_array = supply_vec
+                                supply_total = _extract_supply_fast(lca_obj, min_amount)
+                            else:
+                                supply_total = _extract_supply_fast_cached(
+                                    supply_vec, act_ids, positions, min_amount
+                                )
+                            if supply_total:
+                                supplies.append((supply_total, int(root_act)))
 
         else:
             # Original single-demand path (no per-root attribution)
@@ -692,25 +697,25 @@ def lca(
                 lca_obj.decompose_technosphere()
             lca_obj.supply_array = lca_obj.solve_linear_system()
 
-            if act_ids is None or positions is None:
-                supply_total = _extract_supply_fast(lca_obj, min_amount)
-            else:
-                supply_total = _extract_supply_fast_cached(
-                    lca_obj.supply_array, act_ids, positions, min_amount
-                )
-            if supply_total:
-                supplies.append((supply_total, None))
+            if need_supply_dicts:
+                if act_ids is None or positions is None:
+                    supply_total = _extract_supply_fast(lca_obj, min_amount)
+                else:
+                    supply_total = _extract_supply_fast_cached(
+                        lca_obj.supply_array, act_ids, positions, min_amount
+                    )
+                if supply_total:
+                    supplies.append((supply_total, None))
 
         # ---- Inventory ----
         if supplies and store_inventory:
-            for supply_dict, root_act in supplies:
-                trails.accumulate_temporalized_biosphere_inventory(
-                    base_year=solve_year,
-                    supply_by_activity=supply_dict,
-                    min_amount=float(min_amount),
-                    store_activity=root_act,
-                    debug=debug,
-                )
+            trails.accumulate_temporalized_biosphere_inventory_batch(
+                base_year=solve_year,
+                supplies=supplies,
+                min_amount=float(min_amount),
+                use_temporal_distributions=True,
+                debug=debug,
+            )
 
         # ---- Scores ----
         if compute_score:
@@ -760,16 +765,20 @@ def lca(
     if attribute_to_roots:
         if store_inventory:
             for raw_year, per_root_injected in root_injected_by_year.items():
-                for root_act, injected_supply in per_root_injected.items():
-                    if not injected_supply:
-                        continue
-                    trails.accumulate_temporalized_biosphere_inventory(
-                        base_year=int(raw_year),
-                        supply_by_activity=injected_supply,
-                        min_amount=float(min_amount),
-                        store_activity=int(root_act),
-                        debug=debug,
-                    )
+                supplies_batch = [
+                    (injected_supply, int(root_act))
+                    for root_act, injected_supply in per_root_injected.items()
+                    if injected_supply
+                ]
+                if not supplies_batch:
+                    continue
+                trails.accumulate_temporalized_biosphere_inventory_batch(
+                    base_year=int(raw_year),
+                    supplies=supplies_batch,
+                    min_amount=float(min_amount),
+                    use_temporal_distributions=True,
+                    debug=debug,
+                )
         if compute_score:
             assert cf_vectors is not None
             for raw_year, per_root_injected in root_injected_by_year.items():

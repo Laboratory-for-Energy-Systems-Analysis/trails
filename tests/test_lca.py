@@ -319,6 +319,55 @@ def test_lca_multi_method_scores_without_inventory(example_trails: Trails) -> No
     assert example_trails.scores.coords["method"].values.tolist() == methods
 
 
+def test_lca_root_mode_without_inventory_skips_supply_extraction(
+    monkeypatch: pytest.MonkeyPatch, example_trails: Trails
+) -> None:
+    """Root-attribution scoring should not extract per-root supply dicts when inventory is disabled."""
+    activity_indices = next(iter(example_trails.activity_indices.values()))
+    start_act_idx = next(iter(activity_indices.keys()))
+    methods = get_lcia_method_names(ei_version="3.11")[:1]
+    assert methods
+
+    calls = {"fast": 0, "cached": 0}
+
+    def fake_extract_fast(*args: object, **kwargs: object) -> dict[int, float]:
+        calls["fast"] += 1
+        return {}
+
+    def fake_extract_fast_cached(*args: object, **kwargs: object) -> dict[int, float]:
+        calls["cached"] += 1
+        return {}
+
+    monkeypatch.setattr(lca_module, "_extract_supply_fast", fake_extract_fast)
+    monkeypatch.setattr(
+        lca_module, "_extract_supply_fast_cached", fake_extract_fast_cached
+    )
+    # Force multi-RHS path where matrix scoring is used directly.
+    monkeypatch.setattr(lca_module, "SOLVER", "umfpack")
+
+    example_trails.temporal_routing(
+        start_year=2005,
+        start_act_idx=start_act_idx,
+        max_depth=1,
+        min_amount=0.0,
+        show_progress=False,
+        attribute_to_roots=True,
+        debug=False,
+    )
+
+    lca_module.lca(
+        trails=example_trails,
+        methods=methods,
+        show_progress=False,
+        compute_score=True,
+        store_inventory=False,
+        attribute_to_roots=True,
+    )
+
+    assert calls["fast"] == 0
+    assert calls["cached"] == 0
+
+
 def test_lca_total_invariant_to_root_attribution(example_package: Package) -> None:
     """Total score should not depend on root-attribution bookkeeping mode."""
     methods = get_lcia_method_names(ei_version="3.11")[:1]
