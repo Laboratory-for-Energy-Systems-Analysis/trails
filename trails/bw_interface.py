@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict, Tuple, TYPE_CHECKING
+from typing import Any, Dict, Literal, Tuple, TYPE_CHECKING
 
 import bw_processing as bwp
 import numpy as np
@@ -188,6 +188,11 @@ def build_datapackage_for_year_from_trails(
     year: int,
     zero_biosphere: bool = False,
     debug: bool = False,
+    *,
+    include_biosphere: bool = True,
+    validate_metadata: bool = True,
+    build_metadata_indices: bool = True,
+    technosphere_sign_mode: Literal["abs_flip", "signed"] = "abs_flip",
 ) -> tuple[Any, dict[tuple, int], dict[tuple, int], list[tuple[int, int]]]:
     """Build datapackage for year from trails.
 
@@ -199,82 +204,126 @@ def build_datapackage_for_year_from_trails(
     :type zero_biosphere: bool
     :param debug: Value for `debug`.
     :type debug: bool
+    :param include_biosphere: Value for `include_biosphere`.
+    :type include_biosphere: bool
+    :param validate_metadata: Value for `validate_metadata`.
+    :type validate_metadata: bool
+    :param build_metadata_indices: Value for `build_metadata_indices`.
+    :type build_metadata_indices: bool
+    :param technosphere_sign_mode: Value for `technosphere_sign_mode`.
+    :type technosphere_sign_mode: Literal["abs_flip", "signed"]
     :returns: Return value.
     :rtype: tuple[Any, dict[tuple, int], dict[tuple, int], list[tuple[int, int]]]"""
+
+    if technosphere_sign_mode not in ("abs_flip", "signed"):
+        raise ValueError(
+            "technosphere_sign_mode must be one of {'abs_flip', 'signed'}"
+        )
 
     label_for_matrix, t = _resolve_matrix_label(trails, int(year))
 
     A_t = trails.A[t, :, :]  # (activity, product)
-    B_t = trails.B[t, :, :]  # (activity, flow)
-
     A_signed = A_t.data.astype(np.float64, copy=False)
-    B_signed = B_t.data.astype(np.float64, copy=False)
 
-    meta_label = _select_metadata_label(trails, label_for_matrix)
-    act_meta = trails.activity_indices.get(meta_label, {})
-    bio_meta = trails.biosphere_indices.get(meta_label, {})
+    B_t = None
+    B_signed = None
+    needs_biosphere_inputs = (
+        include_biosphere or validate_metadata or build_metadata_indices
+    )
+    if needs_biosphere_inputs:
+        B_t = trails.B[t, :, :]  # (activity, flow)
+        B_signed = B_t.data.astype(np.float64, copy=False)
 
-    # A -> bw_processing: non-negative data + flip array
-    flip_A = A_signed < 0
-    data_A = np.abs(A_signed)
-
-    # B -> bw_processing: non-negative data + flip array
-    if zero_biosphere:
-        data_B = np.zeros_like(B_signed, dtype=np.float64)
-        flip_B = np.zeros_like(B_signed, dtype=bool)
+    if validate_metadata or build_metadata_indices:
+        meta_label = _select_metadata_label(trails, label_for_matrix)
+        act_meta = trails.activity_indices.get(meta_label, {})
+        bio_meta = trails.biosphere_indices.get(meta_label, {})
     else:
-        flip_B = B_signed < 0
-        data_B = np.abs(B_signed)
+        meta_label = label_for_matrix
+        act_meta = {}
+        bio_meta = {}
+
+    if technosphere_sign_mode == "signed":
+        data_A = A_signed
+        flip_A = None
+    else:
+        # A -> bw_processing: non-negative data + flip array
+        data_A = np.abs(A_signed)
+        flip_A = A_signed < 0
 
     # Indices
     A_act_idx, A_prod_idx = _ij_from_coords(A_t)
-    B_act_idx, B_flow_idx = _ij_from_coords(B_t)
 
     # Brightway convention:
     # technosphere_matrix is (product, activity)
     indices_A = _make_bw_indices_rowcol(A_prod_idx, A_act_idx)
-    # biosphere_matrix is (flow, activity)
-    indices_B = _make_bw_indices_rowcol(B_flow_idx, B_act_idx)
 
-    _warn_on_missing_metadata(
-        label_for_matrix=label_for_matrix,
-        meta_label=meta_label,
-        A_act_idx=A_act_idx,
-        A_prod_idx=A_prod_idx,
-        B_flow_idx=B_flow_idx,
-        act_meta=act_meta,
-        bio_meta=bio_meta,
-    )
+    B_flow_idx = None
+    if needs_biosphere_inputs:
+        assert B_t is not None
+        B_act_idx, B_flow_idx = _ij_from_coords(B_t)
+    if include_biosphere:
+        assert B_signed is not None and B_t is not None and B_flow_idx is not None
+        # B -> bw_processing: non-negative data + flip array
+        if zero_biosphere:
+            data_B = np.zeros_like(B_signed, dtype=np.float64)
+            flip_B = np.zeros_like(B_signed, dtype=bool)
+        else:
+            flip_B = B_signed < 0
+            data_B = np.abs(B_signed)
+        # biosphere_matrix is (flow, activity)
+        indices_B = _make_bw_indices_rowcol(B_flow_idx, B_act_idx)
+
+    if validate_metadata:
+        assert B_flow_idx is not None
+        _warn_on_missing_metadata(
+            label_for_matrix=label_for_matrix,
+            meta_label=meta_label,
+            A_act_idx=A_act_idx,
+            A_prod_idx=A_prod_idx,
+            B_flow_idx=B_flow_idx,
+            act_meta=act_meta,
+            bio_meta=bio_meta,
+        )
 
     dp = bwp.create_datapackage()
 
     # Safety checks
     assert indices_A.shape == data_A.shape, (indices_A.shape, data_A.shape)
     assert indices_A.dtype == bwp.INDICES_DTYPE, indices_A.dtype
-    assert np.all(data_A >= 0), "A data must be non-negative for flip convention"
-    assert flip_A.shape == data_A.shape
+    if technosphere_sign_mode == "abs_flip":
+        assert np.all(data_A >= 0), "A data must be non-negative for flip convention"
+        assert flip_A is not None and flip_A.shape == data_A.shape
 
-    assert indices_B.shape == data_B.shape, (indices_B.shape, data_B.shape)
-    assert indices_B.dtype == bwp.INDICES_DTYPE, indices_B.dtype
-    assert np.all(data_B >= 0), "B data must be non-negative for flip convention"
-    assert flip_B.shape == data_B.shape
+    if include_biosphere:
+        assert indices_B.shape == data_B.shape, (indices_B.shape, data_B.shape)
+        assert indices_B.dtype == bwp.INDICES_DTYPE, indices_B.dtype
+        assert np.all(data_B >= 0), "B data must be non-negative for flip convention"
+        assert flip_B.shape == data_B.shape
 
-    dp.add_persistent_vector(
-        matrix="technosphere_matrix",
-        indices_array=indices_A,
-        data_array=data_A,
-        flip_array=flip_A,
-    )
-    dp.add_persistent_vector(
-        matrix="biosphere_matrix",
-        indices_array=indices_B,
-        data_array=data_B,
-        flip_array=flip_B,
-    )
+    add_A_kwargs: dict[str, Any] = {
+        "matrix": "technosphere_matrix",
+        "indices_array": indices_A,
+        "data_array": data_A,
+    }
+    if flip_A is not None:
+        add_A_kwargs["flip_array"] = flip_A
+    dp.add_persistent_vector(**add_A_kwargs)
+    if include_biosphere:
+        dp.add_persistent_vector(
+            matrix="biosphere_matrix",
+            indices_array=indices_B,
+            data_array=data_B,
+            flip_array=flip_B,
+        )
 
-    technosphere_indices, biosphere_indices = _build_metadata_indices(
-        act_meta, bio_meta
-    )
+    if build_metadata_indices:
+        technosphere_indices, biosphere_indices = _build_metadata_indices(
+            act_meta, bio_meta
+        )
+    else:
+        technosphere_indices = {}
+        biosphere_indices = {}
     uncertain_parameters: list[tuple[int, int]] = []
 
     return dp, technosphere_indices, biosphere_indices, uncertain_parameters
@@ -456,12 +505,21 @@ def _get_datapackage(
     :rtype: tuple[Any, dict[tuple, int], dict[tuple, int], list[tuple[int, int]]]"""
     dp_key = (year, zero_bio)
     if dp_key not in dp_cache:
+        builder_kwargs: dict[str, Any] = {}
+        if zero_bio:
+            builder_kwargs = {
+                "include_biosphere": False,
+                "validate_metadata": False,
+                "build_metadata_indices": False,
+                "technosphere_sign_mode": "signed",
+            }
         dp, tech_idx, bio_idx, uncertain_params = (
             build_datapackage_for_year_from_trails(
                 trails=trails,
                 year=year,
                 zero_biosphere=zero_bio,
                 debug=debug,
+                **builder_kwargs,
             )
         )
         dp_cache[dp_key] = (dp, tech_idx, bio_idx, uncertain_params)

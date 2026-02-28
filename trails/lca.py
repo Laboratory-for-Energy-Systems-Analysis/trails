@@ -591,7 +591,20 @@ def lca(
         activity_demand = {int(i): float(demand_vector[i]) for i in nonzero_indices}
 
         lca_obj = bc.LCA(demand=activity_demand, data_objs=[dp])
-        lca_obj.load_lci_data()  # build matrices + dicts
+        # The zero-bio fast path intentionally omits biosphere resources.
+        # bw2calc warns on empty biosphere in this case; suppress this
+        # specific warning while keeping all other warnings visible.
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                "ignore",
+                message=(
+                    r"No valid biosphere flows found\. No inventory results can "
+                    r"be calculated, `lcia` will raise an error"
+                ),
+                category=UserWarning,
+                module=r"bw2calc\.lca_base",
+            )
+            lca_obj.load_lci_data()  # build matrices + dicts
 
         # Cache mappings once per year
         act_map = getattr(lca_obj.dicts, "activity", None)
