@@ -402,3 +402,67 @@ def test_lca_total_invariant_to_root_attribution(example_package: Package) -> No
     total_false = run_case(False)
     total_true = run_case(True)
     assert total_false == pytest.approx(total_true, rel=1e-10, abs=1e-12)
+
+
+def test_lca_direct_solver_matches_bw2calc_total(example_package: Package) -> None:
+    """Direct technosphere solver should match bw2calc totals."""
+    methods = get_lcia_method_names(ei_version="3.11")[:1]
+    assert methods
+
+    def run_case(mode: str) -> float:
+        trails = Trails(example_package, interpolate_annual=False)
+        activity_indices = next(iter(trails.activity_indices.values()))
+        start_act_idx = next(iter(activity_indices.keys()))
+
+        trails.temporal_routing(
+            start_year=2005,
+            start_act_idx=start_act_idx,
+            max_depth=1,
+            min_amount=0.0,
+            show_progress=False,
+            attribute_to_roots=False,
+            debug=False,
+        )
+
+        lca_module.lca(
+            trails=trails,
+            methods=methods,
+            show_progress=False,
+            compute_score=True,
+            store_inventory=False,
+            attribute_to_roots=False,
+            solver_mode=mode,
+        )
+        assert trails.scores is not None
+        return float(trails.scores.data.sum())
+
+    total_bw = run_case("bw2calc")
+    total_direct = run_case("direct")
+    assert total_direct == pytest.approx(total_bw, rel=1e-10, abs=1e-12)
+
+
+def test_lca_invalid_solver_mode_raises(example_trails: Trails) -> None:
+    """Invalid solver mode should raise a clear error."""
+    activity_indices = next(iter(example_trails.activity_indices.values()))
+    start_act_idx = next(iter(activity_indices.keys()))
+
+    example_trails.temporal_routing(
+        start_year=2005,
+        start_act_idx=start_act_idx,
+        max_depth=1,
+        min_amount=0.0,
+        show_progress=False,
+        attribute_to_roots=False,
+        debug=False,
+    )
+
+    with pytest.raises(ValueError, match="solver_mode"):
+        lca_module.lca(
+            trails=example_trails,
+            methods=["dummy"],
+            show_progress=False,
+            compute_score=False,
+            store_inventory=False,
+            attribute_to_roots=False,
+            solver_mode="invalid-mode",  # type: ignore[arg-type]
+        )

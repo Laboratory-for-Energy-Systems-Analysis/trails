@@ -1,6 +1,6 @@
 from __future__ import annotations
 import warnings
-from typing import Any, Dict, List, TYPE_CHECKING
+from typing import Any, Dict, List, Literal, TYPE_CHECKING
 
 import bw2calc as bc
 import numpy as np
@@ -56,6 +56,19 @@ if UmfpackWarning is not None:
     warnings.filterwarnings("ignore", module="scikits")
 
 _CHAR_CACHE: dict = {}
+
+
+class _IdentityProductMap:
+    """Mapping-like object returning row index for integer product IDs."""
+
+    def __init__(self, n: int) -> None:
+        self.n = int(n)
+
+    def __getitem__(self, key: int) -> int:
+        i = int(key)
+        if i < 0 or i >= self.n:
+            raise KeyError(i)
+        return i
 
 
 def _get_mapping_arrays(
@@ -159,6 +172,134 @@ def _build_rhs_matrix_from_root_demands(
             B[int(i), j] += v
 
     return roots, B
+
+
+def _build_direct_technosphere_for_year(
+    trails: Trails,
+    year: int,
+    cache: dict[int, tuple[sp.csc_matrix, _IdentityProductMap, dict[int, tuple[int, float]]]],
+) -> tuple[sp.csc_matrix, _IdentityProductMap, dict[int, tuple[int, float]]]:
+    """Build (or fetch cached) direct technosphere matrix for one solve year."""
+    y = int(year)
+    cached = cache.get(y)
+    if cached is not None:
+        return cached
+
+    context = trails._get_scenario_context(y)
+    if context is None:
+        raise RuntimeError(f"No scenario context available for year={y}")
+    _scenario_year, _label, t = context
+
+    if trails.A is None:
+        raise RuntimeError("Trails.A is None")
+    A_t = trails.A[int(t), :, :]
+    coords = A_t.coords
+    if coords.shape[0] == 3:
+        act_idx = np.asarray(coords[1], dtype=np.int64)
+        prod_idx = np.asarray(coords[2], dtype=np.int64)
+    elif coords.shape[0] == 2:
+        act_idx = np.asarray(coords[0], dtype=np.int64)
+        prod_idx = np.asarray(coords[1], dtype=np.int64)
+    else:
+        raise ValueError(f"Unsupported A coords ndim={coords.shape[0]}")
+
+    data = np.asarray(A_t.data, dtype=np.float64)
+    n_acts = int(trails.A.shape[1])
+    n_prods = int(trails.A.shape[2])
+
+    A_csc = sp.coo_matrix((data, (prod_idx, act_idx)), shape=(n_prods, n_acts)).tocsc()
+    if A_csc.shape[0] != A_csc.shape[1]:
+        raise RuntimeError(
+            f"Direct solver requires square technosphere; got {A_csc.shape} in year={y}"
+        )
+
+    result = (A_csc, _IdentityProductMap(A_csc.shape[0]), {})
+    cache[y] = result
+    return result
+
+
+def _reference_product_from_activity_direct(
+    A_csc: sp.csc_matrix,
+    activity_id: int,
+    cache: dict[int, tuple[int, float]],
+) -> tuple[int, float]:
+    """Resolve reference product row and sign from direct technosphere matrix."""
+    act = int(activity_id)
+    cached = cache.get(act)
+    if cached is not None:
+        return cached
+
+    if act < 0 or act >= int(A_csc.shape[1]):
+        raise KeyError(f"activity_id={act} outside technosphere columns")
+
+    col = A_csc.getcol(act)
+    rows = col.indices
+    vals = np.asarray(col.data, dtype=np.float64)
+    if rows.size == 0:
+        raise ValueError(f"No technosphere entries found for activity_id={act}")
+
+    prod_row: int | None = None
+    prod_value = 0.0
+
+    if 0 <= act < int(A_csc.shape[0]):
+        mask = rows == act
+        if np.any(mask):
+            prod_row = act
+            prod_value = float(vals[mask][0])
+
+    if prod_row is None or prod_value == 0.0:
+        k = int(np.argmin(np.abs(np.abs(vals) - 1.0)))
+        prod_row = int(rows[k])
+        prod_value = float(vals[k])
+
+    result = (int(prod_row), float(prod_value))
+    cache[act] = result
+    return result
+
+
+def _map_activity_demands_to_products_direct(
+    A_csc: sp.csc_matrix,
+    activity_demands: dict[int, float],
+    ref_cache: dict[int, tuple[int, float]],
+) -> dict[int, float]:
+    """Map activity demand to product demand using direct technosphere columns."""
+    if not activity_demands:
+        return {}
+
+    mapped: dict[int, float] = {}
+    for act_id, amount in activity_demands.items():
+        amt = float(amount)
+        act_id = int(act_id)
+        prod_id, prod_value = _reference_product_from_activity_direct(
+            A_csc=A_csc, activity_id=act_id, cache=ref_cache
+        )
+        sign = -1.0 if prod_value < 0.0 else 1.0
+        mapped[int(prod_id)] = mapped.get(int(prod_id), 0.0) + amt * sign
+    return mapped
+
+
+def _extract_supply_fast_direct(
+    supply_array: np.ndarray,
+    *,
+    n_activities: int,
+    min_amount: float = 0.0,
+) -> dict[int, float]:
+    """Extract non-zero activity supplies directly from solved vector."""
+    supply = np.asarray(supply_array, dtype=np.float64)
+    limit = min(int(n_activities), int(supply.shape[0]))
+    if limit <= 0:
+        return {}
+
+    vals = supply[:limit]
+    threshold = float(abs(min_amount))
+    if threshold > 0.0:
+        idx = np.flatnonzero(np.abs(vals) > threshold)
+    else:
+        idx = np.flatnonzero(vals != 0.0)
+    if idx.size == 0:
+        return {}
+
+    return {int(i): float(vals[i]) for i in idx}
 
 
 def solve_many_rhs_umfpack_factorized(
@@ -372,6 +513,7 @@ def lca(
     store_inventory: bool = False,
     compute_score: bool = True,
     ei_version: str = "3.11",
+    solver_mode: Literal["bw2calc", "direct"] = "bw2calc",
 ) -> None:
     """Lca.
 
@@ -391,8 +533,13 @@ def lca(
     :type compute_score: bool
     :param ei_version: Value for `ei_version`.
     :type ei_version: str
+    :param solver_mode: Value for `solver_mode`.
+    :type solver_mode: Literal["bw2calc", "direct"]
     :raises RuntimeError: If an error occurs.
     :raises ValueError: If an error occurs."""
+    if solver_mode not in ("bw2calc", "direct"):
+        raise ValueError("solver_mode must be one of {'bw2calc', 'direct'}")
+
     debug = bool(getattr(trails, "debug", False))
 
     # Routing must be run explicitly before LCA.
@@ -568,6 +715,10 @@ def lca(
             leave=True,
         )
 
+    direct_matrix_cache: dict[
+        int, tuple[sp.csc_matrix, _IdentityProductMap, dict[int, tuple[int, float]]]
+    ] = {}
+
     for solve_year in candidate_years:
         root_ids = None
         root_supply_matrix = None
@@ -580,132 +731,209 @@ def lca(
                 pbar.update(1)
             continue
 
-        dp, _, _, _ = _get_datapackage(
-            dp_cache=datapackage_cache,
-            trails=trails,
-            year=solve_year,
-            zero_bio=True,
-            debug=debug,
-        )
-
         activity_demand = {int(i): float(demand_vector[i]) for i in nonzero_indices}
-
-        lca_obj = bc.LCA(demand=activity_demand, data_objs=[dp])
-        # The zero-bio fast path intentionally omits biosphere resources.
-        # bw2calc warns on empty biosphere in this case; suppress this
-        # specific warning while keeping all other warnings visible.
-        with warnings.catch_warnings():
-            warnings.filterwarnings(
-                "ignore",
-                message=(
-                    r"No valid biosphere flows found\. No inventory results can "
-                    r"be calculated, `lcia` will raise an error"
-                ),
-                category=UserWarning,
-                module=r"bw2calc\.lca_base",
-            )
-            lca_obj.load_lci_data()  # build matrices + dicts
-
-        # Cache mappings once per year
-        act_map = getattr(lca_obj.dicts, "activity", None)
-        prod_map = getattr(lca_obj.dicts, "product", None)
-
-        act_ids, positions = _get_mapping_arrays(act_map)
-        # For RHS building we need the product-id -> row-index dict.
-        product_dict = prod_map  # mapping-like
-
-        functional_unit_demand = _map_activity_demands_to_products(
-            lca_obj,
-            activity_demand,
-        )
-        if not functional_unit_demand:
-            if pbar is not None:
-                pbar.update(1)
-            continue
-
-        # Prepare the technosphere matrix once per year (UMFPACK expects CSC).
-        A_csc = lca_obj.technosphere_matrix
-        if not sp.isspmatrix_csc(A_csc):
-            A_csc = A_csc.tocsc()
-
+        n_activities = int(trails.A.shape[1]) if trails.A is not None else 0
         supplies: list[tuple[Dict[int, float], int | None]] = []
         need_supply_dicts = bool(store_inventory) or (
             bool(compute_score) and not bool(attribute_to_roots)
         )
+        use_direct_solver = bool(solver_mode == "direct")
 
-        if attribute_to_roots:
-            # Build one dense RHS matrix for all roots in this year
-            per_root_demands_raw = root_demands_by_year.get(solve_year, {})
-            per_root_demands: dict[int, dict[int, float]] = {}
-            for root_act, demand in per_root_demands_raw.items():
-                mapped = _map_activity_demands_to_products(
-                    lca_obj,
-                    demand,
-                )
-                if mapped:
-                    per_root_demands[int(root_act)] = mapped
-            roots, rhs_matrix = _build_rhs_matrix_from_root_demands(
-                per_root_demands=per_root_demands,
-                product_dict=product_dict,
-                n=A_csc.shape[0],
-                min_amount=float(min_amount),
+        if use_direct_solver:
+            A_csc, product_dict, ref_prod_cache = _build_direct_technosphere_for_year(
+                trails=trails,
+                year=solve_year,
+                cache=direct_matrix_cache,
             )
+            functional_unit_demand = _map_activity_demands_to_products_direct(
+                A_csc=A_csc,
+                activity_demands=activity_demand,
+                ref_cache=ref_prod_cache,
+            )
+            if not functional_unit_demand:
+                if pbar is not None:
+                    pbar.update(1)
+                continue
 
-            if roots:
-                if SOLVER == "pypardiso":
-                    # Keep the PARDISO path for environments that rely on it.
-                    for root_act in roots:
-                        root_demand = per_root_demands[root_act]
-                        lca_obj.build_demand_array(root_demand)
-                        lca_obj.supply_array = lca_obj.solve_linear_system()
-                        if need_supply_dicts:
-                            if act_ids is None or positions is None:
-                                supply_total = _extract_supply_fast(lca_obj, min_amount)
-                            else:
-                                supply_total = _extract_supply_fast_cached(
-                                    lca_obj.supply_array, act_ids, positions, min_amount
-                                )
-                            if supply_total:
-                                supplies.append((supply_total, int(root_act)))
-                else:
-                    # UMFPACK/SciPy: factorize once and solve all RHS vectors.
+            if attribute_to_roots:
+                per_root_demands_raw = root_demands_by_year.get(solve_year, {})
+                per_root_demands: dict[int, dict[int, float]] = {}
+                for root_act, demand in per_root_demands_raw.items():
+                    mapped = _map_activity_demands_to_products_direct(
+                        A_csc=A_csc,
+                        activity_demands=demand,
+                        ref_cache=ref_prod_cache,
+                    )
+                    if mapped:
+                        per_root_demands[int(root_act)] = mapped
+                roots, rhs_matrix = _build_rhs_matrix_from_root_demands(
+                    per_root_demands=per_root_demands,
+                    product_dict=product_dict,  # type: ignore[arg-type]
+                    n=A_csc.shape[0],
+                    min_amount=float(min_amount),
+                )
+
+                if roots:
                     root_supply_matrix = solve_many_rhs_umfpack_factorized(
                         A_csc, rhs_matrix, cache=umfpack_cache
                     )
-                    root_ids = np.asarray(
-                        roots, dtype=np.int64
-                    )  # Column order of RHS and solution.
-
+                    root_ids = np.asarray(roots, dtype=np.int64)
                     if need_supply_dicts:
                         for j, root_act in enumerate(roots):
                             supply_vec = root_supply_matrix[:, j]
-                            if act_ids is None or positions is None:
-                                # Fallback: emulate lca_obj.supply_array for extractor
-                                lca_obj.supply_array = supply_vec
-                                supply_total = _extract_supply_fast(lca_obj, min_amount)
-                            else:
-                                supply_total = _extract_supply_fast_cached(
-                                    supply_vec, act_ids, positions, min_amount
-                                )
+                            supply_total = _extract_supply_fast_direct(
+                                supply_vec,
+                                n_activities=n_activities,
+                                min_amount=min_amount,
+                            )
                             if supply_total:
                                 supplies.append((supply_total, int(root_act)))
+            else:
+                rhs = np.zeros((A_csc.shape[0], 1), dtype=np.float64)
+                for prod_id, v in functional_unit_demand.items():
+                    rhs[int(product_dict[int(prod_id)]), 0] += float(v)
+                X = solve_many_rhs_umfpack_factorized(A_csc, rhs, cache=None)
+                supply_vec = X[:, 0]
+                if need_supply_dicts:
+                    supply_total = _extract_supply_fast_direct(
+                        supply_vec,
+                        n_activities=n_activities,
+                        min_amount=min_amount,
+                    )
+                    if supply_total:
+                        supplies.append((supply_total, None))
 
         else:
-            # Original single-demand path (no per-root attribution)
-            lca_obj.build_demand_array(functional_unit_demand)
-            if SOLVER != "pypardiso":
-                lca_obj.decompose_technosphere()
-            lca_obj.supply_array = lca_obj.solve_linear_system()
+            dp, _, _, _ = _get_datapackage(
+                dp_cache=datapackage_cache,
+                trails=trails,
+                year=solve_year,
+                zero_bio=True,
+                debug=debug,
+            )
 
-            if need_supply_dicts:
-                if act_ids is None or positions is None:
-                    supply_total = _extract_supply_fast(lca_obj, min_amount)
-                else:
-                    supply_total = _extract_supply_fast_cached(
-                        lca_obj.supply_array, act_ids, positions, min_amount
+            lca_obj = bc.LCA(demand=activity_demand, data_objs=[dp])
+            # The zero-bio fast path intentionally omits biosphere resources.
+            # bw2calc warns on empty biosphere in this case; suppress this
+            # specific warning while keeping all other warnings visible.
+            with warnings.catch_warnings():
+                warnings.filterwarnings(
+                    "ignore",
+                    message=(
+                        r"No valid biosphere flows found\. No inventory results can "
+                        r"be calculated, `lcia` will raise an error"
+                    ),
+                    category=UserWarning,
+                    module=r"bw2calc\.lca_base",
+                )
+                lca_obj.load_lci_data()  # build matrices + dicts
+
+            # Cache mappings once per year
+            act_map = getattr(lca_obj.dicts, "activity", None)
+            prod_map = getattr(lca_obj.dicts, "product", None)
+
+            act_ids, positions = _get_mapping_arrays(act_map)
+            # For RHS building we need the product-id -> row-index dict.
+            product_dict = prod_map  # mapping-like
+
+            functional_unit_demand = _map_activity_demands_to_products(
+                lca_obj,
+                activity_demand,
+            )
+            if not functional_unit_demand:
+                if pbar is not None:
+                    pbar.update(1)
+                continue
+
+            # Prepare the technosphere matrix once per year (UMFPACK expects CSC).
+            A_csc = lca_obj.technosphere_matrix
+            if not sp.isspmatrix_csc(A_csc):
+                A_csc = A_csc.tocsc()
+
+            if attribute_to_roots:
+                # Build one dense RHS matrix for all roots in this year
+                per_root_demands_raw = root_demands_by_year.get(solve_year, {})
+                per_root_demands: dict[int, dict[int, float]] = {}
+                for root_act, demand in per_root_demands_raw.items():
+                    mapped = _map_activity_demands_to_products(
+                        lca_obj,
+                        demand,
                     )
-                if supply_total:
-                    supplies.append((supply_total, None))
+                    if mapped:
+                        per_root_demands[int(root_act)] = mapped
+                roots, rhs_matrix = _build_rhs_matrix_from_root_demands(
+                    per_root_demands=per_root_demands,
+                    product_dict=product_dict,
+                    n=A_csc.shape[0],
+                    min_amount=float(min_amount),
+                )
+
+                if roots:
+                    if SOLVER == "pypardiso":
+                        # Keep the PARDISO path for environments that rely on it.
+                        for root_act in roots:
+                            root_demand = per_root_demands[root_act]
+                            lca_obj.build_demand_array(root_demand)
+                            lca_obj.supply_array = lca_obj.solve_linear_system()
+                            if need_supply_dicts:
+                                if act_ids is None or positions is None:
+                                    supply_total = _extract_supply_fast(
+                                        lca_obj, min_amount
+                                    )
+                                else:
+                                    supply_total = _extract_supply_fast_cached(
+                                        lca_obj.supply_array,
+                                        act_ids,
+                                        positions,
+                                        min_amount,
+                                    )
+                                if supply_total:
+                                    supplies.append((supply_total, int(root_act)))
+                    else:
+                        # UMFPACK/SciPy: factorize once and solve all RHS vectors.
+                        root_supply_matrix = solve_many_rhs_umfpack_factorized(
+                            A_csc, rhs_matrix, cache=umfpack_cache
+                        )
+                        root_ids = np.asarray(
+                            roots, dtype=np.int64
+                        )  # Column order of RHS and solution.
+
+                        if need_supply_dicts:
+                            for j, root_act in enumerate(roots):
+                                supply_vec = root_supply_matrix[:, j]
+                                if act_ids is None or positions is None:
+                                    # Fallback: emulate lca_obj.supply_array for extractor
+                                    lca_obj.supply_array = supply_vec
+                                    supply_total = _extract_supply_fast(
+                                        lca_obj, min_amount
+                                    )
+                                else:
+                                    supply_total = _extract_supply_fast_cached(
+                                        supply_vec, act_ids, positions, min_amount
+                                    )
+                                if supply_total:
+                                    supplies.append((supply_total, int(root_act)))
+
+                else:
+                    if pbar is not None:
+                        pbar.update(1)
+                    continue
+            else:
+                # Original single-demand path (no per-root attribution)
+                lca_obj.build_demand_array(functional_unit_demand)
+                if SOLVER != "pypardiso":
+                    lca_obj.decompose_technosphere()
+                lca_obj.supply_array = lca_obj.solve_linear_system()
+
+                if need_supply_dicts:
+                    if act_ids is None or positions is None:
+                        supply_total = _extract_supply_fast(lca_obj, min_amount)
+                    else:
+                        supply_total = _extract_supply_fast_cached(
+                            lca_obj.supply_array, act_ids, positions, min_amount
+                        )
+                    if supply_total:
+                        supplies.append((supply_total, None))
 
         # ---- Inventory ----
         if supplies and store_inventory:
