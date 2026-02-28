@@ -1,5 +1,6 @@
 import numpy as np
 import pytest
+import sparse
 
 from trails.trails import Trails
 
@@ -202,6 +203,40 @@ def test_reset_inventory_uses_inventory_offset_bounds(example_trails: Trails) ->
     assert int(years[0]) == int(example_trails.min_year) + int(min_inv)
     assert int(years[-1]) == int(example_trails.max_year) + int(max_inv) + 500
     assert int(years[0]) <= int(example_trails.min_year) + int(min_bio)
+
+
+def test_inventory_root_reduce_uses_int64_coords(example_trails: Trails) -> None:
+    """Inventory reductions should work with large shapes and root attribution."""
+    example_trails.A = sparse.COO(
+        np.array([[0], [0], [0]], dtype=np.int64),
+        np.array([1.0], dtype=np.float32),
+        shape=(1, 42000, 1),
+    )
+    example_trails.B = sparse.COO(
+        np.array([[0], [0], [0]], dtype=np.int64),
+        np.array([1.0], dtype=np.float32),
+        shape=(1, 42000, 50000),
+    )
+
+    example_trails.reset_inventory(attribute_to_roots=True)
+    assert example_trails._inventory_years is not None
+    y0 = int(example_trails._inventory_years[0])
+
+    example_trails._append_inventory_entries_bulk(
+        np.array([0, 1, 2], dtype=np.int64),
+        np.array([y0, y0, y0], dtype=np.int64),
+        np.array([0, 1, 2], dtype=np.int64),
+        np.array([1.0, 2.0, 3.0], dtype=np.float64),
+        root_activity=np.array([0, 1, 2], dtype=np.int64),
+    )
+
+    inv = example_trails.finalize_inventory()
+    assert isinstance(inv.data, sparse.COO)
+    assert inv.data.coords.dtype == np.int64
+
+    reduced = inv.sum(dim=["activity"]).transpose("flow", "year", "root activity")
+    assert isinstance(reduced.data, sparse.COO)
+    assert reduced.data.coords.dtype == np.int64
 
 
 def test_temporal_traversal_basic(example_trails: Trails) -> None:

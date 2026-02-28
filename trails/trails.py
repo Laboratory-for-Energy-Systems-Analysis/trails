@@ -1201,12 +1201,9 @@ class Trails:
             else:
                 shape = (n_activities, n_flows, n_years)
 
-            max_index = max(int(dim) - 1 for dim in shape)
-            coord_dtype = np.dtype(getattr(self, "index_dtype", np.int64))
-            if coord_dtype not in (np.int32, np.int64):
-                coord_dtype = np.int64
-            if coord_dtype == np.int32 and max_index > np.iinfo(np.int32).max:
-                coord_dtype = np.int64
+            # Keep inventory coordinates int64 to avoid uint64 reduce index
+            # promotion in sparse reductions on large reshaped arrays.
+            coord_dtype = np.int64
 
             if keys_agg.size:
                 if has_root:
