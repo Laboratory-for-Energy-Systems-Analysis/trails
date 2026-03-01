@@ -1169,28 +1169,44 @@ class Trails:
         has_root = bool(getattr(self, "_inventory_has_root", False))
 
         if self._inv_key_parts:
+            if len(self._inv_key_parts) != len(self._inv_value_parts):
+                raise RuntimeError(
+                    "Inventory key/value builders are inconsistent. "
+                    "Call reset_inventory() and rerun lca()."
+                )
+
             keys = np.concatenate(self._inv_key_parts).astype(np.int64, copy=False)
             data = np.concatenate(self._inv_value_parts).astype(
                 self.value_dtype, copy=False
             )
 
-            if keys.size:
-                order = np.argsort(keys, kind="quicksort")
-                keys_sorted = keys[order]
-                data_sorted = data[order]
+            # Free builder references once contiguous arrays are materialized.
+            self._inv_key_parts.clear()
+            self._inv_value_parts.clear()
 
-                first = np.empty(keys_sorted.size, dtype=bool)
+            if keys.size:
+                # Reassign sorted arrays to drop pre-sort buffers earlier and
+                # keep the fast argsort path.
+                order = np.argsort(keys, kind="quicksort")
+                keys = keys[order]
+                data = data[order]
+                del order
+
+                first = np.empty(keys.size, dtype=bool)
                 first[0] = True
-                first[1:] = keys_sorted[1:] != keys_sorted[:-1]
+                first[1:] = keys[1:] != keys[:-1]
                 group_starts = np.flatnonzero(first)
-                data_agg = np.add.reduceat(data_sorted, group_starts).astype(
+                data_agg = np.add.reduceat(data, group_starts).astype(
                     self.value_dtype, copy=False
                 )
-                keys_agg = keys_sorted[group_starts]
+                keys_agg = keys[group_starts].copy()
 
                 keep = data_agg != 0.0
                 keys_agg = keys_agg[keep]
                 data_agg = data_agg[keep]
+
+                del first
+                del group_starts
             else:
                 keys_agg = np.empty(0, dtype=np.int64)
                 data_agg = np.empty(0, dtype=self.value_dtype)
@@ -1206,23 +1222,25 @@ class Trails:
             coord_dtype = np.int64
 
             if keys_agg.size:
+                # Decode linearized keys in-place to avoid allocating several
+                # large temporary coordinate arrays.
                 if has_root:
-                    q, root = np.divmod(keys_agg, n_activities)
-                else:
-                    root = None
+                    coords = np.empty((4, keys_agg.size), dtype=coord_dtype)
                     q = keys_agg
-
-                q, year_idx = np.divmod(q, n_years)
-                act_idx, flow_idx = np.divmod(q, n_flows)
-
-                if has_root and root is not None:
-                    coords = np.vstack([act_idx, flow_idx, year_idx, root]).astype(
-                        coord_dtype, copy=False
-                    )
+                    np.remainder(q, n_activities, out=coords[3])
+                    np.floor_divide(q, n_activities, out=q)
+                    np.remainder(q, n_years, out=coords[2])
+                    np.floor_divide(q, n_years, out=q)
+                    np.remainder(q, n_flows, out=coords[1])
+                    np.floor_divide(q, n_flows, out=coords[0])
                 else:
-                    coords = np.vstack([act_idx, flow_idx, year_idx]).astype(
-                        coord_dtype, copy=False
-                    )
+                    coords = np.empty((3, keys_agg.size), dtype=coord_dtype)
+                    q = keys_agg
+                    np.remainder(q, n_years, out=coords[2])
+                    np.floor_divide(q, n_years, out=q)
+                    np.remainder(q, n_flows, out=coords[1])
+                    np.floor_divide(q, n_flows, out=coords[0])
+
                 inv = sparse.COO(
                     coords,
                     data_agg,
@@ -1255,6 +1273,9 @@ class Trails:
             coords_xr["root activity"] = np.arange(n_activities, dtype=int)
 
         self.inventory = xr.DataArray(inv, dims=dims, coords=coords_xr)
+        # Builders are no longer needed once inventory is finalized.
+        self._inv_key_parts = []
+        self._inv_value_parts = []
         return self.inventory
 
     # ------------------------------------------------------------------
@@ -3788,37 +3809,54 @@ class Trails:
         ported_kernel = self._get_numba_ported_kernel()
 
         queued_act_values: list[int] = []
-        queued_year_parts: list[np.ndarray] = []
+        queued_year_parts: list[np.ndarray | int] = []
         queued_flow_parts: list[np.ndarray] = []
         queued_value_parts: list[np.ndarray] = []
         queued_root_values: list[int] = []
         queued_nnz = 0
-        flush_nnz = 250_000
+        flush_nnz = 1_000_000
 
         def flush_queued_inventory() -> None:
             nonlocal queued_nnz
             if not queued_flow_parts:
                 return
             if len(queued_flow_parts) == 1:
-                year_all = queued_year_parts[0]
                 flow_all = queued_flow_parts[0]
                 value_all = queued_value_parts[0]
                 total_nnz = int(flow_all.size)
+                year_part = queued_year_parts[0]
+                if isinstance(year_part, np.ndarray):
+                    year_all = year_part
+                else:
+                    year_all = np.empty(total_nnz, dtype=np.int64)
+                    year_all.fill(int(year_part))
+                act_all = np.empty(total_nnz, dtype=np.int64)
+                act_all.fill(int(queued_act_values[0]))
+                if has_root:
+                    root_all = np.empty(total_nnz, dtype=np.int64)
+                    root_all.fill(int(queued_root_values[0]))
+                else:
+                    root_all = None
             else:
-                year_all = np.concatenate(queued_year_parts)
                 flow_all = np.concatenate(queued_flow_parts)
                 value_all = np.concatenate(queued_value_parts)
                 total_nnz = int(flow_all.size)
 
-            act_all = np.empty(total_nnz, dtype=np.int64)
-            root_all = np.empty(total_nnz, dtype=np.int64) if has_root else None
-            cursor = 0
-            for i, flow_part in enumerate(queued_flow_parts):
-                n = int(flow_part.size)
-                act_all[cursor : cursor + n] = int(queued_act_values[i])
-                if has_root and root_all is not None:
-                    root_all[cursor : cursor + n] = int(queued_root_values[i])
-                cursor += n
+                year_all = np.empty(total_nnz, dtype=np.int64)
+                act_all = np.empty(total_nnz, dtype=np.int64)
+                root_all = np.empty(total_nnz, dtype=np.int64) if has_root else None
+                cursor = 0
+                for i, flow_part in enumerate(queued_flow_parts):
+                    n = int(flow_part.size)
+                    year_part = queued_year_parts[i]
+                    if isinstance(year_part, np.ndarray):
+                        year_all[cursor : cursor + n] = year_part
+                    else:
+                        year_all[cursor : cursor + n] = int(year_part)
+                    act_all[cursor : cursor + n] = int(queued_act_values[i])
+                    if has_root and root_all is not None:
+                        root_all[cursor : cursor + n] = int(queued_root_values[i])
+                    cursor += n
 
             append_bulk(
                 act_all,
@@ -4224,11 +4262,29 @@ class Trails:
                     flows_anchor = np.concatenate(anchor_flow_parts)
                     values_anchor = np.concatenate(anchor_value_parts)
                 if flows_anchor.size:
-                    row_flow_parts.append(flows_anchor)
-                    row_year_parts.append(
-                        np.full(flows_anchor.size, int(base_year), dtype=np.int64)
-                    )
-                    row_value_parts.append(values_anchor)
+                    nnz_anchor = int(flows_anchor.size)
+                    queued_act_values.append(int(inventory_act))
+                    queued_year_parts.append(int(base_year))
+                    if (
+                        flows_anchor.dtype == np.int64
+                        and flows_anchor.flags.c_contiguous
+                    ):
+                        queued_flow_parts.append(flows_anchor)
+                    else:
+                        queued_flow_parts.append(
+                            np.asarray(flows_anchor, dtype=np.int64, order="C")
+                        )
+                    if values_anchor.dtype == np.float64:
+                        queued_value_parts.append(values_anchor)
+                    else:
+                        queued_value_parts.append(
+                            np.asarray(values_anchor, dtype=np.float64)
+                        )
+                    if has_root:
+                        queued_root_values.append(int(root_activity))
+                    queued_nnz += nnz_anchor
+                    if queued_nnz >= flush_nnz:
+                        flush_queued_inventory()
 
             if row_flow_parts:
                 if len(row_flow_parts) == 1:
@@ -4240,16 +4296,27 @@ class Trails:
                     years_all = np.concatenate(row_year_parts)
                     values_all = np.concatenate(row_value_parts)
 
-                nnz_all = int(flows_all.size)
-                if nnz_all:
+                if flows_all.size:
+                    nnz_all = int(flows_all.size)
                     queued_act_values.append(int(inventory_act))
-                    queued_year_parts.append(
-                        np.asarray(years_all, dtype=np.int64, order="C")
-                    )
-                    queued_flow_parts.append(
-                        np.asarray(flows_all, dtype=np.int64, order="C")
-                    )
-                    queued_value_parts.append(np.asarray(values_all, dtype=np.float64))
+                    if years_all.dtype == np.int64 and years_all.flags.c_contiguous:
+                        queued_year_parts.append(years_all)
+                    else:
+                        queued_year_parts.append(
+                            np.asarray(years_all, dtype=np.int64, order="C")
+                        )
+                    if flows_all.dtype == np.int64 and flows_all.flags.c_contiguous:
+                        queued_flow_parts.append(flows_all)
+                    else:
+                        queued_flow_parts.append(
+                            np.asarray(flows_all, dtype=np.int64, order="C")
+                        )
+                    if values_all.dtype == np.float64:
+                        queued_value_parts.append(values_all)
+                    else:
+                        queued_value_parts.append(
+                            np.asarray(values_all, dtype=np.float64)
+                        )
                     if has_root:
                         queued_root_values.append(int(root_activity))
                     queued_nnz += nnz_all

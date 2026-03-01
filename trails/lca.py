@@ -1,4 +1,5 @@
 from __future__ import annotations
+import gc
 import warnings
 from typing import Any, Dict, List, Literal, TYPE_CHECKING
 
@@ -1122,6 +1123,21 @@ def lca(
                         debug=debug,
                         method_idx=method_idx,
                     )
+
+    # Large local containers are no longer needed past this point; clear them
+    # before finalize_* to reduce peak RSS during inventory/scores materialization.
+    frontier.clear()
+    provenance.clear()
+    injected_supply_by_year_act.clear()
+    injected_supply_prov_by_year_act.clear()
+    frontier_by_year.clear()
+    root_demands_by_year.clear()
+    root_injected_by_year.clear()
+    datapackage_cache.clear()
+    direct_matrix_cache.clear()
+    if "injected_by_raw_year" in locals():
+        injected_by_raw_year.clear()
+    gc.collect()
 
     if store_inventory:
         trails.finalize_inventory()
