@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import copy
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from functools import lru_cache
 import os
 from pathlib import Path
 from typing import Any, Dict, Tuple
@@ -61,15 +63,111 @@ def _safe_nanpercentile(values: np.ndarray, quantiles: list[float]) -> np.ndarra
     return np.nan_to_num(out, nan=0.0)
 
 
+@lru_cache(maxsize=2)
+def _build_fair_template_cached(
+    *,
+    scenario: str,
+    start_year: float,
+    end_year: float,
+    config_csv: str,
+    properties_csv: str,
+    species_key: tuple[str, ...],
+    configs_key: tuple[object, ...],
+    ghg_method: str | None,
+    temperature_prescribed: bool | None,
+) -> fair.FAIR:
+    """Build and cache a configured FaIR template for repeated perturbation runs."""
+    species, properties = read_properties(filename=properties_csv, species=list(species_key))
+
+    if temperature_prescribed is None:
+        f = fair.FAIR()
+    else:
+        f = fair.FAIR(temperature_prescribed=bool(temperature_prescribed))
+    if ghg_method is not None:
+        f.ghg_method = ghg_method
+    f.define_time(float(start_year), float(end_year), 1)
+    f.define_scenarios([str(scenario)])
+    f.define_configs(list(configs_key))
+    f.define_species(species, properties)
+    f.allocate()
+    f.fill_species_configs(filename=properties_csv)
+    f.override_defaults(config_csv)
+
+    # Initialize arrays to stable values before each deep-copied run.
+    initialise(f.temperature, 0)
+    initialise(f.forcing, 0)
+    return f
+
+
+def _fill_emissions_from_df_fast(
+    f: fair.FAIR,
+    emissions_df: pd.DataFrame,
+    *,
+    scenario: str,
+    year_cols: list[str],
+    year_vals: list[float],
+) -> None:
+    """Fast path for filling FaIR emissions without per-species xarray indexing."""
+    from fair.exceptions import DuplicateScenarioError
+    from fair.io.fill_from import _emissions_unit_convert
+
+    if emissions_df.empty:
+        return
+
+    dup_counts = emissions_df.groupby("variable", sort=False).size()
+    duplicates = dup_counts[dup_counts > 1]
+    if not duplicates.empty:
+        specie = str(duplicates.index[0])
+        raise DuplicateScenarioError(
+            "Input data for emissions contains duplicate "
+            f"rows for variable='{specie}, scenario='{scenario}'."
+        )
+
+    df_by_var = emissions_df.set_index("variable", drop=False)
+    times = np.asarray(year_vals, dtype=float)
+    target_times = np.asarray(f.timepoints, dtype=float)
+    same_grid = times.shape == target_times.shape and np.allclose(times, target_times)
+
+    emissions_data = np.asarray(f.emissions.values, dtype=float)
+    for specie_idx, specie in enumerate(f.species):
+        if f.properties_df.loc[specie, "input_mode"] != "emissions":
+            continue
+        if specie not in df_by_var.index:
+            continue
+
+        row = df_by_var.loc[specie]
+        data_in = row[year_cols].to_numpy(dtype=float, copy=False)
+        if same_grid:
+            data = data_in
+        else:
+            data = np.interp(target_times, times, data_in, left=np.nan, right=np.nan)
+
+        unit = str(row["unit"])
+        is_ghg = bool(f.properties_df.loc[specie, "greenhouse_gas"])
+        converted = _emissions_unit_convert(data, unit, specie, is_ghg)
+        emissions_data[:, 0, :, specie_idx] = converted[:, None]
+
+    f.emissions.data = emissions_data
+
+
 def _inventory_emissions_by_fair_species(
-    trails: Any,
+    inv_data: sparse.COO,
+    inv_years: list[int],
+    n_flow: int,
+    flow_pos_to_key: dict[int, tuple[str, str, str] | str],
     species_map: dict[object, str],
     signs: dict[object, float],
 ) -> pd.DataFrame:
     """inventory emissions by fair species.
 
-    :param trails: Value for `trails`.
-    :type trails: Any
+    :param inv_data: Activity-reduced inventory as flow/year/root sparse COO.
+    :type inv_data: sparse.COO
+    :param inv_years: Inventory years (matching inv_data year axis).
+    :type inv_years: list[int]
+    :param n_flow: Number of flows.
+    :type n_flow: int
+    :param flow_pos_to_key: Flow-position mapping to biosphere flow keys.
+    :type flow_pos_to_key: dict[int, tuple[str, str, str] | str]
     :param species_map: Value for `species_map`.
     :type species_map: dict[object, str]
     :param signs: Value for `signs`.
@@ -77,74 +175,56 @@ def _inventory_emissions_by_fair_species(
     :returns: Return value.
     :rtype: pd.DataFrame
     :raises ValueError: If an error occurs."""
-    inv = trails.inventory
-    if inv is None:
-        raise ValueError("Trails.inventory is empty; run LCA first.")
+    if not flow_pos_to_key:
+        return pd.DataFrame(index=inv_years)
 
-    if "root activity" in inv.dims:
-        inv_sum = inv.sum(dim=["activity", "root activity"])
-    else:
-        inv_sum = inv.sum(dim=["activity"])
+    n_year = len(inv_years)
+    species_order: list[str] = []
+    species_to_idx: dict[str, int] = {}
+    flow_to_species = np.full(n_flow, -1, dtype=int)
+    flow_to_sign = np.ones(n_flow, dtype=float)
 
-    inv_sum = inv_sum.transpose("flow", "year")
-    years = [int(y) for y in inv_sum.coords["year"].values.tolist()]
-
-    # flow position -> name
-    flow_coord = inv_sum.coords["flow"].values
-    coord_value_to_pos = {int(v): i for i, v in enumerate(flow_coord)}
-
-    flow_pos_to_key: dict[int, tuple[str, str, str] | str] = {}
-    for _label, meta in getattr(trails, "biosphere_indices", {}).items():
-        for fid, md in meta.items():
-            if not isinstance(md, dict):
-                continue
-            name = md.get("name")
-            if not name:
-                continue
-            compartment = (md.get("compartment") or "").strip()
-            subcompartment = (md.get("subcompartment") or "").strip()
-            flow_key = (str(name), compartment, subcompartment)
-            fid_int = int(fid)
-            if fid_int in coord_value_to_pos:
-                pos = coord_value_to_pos[fid_int]
-            elif 0 <= fid_int < len(flow_coord):
-                pos = fid_int
-            else:
-                continue
-            flow_pos_to_key.setdefault(pos, flow_key)
-
-    data = inv_sum.data
-    if hasattr(data, "todense"):
-        dense = pd.DataFrame(
-            data.todense(), index=range(len(flow_coord)), columns=years
-        )
-    else:
-        dense = pd.DataFrame(data, index=range(len(flow_coord)), columns=years)
-
-    agg: Dict[str, pd.Series] = {}
     for pos, flow_key in flow_pos_to_key.items():
         fair_species = species_map.get(flow_key)
         if fair_species is None and isinstance(flow_key, tuple):
             fair_species = species_map.get(flow_key[0])
         if fair_species is None:
             continue
-        sign = float(
+        specie = str(fair_species)
+        if specie not in species_to_idx:
+            species_to_idx[specie] = len(species_order)
+            species_order.append(specie)
+        flow_to_species[int(pos)] = species_to_idx[specie]
+        flow_to_sign[int(pos)] = float(
             signs.get(
                 flow_key,
-                signs.get(
-                    flow_key[0] if isinstance(flow_key, tuple) else flow_key, 1.0
-                ),
+                signs.get(flow_key[0] if isinstance(flow_key, tuple) else flow_key, 1.0),
             )
         )
-        series = dense.loc[pos]
-        if sign != 1.0:
-            series = series.abs() * sign
-        agg[fair_species] = agg.get(fair_species, 0.0) + series
 
-    if not agg:
-        return pd.DataFrame(index=years)
+    if not species_order:
+        return pd.DataFrame(index=inv_years)
 
-    out = pd.DataFrame(agg)
+    coo = inv_data
+
+    flow_idx = coo.coords[0].astype(int, copy=False)
+    year_idx = coo.coords[1].astype(int, copy=False)
+    vals = coo.data.astype(float, copy=False)
+
+    specie_idx = flow_to_species[flow_idx]
+    valid = specie_idx >= 0
+    agg = np.zeros((len(species_order), n_year), dtype=float)
+    if np.any(valid):
+        specie_valid = specie_idx[valid]
+        year_valid = year_idx[valid]
+        vals_valid = vals[valid]
+        signs_valid = flow_to_sign[flow_idx[valid]]
+        signed_vals = np.where(signs_valid == 1.0, vals_valid, np.abs(vals_valid) * signs_valid)
+        flat_idx = specie_valid * n_year + year_valid
+        flat = agg.reshape(-1)
+        np.add.at(flat, flat_idx, signed_vals)
+
+    out = pd.DataFrame(agg.T, index=inv_years, columns=species_order)
     out.index.name = "year"
     return out
 
@@ -217,7 +297,6 @@ def _run_fair_emissions(
             if properties_csv is None:
                 properties_csv = _default_properties_file()
     properties_csv = Path(properties_csv)
-    species, properties = read_properties(filename=str(properties_csv), species=species)
 
     if config_csv is None:
         config_csv = _find_any_fair_repo_file(
@@ -274,24 +353,25 @@ def _run_fair_emissions(
             config_name = cfg.index[0]
         configs = [_normalize_config_name(config_name)]
 
-    if temperature_prescribed is None:
-        f = fair.FAIR()
-    else:
-        f = fair.FAIR(temperature_prescribed=bool(temperature_prescribed))
-    if ghg_method is not None:
-        f.ghg_method = ghg_method
-    f.define_time(start_year, end_year, 1)
-    f.define_scenarios([scenario])
-    f.define_configs(configs)
-    f.define_species(species, properties)
-    f.allocate()
-    f.fill_species_configs(filename=str(properties_csv))
-    f.override_defaults(str(config_csv))
-    # Initialize temperature and forcing arrays to avoid NaNs in FaIR outputs.
-
-    initialise(f.temperature, 0)
-    initialise(f.forcing, 0)
-    f.fill_from_pandas(mode="emissions", df=df)
+    template = _build_fair_template_cached(
+        scenario=str(scenario),
+        start_year=float(start_year),
+        end_year=float(end_year),
+        config_csv=str(config_csv.resolve()),
+        properties_csv=str(properties_csv.resolve()),
+        species_key=tuple(str(s) for s in species),
+        configs_key=tuple(configs),
+        ghg_method=ghg_method,
+        temperature_prescribed=temperature_prescribed,
+    )
+    f = copy.deepcopy(template)
+    _fill_emissions_from_df_fast(
+        f,
+        df,
+        scenario=str(scenario),
+        year_cols=year_cols,
+        year_vals=year_vals,
+    )
     f.run(progress=progress)
     if not np.isfinite(f.forcing.values).any():
         forcing = _compute_ghg_forcing_from_concentration(f)
@@ -561,6 +641,67 @@ def run_fair_delta_rf(
             cfg = pd.read_csv(cfg_path, index_col=0)
             config_names = [str(x) for x in cfg.index.tolist()]
 
+    inv = trails.inventory
+    if inv is None:
+        raise ValueError("Trails.inventory is empty; run LCA first.")
+
+    if "root activity" not in inv.dims:
+        raise ValueError("Trails.inventory must include 'root activity' for delta RF.")
+
+    dims = list(inv.dims)
+    if "activity" not in dims or "flow" not in dims or "year" not in dims:
+        raise ValueError("Trails.inventory must include activity/flow/year dimensions.")
+    activity_axis = dims.index("activity")
+    flow_axis = dims.index("flow")
+    year_axis = dims.index("year")
+    root_axis = dims.index("root activity")
+
+    inv_raw = inv.data
+    if isinstance(inv_raw, sparse.COO):
+        coo_full = inv_raw
+    else:
+        coo_full = sparse.COO.from_numpy(np.asarray(inv_raw, dtype=float))
+
+    # Reduce once over activity and reuse this COO for both species deltas and
+    # per-flow/root allocations to avoid duplicate sparse reductions.
+    inv_data = coo_full.sum(axis=activity_axis)
+    remaining_axes = [i for i in range(coo_full.ndim) if i != activity_axis]
+    flow_new_axis = remaining_axes.index(flow_axis)
+    year_new_axis = remaining_axes.index(year_axis)
+    root_new_axis = remaining_axes.index(root_axis)
+    if inv_data.ndim != 3:
+        raise ValueError("Unexpected inventory shape after aggregation to flow/year/root.")
+    if (flow_new_axis, year_new_axis, root_new_axis) != (0, 1, 2):
+        inv_data = inv_data.transpose((flow_new_axis, year_new_axis, root_new_axis))
+
+    n_flow = int(inv.sizes["flow"])
+    n_root = int(inv.sizes["root activity"])
+
+    flow_coord = inv.coords["flow"].values
+    coord_value_to_pos = {int(v): i for i, v in enumerate(flow_coord)}
+
+    flow_pos_to_key: dict[int, tuple[str, str, str] | str] = {}
+    for _label, meta in getattr(trails, "biosphere_indices", {}).items():
+        for fid, md in meta.items():
+            if not isinstance(md, dict):
+                continue
+            name = md.get("name")
+            if not name:
+                continue
+            compartment = (md.get("compartment") or "").strip()
+            subcompartment = (md.get("subcompartment") or "").strip()
+            flow_key = (str(name), compartment, subcompartment)
+            key = int(fid)
+            if key in coord_value_to_pos:
+                pos = coord_value_to_pos[key]
+            elif 0 <= key < len(flow_coord):
+                pos = key
+            else:
+                continue
+            flow_pos_to_key.setdefault(pos, flow_key)
+
+    inv_years = [int(y) for y in inv.coords["year"].values.tolist()]
+
     # Baseline run
     f_base = _run_fair_emissions(
         df,
@@ -575,12 +716,18 @@ def run_fair_delta_rf(
         progress=False,
     )
 
-    # Build perturbations from Trails inventory
-    delta_by_species = _inventory_emissions_by_fair_species(trails, species_map, signs)
+    # Build perturbations from activity-reduced inventory (single sparse reduction path).
+    delta_by_species = _inventory_emissions_by_fair_species(
+        inv_data,
+        inv_years,
+        n_flow,
+        flow_pos_to_key,
+        species_map,
+        signs,
+    )
     no_perturbation = delta_by_species.empty
-    if no_perturbation:
-        if scale_factor is None:
-            scale_factor = 1.0
+    if no_perturbation and scale_factor is None:
+        scale_factor = 1.0
 
     # Determine if the emissions baseline uses half-year columns (e.g., 1750.5)
     base_year_cols, base_year_vals = _extract_year_columns(df)
@@ -753,51 +900,11 @@ def run_fair_delta_rf(
     fair_years = [float(y) for y in forcing_base.coords["timebounds"].values.tolist()]
     year_to_fair_idx = {y: i for i, y in enumerate(fair_years)}
 
-    inv = trails.inventory
-    if inv is None:
-        raise ValueError("Trails.inventory is empty; run LCA first.")
-
-    if "root activity" not in inv.dims:
-        raise ValueError("Trails.inventory must include 'root activity' for delta RF.")
-
-    inv_sum = inv.sum(dim=["activity"]).transpose("flow", "year", "root activity")
-    inv_data = inv_sum.data
-    if not isinstance(inv_data, sparse.COO):
-        inv_data = sparse.COO.from_numpy(np.asarray(inv_data))
-
-    n_flow = int(inv_sum.sizes["flow"])
-    n_root = int(inv_sum.sizes["root activity"])
-
-    flow_coord = inv_sum.coords["flow"].values
-    coord_value_to_pos = {int(v): i for i, v in enumerate(flow_coord)}
-
-    flow_pos_to_key: dict[int, tuple[str, str, str] | str] = {}
-    for _label, meta in getattr(trails, "biosphere_indices", {}).items():
-        for fid, md in meta.items():
-            if not isinstance(md, dict):
-                continue
-            name = md.get("name")
-            if not name:
-                continue
-            compartment = (md.get("compartment") or "").strip()
-            subcompartment = (md.get("subcompartment") or "").strip()
-            flow_key = (str(name), compartment, subcompartment)
-            key = int(fid)
-            if key in coord_value_to_pos:
-                pos = coord_value_to_pos[key]
-            elif 0 <= key < len(flow_coord):
-                pos = key
-            else:
-                continue
-            flow_pos_to_key.setdefault(pos, flow_key)
-
     # Build per-species sparse entries
     flow_idx = inv_data.coords[0]
     year_idx = inv_data.coords[1]
     root_idx = inv_data.coords[2]
     data = inv_data.data.astype(float, copy=False)
-
-    inv_years = [int(y) for y in inv_sum.coords["year"].values.tolist()]
 
     coords_out = []
     data_out = []
@@ -1129,6 +1236,13 @@ def run_fair_delta_rf(
             else:
                 max_workers = min(per_species_workers, len(work_items))
             max_workers = max(1, int(max_workers))
+            if debug:
+                print(
+                    "FAIR debug: per-species workers",
+                    max_workers,
+                    "items",
+                    len(work_items),
+                )
 
             with ThreadPoolExecutor(max_workers=max_workers) as executor:
                 future_to_key = {
@@ -1253,8 +1367,8 @@ def run_fair_delta_rf(
         coords={
             "quantile": np.array(quantiles, dtype=float),
             "year": year_coord,
-            "flow": inv_sum.coords["flow"],
-            "root activity": inv_sum.coords["root activity"],
+            "flow": inv.coords["flow"],
+            "root activity": inv.coords["root activity"],
         },
     )
     if temp_coords_out:
@@ -1277,8 +1391,8 @@ def run_fair_delta_rf(
         coords={
             "quantile": np.array(quantiles, dtype=float),
             "year": year_coord,
-            "flow": inv_sum.coords["flow"],
-            "root activity": inv_sum.coords["root activity"],
+            "flow": inv.coords["flow"],
+            "root activity": inv.coords["root activity"],
         },
     )
     return trails.instant_radiative_forcing

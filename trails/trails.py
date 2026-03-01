@@ -3814,7 +3814,12 @@ class Trails:
         queued_value_parts: list[np.ndarray] = []
         queued_root_values: list[int] = []
         queued_nnz = 0
-        flush_nnz = 1_000_000
+        flush_nnz = int(getattr(self, "_bio_inventory_flush_nnz", 2_000_000))
+        if flush_nnz < 100_000:
+            flush_nnz = 100_000
+        matrix_year_groups_cache: dict[
+            tuple, list[tuple[int, np.ndarray, np.ndarray]]
+        ] = {}
 
         def flush_queued_inventory() -> None:
             nonlocal queued_nnz
@@ -4106,6 +4111,7 @@ class Trails:
                     row_value_parts.append(contrib)
 
             if matrix_entries:
+                matrix_kernel = self._get_numba_matrix_kernel()
                 if isinstance(matrix_entries, list):
                     grouped: dict[tuple, tuple[list[int], TemporalExchange]] = {}
                     for p, tex in matrix_entries:
@@ -4152,18 +4158,37 @@ class Trails:
                             continue
 
                     f_arr = flows_full[idx]
+                    if f_arr.size == 0:
+                        continue
+                    f_arr_i64 = f_arr.astype(np.int64, copy=False)
 
-                    year_groups: dict[int, list[tuple[int, float]]] = {}
-                    for offset, weight in zip(offsets_arr, weights_arr):
-                        if weight == 0.0:
-                            continue
-                        raw_year = base_year + int(offset)
-                        y_eff = map_year_cached(raw_year)
-                        year_groups.setdefault(int(y_eff), []).append(
-                            (int(raw_year), float(weight))
-                        )
+                    year_groups_cached = matrix_year_groups_cache.get(k)
+                    if year_groups_cached is None:
+                        year_groups: dict[int, list[tuple[int, float]]] = {}
+                        for offset, weight in zip(offsets_arr, weights_arr):
+                            if weight == 0.0:
+                                continue
+                            raw_year = base_year + int(offset)
+                            y_eff = map_year_cached(raw_year)
+                            year_groups.setdefault(int(y_eff), []).append(
+                                (int(raw_year), float(weight))
+                            )
+                        year_groups_cached = []
+                        for y_eff, year_weights in year_groups.items():
+                            years_vec = np.fromiter(
+                                (yw[0] for yw in year_weights),
+                                dtype=np.int64,
+                                count=len(year_weights),
+                            )
+                            weights_vec = np.fromiter(
+                                (yw[1] for yw in year_weights),
+                                dtype=np.float64,
+                                count=len(year_weights),
+                            )
+                            year_groups_cached.append((int(y_eff), years_vec, weights_vec))
+                        matrix_year_groups_cache[k] = year_groups_cached
 
-                    for y_eff, year_weights in year_groups.items():
+                    for y_eff, years_vec, weights_vec in year_groups_cached:
                         t_eff = t_eff_cache.get(y_eff)
                         if t_eff is None and y_eff not in t_eff_cache:
                             t_eff = scenario_index_get(str(y_eff))
@@ -4176,7 +4201,7 @@ class Trails:
                         if cached_eff is None:
                             cached_eff = self._get_B_row_cache_for_t(t_eff_i)
                             B_row_cache_local[t_eff_i] = cached_eff
-                        row_ptr_eff, flow_sorted_eff, data_sorted_eff = cached_eff
+                        row_ptr_eff, _flow_sorted_eff, data_sorted_eff = cached_eff
 
                         start_eff = int(row_ptr_eff[a])
                         end_eff = int(row_ptr_eff[a + 1])
@@ -4184,13 +4209,10 @@ class Trails:
                             continue
 
                         row_vals_eff = data_sorted_eff[start_eff:end_eff]
-                        if f_arr.size == 0:
-                            continue
                         row_index_map = self._get_B_row_index_map_for_t_act(t_eff_i, a)
-                        matrix_kernel = self._get_numba_matrix_kernel()
                         if matrix_kernel is not None:
                             vals_eff, valid = matrix_kernel(
-                                f_arr.astype(np.int64, copy=False),
+                                f_arr_i64,
                                 row_index_map,
                                 row_vals_eff,
                             )
@@ -4199,7 +4221,7 @@ class Trails:
                             vals_eff = vals_eff[valid]
                             f_use = f_arr[valid]
                         else:
-                            pos = row_index_map[f_arr]
+                            pos = row_index_map[f_arr_i64]
                             valid = pos >= 0
                             if not np.any(valid):
                                 continue
@@ -4210,8 +4232,10 @@ class Trails:
                             if dbg_act is None or int(dbg_act) == int(a):
                                 flow_mask = f_use == int(dbg_flow_id)
                                 if np.any(flow_mask):
-                                    for (raw_year, weight), v in zip(
-                                        year_weights, vals_eff[flow_mask]
+                                    for raw_year, weight, v in zip(
+                                        years_vec,
+                                        weights_vec,
+                                        vals_eff[flow_mask],
                                     ):
                                         if dbg_year is None or int(raw_year) == int(
                                             dbg_year
@@ -4231,13 +4255,6 @@ class Trails:
                                                 float(v),
                                                 float(contrib),
                                             )
-
-                        years_vec = np.array(
-                            [yw[0] for yw in year_weights], dtype=np.int64
-                        )
-                        weights_vec = np.array(
-                            [yw[1] for yw in year_weights], dtype=np.float64
-                        )
 
                         flows_rep = np.repeat(f_use, weights_vec.size)
                         years_rep = np.tile(years_vec, f_use.size)
