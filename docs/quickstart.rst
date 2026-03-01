@@ -75,8 +75,10 @@ What you get
 ------------
 
 Temporal LCA results are stored on the Trails instance. Use ``trails.scores``
-for impact scores (when compute_score=True) and ``trails.inventory`` or
-``trails.characterized_inventory`` for time-resolved inventories.
+for impact scores (when ``compute_score=True``). If you run
+``lca(..., store_inventory=True)``, TRAILS also stores ``trails.inventory``;
+with ``compute_score=True`` and ``store_inventory=True``, it also stores
+``trails.characterized_inventory``.
 
 
 Importing Excel inventories
@@ -134,17 +136,37 @@ quantiles (2.5, 25, 50, 75, 97.5).
 
 .. code-block:: python
 
+    from trails import lca
     from trails.fair_rf import run_fair_delta_rf
+
+    # Ensure an inventory with root attribution is available
+    lca(
+        trails=trails,
+        methods=[method],
+        store_inventory=True,
+    )
 
     rf = run_fair_delta_rf(
         trails,
-        scenario="high-extension",
+        scenario="REMIND|SSP2-PkBudg650",
+        # defaults shown explicitly:
+        per_species_runs=True,
+        per_species_workers=None,  # auto: min(4, cpu_count, n_work_items)
     )
 
 The resulting outputs are stored on the Trails instance:
 
 * ``trails.instant_radiative_forcing`` with dims ``(quantile, year, flow, root activity)``
 * ``trails.delta_temperature`` with dims ``(quantile, year, flow, root activity)``
+
+Notes:
+
+* ``run_fair_delta_rf`` requires ``trails.inventory`` with a
+  ``root activity`` dimension. Run ``lca(..., store_inventory=True)`` first.
+* ``scenario`` must match a scenario label present in the emissions CSV used by
+  ``run_fair_delta_rf``.
+* If ``config_name`` and ``config_names`` are omitted, TRAILS evaluates all
+  available FaIR configurations and stores quantiles across the ensemble.
 
 You can visualize these with the built-in plotting helpers (defaults to the 50th
 quantile):

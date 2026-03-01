@@ -228,7 +228,10 @@ from trails import plot_rf, plot_temp
 
 rf = run_fair_delta_rf(
     trails,
-    scenario="high-extension",
+    scenario="REMIND|SSP2-PkBudg650",
+    # defaults shown explicitly:
+    per_species_runs=True,
+    per_species_workers=None,  # auto: min(4, cpu_count, n_work_items)
 )
 
 # Quantile outputs are stored on the Trails instance
@@ -239,6 +242,16 @@ temp = trails.delta_temperature        # (quantile, year, flow, root activity)
 plot_rf(trails, year_range=(2000, 2100))
 plot_temp(trails, year_range=(2000, 2100))
 ```
+
+Notes:
+
+* ``run_fair_delta_rf`` requires ``trails.inventory`` with
+  ``root activity`` attribution. Run ``lca(..., store_inventory=True)`` after
+  ``temporal_routing(...)`` before calling FaIR.
+* ``scenario`` must match a scenario label present in the emissions CSV used by
+  ``run_fair_delta_rf`` (bundled default uses REMIND/FaIR data).
+* If you don't pass ``config_name`` or ``config_names``, TRAILS evaluates all
+  available FaIR configurations and stores quantiles across the ensemble.
 
 ## Method Overview
 
@@ -344,9 +357,9 @@ exist in the package, the nearest available scenario year is used.
 
 **Do I need both scores and inventory?**  
 By default `lca()` computes scores and stores them on `trails.scores`. If you set
-`compute_score=False`, pass `store_inventory=True` and use
-`trails.characterized_inventory` for plotting. Remember to run
-`trails.temporal_routing(...)` before `lca()`.
+`store_inventory=True`, TRAILS also stores `trails.inventory`. If
+`compute_score=True` at the same time, `trails.characterized_inventory` is also
+available. Remember to run `trails.temporal_routing(...)` before `lca()`.
 
 ## Limitations & Assumptions
 

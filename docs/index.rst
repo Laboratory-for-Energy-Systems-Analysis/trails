@@ -14,6 +14,8 @@ exchange distributions and scenario-aware inventories.
    theory
    quickstart
    user_guide
+   methods
+   nomenclature
    api_reference
 
 Indices and tables
