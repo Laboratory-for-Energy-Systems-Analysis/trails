@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import os
 from pathlib import Path
 from typing import Any, Dict, Tuple
 
@@ -480,6 +482,7 @@ def run_fair_delta_rf(
     validate_rtol: float = 1e-6,
     validate_raise: bool = False,
     per_species_runs: bool = True,
+    per_species_workers: int | None = None,
     quantiles: list[float] | None = None,
 ) -> xr.DataArray:
     """Run fair delta rf.
@@ -520,6 +523,9 @@ def run_fair_delta_rf(
     :type validate_raise: bool
     :param per_species_runs: Value for `per_species_runs`.
     :type per_species_runs: bool
+    :param per_species_workers: Number of workers for per-species FaIR runs.
+        If ``None``, an automatic worker count is used.
+    :type per_species_workers: int | None
     :param quantiles: Value for `quantiles`.
     :type quantiles: list[float] | None
     :returns: Return value.
@@ -533,6 +539,10 @@ def run_fair_delta_rf(
             raise ValueError("scale_target_fraction must be > 0.")
     elif scale_factor <= 0:
         raise ValueError("scale_factor must be > 0.")
+    if per_species_workers is not None and int(per_species_workers) < 1:
+        raise ValueError("per_species_workers must be >= 1 when provided.")
+    if per_species_workers is not None:
+        per_species_workers = int(per_species_workers)
     df = load_emissions_csv(emissions_csv)
     species_map, signs = load_species_mapping(mapping_yaml)
     if quantiles is None:
@@ -1028,160 +1038,132 @@ def run_fair_delta_rf(
         temp_coords_out.append(np.vstack([q_out, y_out, f_out, r_out]))
         temp_data_out.append(TEMP_alloc[row_idx, col_idx].astype(float, copy=False))
 
+    def _compute_species_quantiles(
+        specie: str, delta_series: pd.Series
+    ) -> tuple[np.ndarray, np.ndarray] | None:
+        df_pert = _build_perturbed_df(df, specie, delta_series)
+        f_pert = _run_fair_emissions(
+            df_pert,
+            scenario,
+            config_csv=config_csv,
+            properties_csv=properties_csv,
+            config_name=config_name,
+            config_names=config_names,
+            ghg_method=ghg_method,
+            temperature_prescribed=temperature_prescribed,
+            debug=debug,
+            progress=False,
+        )
+        if config_names is not None and len(config_names) > 1:
+            forcing_pert = f_pert.forcing.sel(scenario=scenario)
+            temp_pert = f_pert.temperature.sel(scenario=scenario)
+        else:
+            forcing_pert = f_pert.forcing.sel(
+                scenario=scenario, config=f_pert.configs[0]
+            )
+            temp_pert = f_pert.temperature.sel(
+                scenario=scenario, config=f_pert.configs[0]
+            )
+        delta_forcing = forcing_pert - forcing_base
+        delta_temp = temp_pert - temp_base
+        if debug:
+            try:
+                arr = np.asarray(delta_temp.values, dtype=float)
+                print(
+                    "FAIR debug: delta_temp min/max/finite",
+                    float(np.nanmin(arr)),
+                    float(np.nanmax(arr)),
+                    int(np.isfinite(arr).sum()),
+                )
+            except Exception:
+                pass
+
+        effective_scale = 1.0 if scale_factor is None else float(scale_factor)
+        if effective_scale != 1.0:
+            delta_forcing = delta_forcing / effective_scale
+            delta_temp = delta_temp / effective_scale
+
+        alias = rf_alias.get(specie, specie)
+        if alias not in delta_forcing.coords["specie"].values:
+            return None
+
+        if config_names is not None and len(config_names) > 1:
+            rf_series = _extract_fair_timeseries_by_config(
+                delta_forcing.sel(specie=alias)
+            )
+            rf_quant = _safe_nanpercentile(rf_series, quantiles)
+            temp_series = _extract_fair_timeseries_by_config(delta_temp)
+            temp_quant = _safe_nanpercentile(temp_series, quantiles)
+        else:
+            rf_series = np.asarray(delta_forcing.sel(specie=alias).values, dtype=float)
+            rf_series = np.nan_to_num(rf_series, nan=0.0)
+            rf_series = np.ravel(rf_series)
+            rf_quant = np.tile(rf_series[None, :], (n_quant, 1))
+            temp_series = _extract_fair_timeseries(delta_temp)
+            temp_series = np.nan_to_num(temp_series, nan=0.0)
+            temp_quant = np.tile(temp_series[None, :], (n_quant, 1))
+        return rf_quant, temp_quant
+
     if no_perturbation:
         if debug:
             print("FAIR debug: no perturbations; delta RF will be zero.")
     elif per_species_runs:
         delta_by_species_pos = delta_by_species.clip(lower=0.0)
         delta_by_species_neg = delta_by_species.clip(upper=0.0)
-        pbar = tqdm(
-            delta_by_species.columns.tolist(),
-            desc="FaIR per-species",
-            unit="specie",
-        )
-        for specie in pbar:
-            pbar.set_postfix_str(str(specie))
+
+        work_items: list[tuple[str, str, pd.Series]] = []
+        for specie in delta_by_species.columns.tolist():
+            specie_str = str(specie)
             series_pos = delta_by_species_pos[specie]
             if np.any(series_pos.values != 0):
-                df_pert = _build_perturbed_df(df, specie, series_pos)
-                f_pert = _run_fair_emissions(
-                    df_pert,
-                    scenario,
-                    config_csv=config_csv,
-                    properties_csv=properties_csv,
-                    config_name=config_name,
-                    config_names=config_names,
-                    ghg_method=ghg_method,
-                    temperature_prescribed=temperature_prescribed,
-                    debug=debug,
-                    progress=False,
-                )
-                if config_names is not None and len(config_names) > 1:
-                    forcing_pert = f_pert.forcing.sel(scenario=scenario)
-                    temp_pert = f_pert.temperature.sel(scenario=scenario)
-                else:
-                    forcing_pert = f_pert.forcing.sel(
-                        scenario=scenario, config=f_pert.configs[0]
-                    )
-                    temp_pert = f_pert.temperature.sel(
-                        scenario=scenario, config=f_pert.configs[0]
-                    )
-                delta_forcing = forcing_pert - forcing_base
-                delta_temp = temp_pert - temp_base
-                if debug:
-                    try:
-                        arr = np.asarray(delta_temp.values, dtype=float)
-                        print(
-                            "FAIR debug: delta_temp min/max/finite",
-                            float(np.nanmin(arr)),
-                            float(np.nanmax(arr)),
-                            int(np.isfinite(arr).sum()),
-                        )
-                    except Exception:
-                        pass
-                if scale_factor is None:
-                    scale_factor = 1.0
-                if scale_factor != 1.0:
-                    delta_forcing = delta_forcing / float(scale_factor)
-                    delta_temp = delta_temp / float(scale_factor)
-
-                alias = rf_alias.get(specie, specie)
-                if alias in delta_forcing.coords["specie"].values:
-                    if config_names is not None and len(config_names) > 1:
-                        rf_series = _extract_fair_timeseries_by_config(
-                            delta_forcing.sel(specie=alias)
-                        )
-                        rf_quant = _safe_nanpercentile(rf_series, quantiles)
-                        temp_series = _extract_fair_timeseries_by_config(delta_temp)
-                        temp_quant = _safe_nanpercentile(temp_series, quantiles)
-                    else:
-                        rf_series = np.asarray(
-                            delta_forcing.sel(specie=alias).values, dtype=float
-                        )
-                        rf_series = np.nan_to_num(rf_series, nan=0.0)
-                        rf_series = np.ravel(rf_series)
-                        rf_quant = np.tile(rf_series[None, :], (n_quant, 1))
-                        temp_series = _extract_fair_timeseries(delta_temp)
-                        temp_series = np.nan_to_num(temp_series, nan=0.0)
-                        temp_quant = np.tile(temp_series[None, :], (n_quant, 1))
-                    for qi in range(n_quant):
-                        _append_allocated_rf(
-                            specie, rf_quant[qi], "pos", quantile_idx=qi
-                        )
-                        _append_allocated_temp(
-                            specie, temp_quant[qi], "pos", quantile_idx=qi
-                        )
-
+                work_items.append((specie_str, "pos", series_pos.copy()))
             series_neg = delta_by_species_neg[specie]
             if np.any(series_neg.values != 0):
-                df_pert = _build_perturbed_df(df, specie, series_neg)
-                f_pert = _run_fair_emissions(
-                    df_pert,
-                    scenario,
-                    config_csv=config_csv,
-                    properties_csv=properties_csv,
-                    config_name=config_name,
-                    config_names=config_names,
-                    ghg_method=ghg_method,
-                    temperature_prescribed=temperature_prescribed,
-                    debug=debug,
-                    progress=False,
-                )
-                if config_names is not None and len(config_names) > 1:
-                    forcing_pert = f_pert.forcing.sel(scenario=scenario)
-                    temp_pert = f_pert.temperature.sel(scenario=scenario)
-                else:
-                    forcing_pert = f_pert.forcing.sel(
-                        scenario=scenario, config=f_pert.configs[0]
-                    )
-                    temp_pert = f_pert.temperature.sel(
-                        scenario=scenario, config=f_pert.configs[0]
-                    )
-                delta_forcing = forcing_pert - forcing_base
-                delta_temp = temp_pert - temp_base
-                if debug:
-                    try:
-                        arr = np.asarray(delta_temp.values, dtype=float)
-                        print(
-                            "FAIR debug: delta_temp min/max/finite",
-                            float(np.nanmin(arr)),
-                            float(np.nanmax(arr)),
-                            int(np.isfinite(arr).sum()),
-                        )
-                    except Exception:
-                        pass
-                if scale_factor is None:
-                    scale_factor = 1.0
-                if scale_factor != 1.0:
-                    delta_forcing = delta_forcing / float(scale_factor)
-                    delta_temp = delta_temp / float(scale_factor)
+                work_items.append((specie_str, "neg", series_neg.copy()))
 
-                alias = rf_alias.get(specie, specie)
-                if alias in delta_forcing.coords["specie"].values:
-                    if config_names is not None and len(config_names) > 1:
-                        rf_series = _extract_fair_timeseries_by_config(
-                            delta_forcing.sel(specie=alias)
-                        )
-                        rf_quant = _safe_nanpercentile(rf_series, quantiles)
-                        temp_series = _extract_fair_timeseries_by_config(delta_temp)
-                        temp_quant = _safe_nanpercentile(temp_series, quantiles)
-                    else:
-                        rf_series = np.asarray(
-                            delta_forcing.sel(specie=alias).values, dtype=float
-                        )
-                        rf_series = np.nan_to_num(rf_series, nan=0.0)
-                        rf_series = np.ravel(rf_series)
-                        rf_quant = np.tile(rf_series[None, :], (n_quant, 1))
-                        temp_series = _extract_fair_timeseries(delta_temp)
-                        temp_series = np.nan_to_num(temp_series, nan=0.0)
-                        temp_quant = np.tile(temp_series[None, :], (n_quant, 1))
-                    for qi in range(n_quant):
-                        _append_allocated_rf(
-                            specie, rf_quant[qi], "neg", quantile_idx=qi
-                        )
-                        _append_allocated_temp(
-                            specie, temp_quant[qi], "neg", quantile_idx=qi
-                        )
+        results: dict[tuple[str, str], tuple[np.ndarray, np.ndarray] | None] = {}
+        if work_items:
+            if per_species_workers is None:
+                auto_workers = os.cpu_count() or 1
+                max_workers = min(4, auto_workers, len(work_items))
+            else:
+                max_workers = min(per_species_workers, len(work_items))
+            max_workers = max(1, int(max_workers))
+
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                future_to_key = {
+                    executor.submit(
+                        _compute_species_quantiles,
+                        specie,
+                        series,
+                    ): (specie, sign_mode)
+                    for specie, sign_mode, series in work_items
+                }
+                with tqdm(
+                    total=len(work_items),
+                    desc="FaIR per-species",
+                    unit="run",
+                ) as pbar:
+                    for future in as_completed(future_to_key):
+                        key = future_to_key[future]
+                        results[key] = future.result()
+                        pbar.set_postfix_str(f"{key[0]}:{key[1]}")
+                        pbar.update(1)
+
+        for specie in delta_by_species.columns.tolist():
+            specie_str = str(specie)
+            for sign_mode in ("pos", "neg"):
+                quantiles_pair = results.get((specie_str, sign_mode))
+                if quantiles_pair is None:
+                    continue
+                rf_quant, temp_quant = quantiles_pair
+                for qi in range(n_quant):
+                    _append_allocated_rf(
+                        specie_str, rf_quant[qi], sign_mode, quantile_idx=qi
+                    )
+                    _append_allocated_temp(
+                        specie_str, temp_quant[qi], sign_mode, quantile_idx=qi
+                    )
     else:
         df_pert = _build_perturbed_df(df, None)
         f_pert = _run_fair_emissions(
