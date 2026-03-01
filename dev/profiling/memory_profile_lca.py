@@ -194,11 +194,15 @@ def parse_args() -> argparse.Namespace:
         default="/Users/romain/GitHub/trails/dev/lci-case-study-daccs_storage_risk.xlsx",
         help="Path to Excel inventory.",
     )
-    parser.add_argument("--ref-year", type=int, default=2025, help="Routing start year.")
+    parser.add_argument(
+        "--ref-year", type=int, default=2025, help="Routing start year."
+    )
     parser.add_argument(
         "--act-idx", type=int, default=41792, help="Routing start activity index."
     )
-    parser.add_argument("--amount", type=float, default=1.0, help="Functional unit amount.")
+    parser.add_argument(
+        "--amount", type=float, default=1.0, help="Functional unit amount."
+    )
     parser.add_argument("--max-depth", type=int, default=4, help="Routing max depth.")
     parser.add_argument(
         "--method",

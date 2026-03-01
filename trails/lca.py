@@ -179,7 +179,9 @@ def _build_rhs_matrix_from_root_demands(
 def _build_direct_technosphere_for_year(
     trails: Trails,
     year: int,
-    cache: dict[int, tuple[sp.csc_matrix, _IdentityProductMap, dict[int, tuple[int, float]]]],
+    cache: dict[
+        int, tuple[sp.csc_matrix, _IdentityProductMap, dict[int, tuple[int, float]]]
+    ],
 ) -> tuple[sp.csc_matrix, _IdentityProductMap, dict[int, tuple[int, float]]]:
     """Build (or fetch cached) direct technosphere matrix for one solve year."""
     y = int(year)

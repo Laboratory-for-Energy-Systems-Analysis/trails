@@ -132,7 +132,9 @@ def _finalize_legacy_vstack(self: Trails) -> xr.DataArray:
 
     if self._inv_key_parts:
         keys = np.concatenate(self._inv_key_parts).astype(np.int64, copy=False)
-        data = np.concatenate(self._inv_value_parts).astype(self.value_dtype, copy=False)
+        data = np.concatenate(self._inv_value_parts).astype(
+            self.value_dtype, copy=False
+        )
 
         if keys.size:
             order = np.argsort(keys, kind="quicksort")
@@ -193,10 +195,13 @@ def _finalize_legacy_vstack(self: Trails) -> xr.DataArray:
     else:
         if has_root:
             inv = sparse.zeros(
-                (n_activities, n_flows, len(years), n_activities), dtype=self.value_dtype
+                (n_activities, n_flows, len(years), n_activities),
+                dtype=self.value_dtype,
             )
         else:
-            inv = sparse.zeros((n_activities, n_flows, len(years)), dtype=self.value_dtype)
+            inv = sparse.zeros(
+                (n_activities, n_flows, len(years)), dtype=self.value_dtype
+            )
 
     return _build_dataarray_from_inv(self, inv, years, n_activities, n_flows, has_root)
 
@@ -220,7 +225,9 @@ def _finalize_legacy_inplace_decode(self: Trails) -> xr.DataArray:
 
     if self._inv_key_parts:
         keys = np.concatenate(self._inv_key_parts).astype(np.int64, copy=False)
-        data = np.concatenate(self._inv_value_parts).astype(self.value_dtype, copy=False)
+        data = np.concatenate(self._inv_value_parts).astype(
+            self.value_dtype, copy=False
+        )
 
         if keys.size:
             order = np.argsort(keys, kind="quicksort")
@@ -280,10 +287,13 @@ def _finalize_legacy_inplace_decode(self: Trails) -> xr.DataArray:
     else:
         if has_root:
             inv = sparse.zeros(
-                (n_activities, n_flows, len(years), n_activities), dtype=self.value_dtype
+                (n_activities, n_flows, len(years), n_activities),
+                dtype=self.value_dtype,
             )
         else:
-            inv = sparse.zeros((n_activities, n_flows, len(years)), dtype=self.value_dtype)
+            inv = sparse.zeros(
+                (n_activities, n_flows, len(years)), dtype=self.value_dtype
+            )
 
     return _build_dataarray_from_inv(self, inv, years, n_activities, n_flows, has_root)
 
@@ -308,7 +318,9 @@ def _finalize_legacy_reassign(self: Trails) -> xr.DataArray:
 
     if self._inv_key_parts:
         keys = np.concatenate(self._inv_key_parts).astype(np.int64, copy=False)
-        data = np.concatenate(self._inv_value_parts).astype(self.value_dtype, copy=False)
+        data = np.concatenate(self._inv_value_parts).astype(
+            self.value_dtype, copy=False
+        )
 
         if keys.size:
             order = np.argsort(keys, kind="quicksort")
@@ -369,10 +381,13 @@ def _finalize_legacy_reassign(self: Trails) -> xr.DataArray:
     else:
         if has_root:
             inv = sparse.zeros(
-                (n_activities, n_flows, len(years), n_activities), dtype=self.value_dtype
+                (n_activities, n_flows, len(years), n_activities),
+                dtype=self.value_dtype,
             )
         else:
-            inv = sparse.zeros((n_activities, n_flows, len(years)), dtype=self.value_dtype)
+            inv = sparse.zeros(
+                (n_activities, n_flows, len(years)), dtype=self.value_dtype
+            )
 
     return _build_dataarray_from_inv(self, inv, years, n_activities, n_flows, has_root)
 

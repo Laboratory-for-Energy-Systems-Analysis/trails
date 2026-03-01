@@ -4185,7 +4185,9 @@ class Trails:
                                 dtype=np.float64,
                                 count=len(year_weights),
                             )
-                            year_groups_cached.append((int(y_eff), years_vec, weights_vec))
+                            year_groups_cached.append(
+                                (int(y_eff), years_vec, weights_vec)
+                            )
                         matrix_year_groups_cache[k] = year_groups_cached
 
                     for y_eff, years_vec, weights_vec in year_groups_cached:

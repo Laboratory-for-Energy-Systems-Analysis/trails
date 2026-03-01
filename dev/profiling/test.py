@@ -19,13 +19,15 @@ trails = Trails(
     interpolate_annual=True,
     debug=False,
     interpolation_start_year_offset=-20,
-    interpolation_end_year_offset=20
+    interpolation_end_year_offset=20,
 )
 methods = [
     "IPCC 2021 - climate change: total (excl. biogenic CO2) - global warming potential (GWP100)",
 ]
 
-trails.import_excel_inventory(str(HERE.parent / "lci-case-study-daccs_storage_risk.xlsx"))
+trails.import_excel_inventory(
+    str(HERE.parent / "lci-case-study-daccs_storage_risk.xlsx")
+)
 
 ref_year = 2025
 idx = 41792

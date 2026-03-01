@@ -77,7 +77,9 @@ def _build_fair_template_cached(
     temperature_prescribed: bool | None,
 ) -> fair.FAIR:
     """Build and cache a configured FaIR template for repeated perturbation runs."""
-    species, properties = read_properties(filename=properties_csv, species=list(species_key))
+    species, properties = read_properties(
+        filename=properties_csv, species=list(species_key)
+    )
 
     if temperature_prescribed is None:
         f = fair.FAIR()
@@ -198,7 +200,9 @@ def _inventory_emissions_by_fair_species(
         flow_to_sign[int(pos)] = float(
             signs.get(
                 flow_key,
-                signs.get(flow_key[0] if isinstance(flow_key, tuple) else flow_key, 1.0),
+                signs.get(
+                    flow_key[0] if isinstance(flow_key, tuple) else flow_key, 1.0
+                ),
             )
         )
 
@@ -219,7 +223,9 @@ def _inventory_emissions_by_fair_species(
         year_valid = year_idx[valid]
         vals_valid = vals[valid]
         signs_valid = flow_to_sign[flow_idx[valid]]
-        signed_vals = np.where(signs_valid == 1.0, vals_valid, np.abs(vals_valid) * signs_valid)
+        signed_vals = np.where(
+            signs_valid == 1.0, vals_valid, np.abs(vals_valid) * signs_valid
+        )
         flat_idx = specie_valid * n_year + year_valid
         flat = agg.reshape(-1)
         np.add.at(flat, flat_idx, signed_vals)
@@ -670,7 +676,9 @@ def run_fair_delta_rf(
     year_new_axis = remaining_axes.index(year_axis)
     root_new_axis = remaining_axes.index(root_axis)
     if inv_data.ndim != 3:
-        raise ValueError("Unexpected inventory shape after aggregation to flow/year/root.")
+        raise ValueError(
+            "Unexpected inventory shape after aggregation to flow/year/root."
+        )
     if (flow_new_axis, year_new_axis, root_new_axis) != (0, 1, 2):
         inv_data = inv_data.transpose((flow_new_axis, year_new_axis, root_new_axis))
 

@@ -128,14 +128,16 @@ def test_build_datapackage_for_year_from_trails(example_trails: Trails) -> None:
 
 def test_build_datapackage_zero_bio_fast_path(example_trails: Trails) -> None:
     """Zero-bio solve path should only build technosphere resources."""
-    dp, tech_idx, bio_idx, uncertain = lca_module.build_datapackage_for_year_from_trails(
-        example_trails,
-        year=2005,
-        zero_biosphere=True,
-        include_biosphere=False,
-        validate_metadata=False,
-        build_metadata_indices=False,
-        technosphere_sign_mode="signed",
+    dp, tech_idx, bio_idx, uncertain = (
+        lca_module.build_datapackage_for_year_from_trails(
+            example_trails,
+            year=2005,
+            zero_biosphere=True,
+            include_biosphere=False,
+            validate_metadata=False,
+            build_metadata_indices=False,
+            technosphere_sign_mode="signed",
+        )
     )
 
     matrices = {obj["matrix"] for obj in dp.resources if "matrix" in obj}
@@ -194,7 +196,9 @@ def test_get_datapackage_uses_fast_builder_for_zero_bio(
     """_get_datapackage should request technosphere-only signed vectors for zero_bio."""
     calls: list[dict[str, object]] = []
 
-    def fake_builder(*args: object, **kwargs: object) -> tuple[object, dict, dict, list]:
+    def fake_builder(
+        *args: object, **kwargs: object
+    ) -> tuple[object, dict, dict, list]:
         calls.append(dict(kwargs))
         return object(), {}, {}, []
 

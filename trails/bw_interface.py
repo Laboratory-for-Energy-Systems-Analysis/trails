@@ -216,9 +216,7 @@ def build_datapackage_for_year_from_trails(
     :rtype: tuple[Any, dict[tuple, int], dict[tuple, int], list[tuple[int, int]]]"""
 
     if technosphere_sign_mode not in ("abs_flip", "signed"):
-        raise ValueError(
-            "technosphere_sign_mode must be one of {'abs_flip', 'signed'}"
-        )
+        raise ValueError("technosphere_sign_mode must be one of {'abs_flip', 'signed'}")
 
     label_for_matrix, t = _resolve_matrix_label(trails, int(year))
 

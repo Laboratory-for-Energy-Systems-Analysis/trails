@@ -71,7 +71,9 @@ def import_excel_inventory(
         strategies = getattr(importer, "strategies", None)
         if strategies:
             strategies = [
-                s for s in strategies if getattr(s, "__name__", "") != "csv_drop_unknown"
+                s
+                for s in strategies
+                if getattr(s, "__name__", "") != "csv_drop_unknown"
             ]
             importer.apply_strategies(strategies=strategies)
         else:
@@ -174,7 +176,9 @@ def import_excel_inventory(
         off_min = _parse_intish_or_none(exchange.get("temporal_min")) or 0
         off_max = _parse_intish_or_none(exchange.get("temporal_max")) or 0
         amount_source = _parse_amount_source(exchange.get("temporal_amount_source"))
-        offsets = _parse_json_number_list(exchange.get("temporal_offsets"), integer=True)
+        offsets = _parse_json_number_list(
+            exchange.get("temporal_offsets"), integer=True
+        )
         weights = _parse_json_number_list(
             exchange.get("temporal_weights"), integer=False
         )

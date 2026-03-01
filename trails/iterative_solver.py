@@ -79,9 +79,7 @@ def solve_many_rhs_jacobi_gmres(
         raise ValueError(f"Shape mismatch: A {A_csc.shape}, B {B.shape}")
 
     if preconditioner_mode not in {"jacobi", "ilu", "none"}:
-        raise ValueError(
-            "preconditioner_mode must be one of {'jacobi', 'ilu', 'none'}"
-        )
+        raise ValueError("preconditioner_mode must be one of {'jacobi', 'ilu', 'none'}")
 
     preconditioner: Optional[LinearOperator]
     if preconditioner_mode == "none":
