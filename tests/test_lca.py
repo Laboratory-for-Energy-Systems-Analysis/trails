@@ -1,4 +1,5 @@
 import importlib
+import bw2calc as bc
 import numpy as np
 import sparse
 import pytest
@@ -121,6 +122,106 @@ def test_build_datapackage_for_year_from_trails(example_trails: Trails) -> None:
     assert any("battery electric vehicle, production" in key for key in tech_idx)
     assert any("Carbon dioxide, fossil" in key for key in bio_idx)
     assert uncertain == []
+    matrices = {obj["matrix"] for obj in dp.resources if "matrix" in obj}
+    assert matrices == {"technosphere_matrix", "biosphere_matrix"}
+
+
+def test_build_datapackage_zero_bio_fast_path(example_trails: Trails) -> None:
+    """Zero-bio solve path should only build technosphere resources."""
+    dp, tech_idx, bio_idx, uncertain = (
+        lca_module.build_datapackage_for_year_from_trails(
+            example_trails,
+            year=2005,
+            zero_biosphere=True,
+            include_biosphere=False,
+            validate_metadata=False,
+            build_metadata_indices=False,
+            technosphere_sign_mode="signed",
+        )
+    )
+
+    matrices = {obj["matrix"] for obj in dp.resources if "matrix" in obj}
+    assert matrices == {"technosphere_matrix"}
+    assert not any(
+        obj.get("matrix") == "technosphere_matrix" and obj.get("kind") == "flip"
+        for obj in dp.resources
+    )
+    assert tech_idx == {}
+    assert bio_idx == {}
+    assert uncertain == []
+
+
+def test_signed_technosphere_matches_abs_flip_supply(example_trails: Trails) -> None:
+    """Signed technosphere vectors should produce identical supply results."""
+    activity_indices = next(iter(example_trails.activity_indices.values()))
+    start_act_idx = int(next(iter(activity_indices.keys())))
+    demand = {start_act_idx: 1.0}
+
+    dp_abs, _, _, _ = lca_module.build_datapackage_for_year_from_trails(
+        example_trails,
+        year=2005,
+        include_biosphere=False,
+        validate_metadata=False,
+        build_metadata_indices=False,
+        technosphere_sign_mode="abs_flip",
+    )
+    dp_signed, _, _, _ = lca_module.build_datapackage_for_year_from_trails(
+        example_trails,
+        year=2005,
+        include_biosphere=False,
+        validate_metadata=False,
+        build_metadata_indices=False,
+        technosphere_sign_mode="signed",
+    )
+
+    def _solve(dp: object) -> dict[int, float]:
+        lca_obj = bc.LCA(demand=demand, data_objs=[dp])
+        lca_obj.load_lci_data()
+        mapped = lca_module._map_activity_demands_to_products(lca_obj, demand)
+        lca_obj.build_demand_array(mapped)
+        lca_obj.supply_array = lca_obj.solve_linear_system()
+        return lca_module._extract_supply_fast(lca_obj, 0.0)
+
+    supply_abs = _solve(dp_abs)
+    supply_signed = _solve(dp_signed)
+
+    assert set(supply_abs) == set(supply_signed)
+    for act_idx in supply_abs:
+        assert supply_abs[act_idx] == pytest.approx(supply_signed[act_idx], abs=1e-12)
+
+
+def test_get_datapackage_uses_fast_builder_for_zero_bio(
+    monkeypatch: pytest.MonkeyPatch, example_trails: Trails
+) -> None:
+    """_get_datapackage should request technosphere-only signed vectors for zero_bio."""
+    calls: list[dict[str, object]] = []
+
+    def fake_builder(
+        *args: object, **kwargs: object
+    ) -> tuple[object, dict, dict, list]:
+        calls.append(dict(kwargs))
+        return object(), {}, {}, []
+
+    monkeypatch.setattr(
+        "trails.bw_interface.build_datapackage_for_year_from_trails",
+        fake_builder,
+    )
+
+    cache: dict[tuple[int, bool], object] = {}
+    lca_module._get_datapackage(
+        dp_cache=cache,
+        trails=example_trails,
+        year=2005,
+        zero_bio=True,
+        debug=False,
+    )
+
+    assert len(calls) == 1
+    kwargs = calls[0]
+    assert kwargs["include_biosphere"] is False
+    assert kwargs["validate_metadata"] is False
+    assert kwargs["build_metadata_indices"] is False
+    assert kwargs["technosphere_sign_mode"] == "signed"
 
 
 def test_lca_static_mode(example_trails: Trails) -> None:
@@ -222,6 +323,55 @@ def test_lca_multi_method_scores_without_inventory(example_trails: Trails) -> No
     assert example_trails.scores.coords["method"].values.tolist() == methods
 
 
+def test_lca_root_mode_without_inventory_skips_supply_extraction(
+    monkeypatch: pytest.MonkeyPatch, example_trails: Trails
+) -> None:
+    """Root-attribution scoring should not extract per-root supply dicts when inventory is disabled."""
+    activity_indices = next(iter(example_trails.activity_indices.values()))
+    start_act_idx = next(iter(activity_indices.keys()))
+    methods = get_lcia_method_names(ei_version="3.11")[:1]
+    assert methods
+
+    calls = {"fast": 0, "cached": 0}
+
+    def fake_extract_fast(*args: object, **kwargs: object) -> dict[int, float]:
+        calls["fast"] += 1
+        return {}
+
+    def fake_extract_fast_cached(*args: object, **kwargs: object) -> dict[int, float]:
+        calls["cached"] += 1
+        return {}
+
+    monkeypatch.setattr(lca_module, "_extract_supply_fast", fake_extract_fast)
+    monkeypatch.setattr(
+        lca_module, "_extract_supply_fast_cached", fake_extract_fast_cached
+    )
+    # Force multi-RHS path where matrix scoring is used directly.
+    monkeypatch.setattr(lca_module, "SOLVER", "umfpack")
+
+    example_trails.temporal_routing(
+        start_year=2005,
+        start_act_idx=start_act_idx,
+        max_depth=1,
+        min_amount=0.0,
+        show_progress=False,
+        attribute_to_roots=True,
+        debug=False,
+    )
+
+    lca_module.lca(
+        trails=example_trails,
+        methods=methods,
+        show_progress=False,
+        compute_score=True,
+        store_inventory=False,
+        attribute_to_roots=True,
+    )
+
+    assert calls["fast"] == 0
+    assert calls["cached"] == 0
+
+
 def test_lca_total_invariant_to_root_attribution(example_package: Package) -> None:
     """Total score should not depend on root-attribution bookkeeping mode."""
     methods = get_lcia_method_names(ei_version="3.11")[:1]
@@ -256,3 +406,74 @@ def test_lca_total_invariant_to_root_attribution(example_package: Package) -> No
     total_false = run_case(False)
     total_true = run_case(True)
     assert total_false == pytest.approx(total_true, rel=1e-10, abs=1e-12)
+
+
+def test_lca_direct_solver_matches_bw2calc_total(example_package: Package) -> None:
+    """Direct/iterative technosphere solvers should match bw2calc totals."""
+    methods = get_lcia_method_names(ei_version="3.11")[:1]
+    assert methods
+
+    def run_case(mode: str, **kwargs: object) -> float:
+        trails = Trails(example_package, interpolate_annual=False)
+        activity_indices = next(iter(trails.activity_indices.values()))
+        start_act_idx = next(iter(activity_indices.keys()))
+
+        trails.temporal_routing(
+            start_year=2005,
+            start_act_idx=start_act_idx,
+            max_depth=1,
+            min_amount=0.0,
+            show_progress=False,
+            attribute_to_roots=False,
+            debug=False,
+        )
+
+        lca_module.lca(
+            trails=trails,
+            methods=methods,
+            show_progress=False,
+            compute_score=True,
+            store_inventory=False,
+            attribute_to_roots=False,
+            solver_mode=mode,
+            **kwargs,
+        )
+        assert trails.scores is not None
+        return float(trails.scores.data.sum())
+
+    total_bw = run_case("bw2calc")
+    total_direct = run_case("direct")
+    total_iterative = run_case(
+        "iterative",
+        iterative_rtol=1e-6,
+        iterative_maxiter=500,
+    )
+    assert total_direct == pytest.approx(total_bw, rel=1e-10, abs=1e-12)
+    assert total_iterative == pytest.approx(total_bw, rel=1e-5, abs=1e-8)
+
+
+def test_lca_invalid_solver_mode_raises(example_trails: Trails) -> None:
+    """Invalid solver mode should raise a clear error."""
+    activity_indices = next(iter(example_trails.activity_indices.values()))
+    start_act_idx = next(iter(activity_indices.keys()))
+
+    example_trails.temporal_routing(
+        start_year=2005,
+        start_act_idx=start_act_idx,
+        max_depth=1,
+        min_amount=0.0,
+        show_progress=False,
+        attribute_to_roots=False,
+        debug=False,
+    )
+
+    with pytest.raises(ValueError, match="solver_mode"):
+        lca_module.lca(
+            trails=example_trails,
+            methods=["dummy"],
+            show_progress=False,
+            compute_score=False,
+            store_inventory=False,
+            attribute_to_roots=False,
+            solver_mode="invalid-mode",  # type: ignore[arg-type]
+        )

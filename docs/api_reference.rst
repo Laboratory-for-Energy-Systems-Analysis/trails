@@ -43,6 +43,12 @@ Plotting
 .. autofunction:: trails.plot_rf
 .. autofunction:: trails.plot_temp
 
+Cache and Search
+----------------
+
+.. autofunction:: trails.clear_cache
+.. autofunction:: trails.search_activity
+
 
 FaIR_ integration
 -----------------

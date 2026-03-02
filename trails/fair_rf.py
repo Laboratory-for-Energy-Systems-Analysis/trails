@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import copy
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from functools import lru_cache
+import os
 from pathlib import Path
 from typing import Any, Dict, Tuple
 
@@ -38,9 +42,10 @@ def _sanitize_emissions_year_values(df: pd.DataFrame) -> pd.DataFrame:
     if not year_cols:
         return df
     out = df.copy()
-    out.loc[:, year_cols] = (
-        out.loc[:, year_cols].apply(pd.to_numeric, errors="coerce").fillna(0.0)
-    )
+    # Assign each year column explicitly so pandas>=3 doesn't try in-place casts
+    # on existing StringDtype blocks during a multi-column .loc assignment.
+    for col in year_cols:
+        out[col] = pd.to_numeric(out[col], errors="coerce").fillna(0.0)
     return out
 
 
@@ -59,15 +64,113 @@ def _safe_nanpercentile(values: np.ndarray, quantiles: list[float]) -> np.ndarra
     return np.nan_to_num(out, nan=0.0)
 
 
+@lru_cache(maxsize=2)
+def _build_fair_template_cached(
+    *,
+    scenario: str,
+    start_year: float,
+    end_year: float,
+    config_csv: str,
+    properties_csv: str,
+    species_key: tuple[str, ...],
+    configs_key: tuple[object, ...],
+    ghg_method: str | None,
+    temperature_prescribed: bool | None,
+) -> fair.FAIR:
+    """Build and cache a configured FaIR template for repeated perturbation runs."""
+    species, properties = read_properties(
+        filename=properties_csv, species=list(species_key)
+    )
+
+    if temperature_prescribed is None:
+        f = fair.FAIR()
+    else:
+        f = fair.FAIR(temperature_prescribed=bool(temperature_prescribed))
+    if ghg_method is not None:
+        f.ghg_method = ghg_method
+    f.define_time(float(start_year), float(end_year), 1)
+    f.define_scenarios([str(scenario)])
+    f.define_configs(list(configs_key))
+    f.define_species(species, properties)
+    f.allocate()
+    f.fill_species_configs(filename=properties_csv)
+    f.override_defaults(config_csv)
+
+    # Initialize arrays to stable values before each deep-copied run.
+    initialise(f.temperature, 0)
+    initialise(f.forcing, 0)
+    return f
+
+
+def _fill_emissions_from_df_fast(
+    f: fair.FAIR,
+    emissions_df: pd.DataFrame,
+    *,
+    scenario: str,
+    year_cols: list[str],
+    year_vals: list[float],
+) -> None:
+    """Fast path for filling FaIR emissions without per-species xarray indexing."""
+    from fair.exceptions import DuplicateScenarioError
+    from fair.io.fill_from import _emissions_unit_convert
+
+    if emissions_df.empty:
+        return
+
+    dup_counts = emissions_df.groupby("variable", sort=False).size()
+    duplicates = dup_counts[dup_counts > 1]
+    if not duplicates.empty:
+        specie = str(duplicates.index[0])
+        raise DuplicateScenarioError(
+            "Input data for emissions contains duplicate "
+            f"rows for variable='{specie}, scenario='{scenario}'."
+        )
+
+    df_by_var = emissions_df.set_index("variable", drop=False)
+    times = np.asarray(year_vals, dtype=float)
+    target_times = np.asarray(f.timepoints, dtype=float)
+    same_grid = times.shape == target_times.shape and np.allclose(times, target_times)
+
+    emissions_data = np.asarray(f.emissions.values, dtype=float)
+    for specie_idx, specie in enumerate(f.species):
+        if f.properties_df.loc[specie, "input_mode"] != "emissions":
+            continue
+        if specie not in df_by_var.index:
+            continue
+
+        row = df_by_var.loc[specie]
+        data_in = row[year_cols].to_numpy(dtype=float, copy=False)
+        if same_grid:
+            data = data_in
+        else:
+            data = np.interp(target_times, times, data_in, left=np.nan, right=np.nan)
+
+        unit = str(row["unit"])
+        is_ghg = bool(f.properties_df.loc[specie, "greenhouse_gas"])
+        converted = _emissions_unit_convert(data, unit, specie, is_ghg)
+        emissions_data[:, 0, :, specie_idx] = converted[:, None]
+
+    f.emissions.data = emissions_data
+
+
 def _inventory_emissions_by_fair_species(
-    trails: Any,
+    inv_data: sparse.COO,
+    inv_years: list[int],
+    n_flow: int,
+    flow_pos_to_key: dict[int, tuple[str, str, str] | str],
     species_map: dict[object, str],
     signs: dict[object, float],
 ) -> pd.DataFrame:
     """inventory emissions by fair species.
 
-    :param trails: Value for `trails`.
-    :type trails: Any
+    :param inv_data: Activity-reduced inventory as flow/year/root sparse COO.
+    :type inv_data: sparse.COO
+    :param inv_years: Inventory years (matching inv_data year axis).
+    :type inv_years: list[int]
+    :param n_flow: Number of flows.
+    :type n_flow: int
+    :param flow_pos_to_key: Flow-position mapping to biosphere flow keys.
+    :type flow_pos_to_key: dict[int, tuple[str, str, str] | str]
     :param species_map: Value for `species_map`.
     :type species_map: dict[object, str]
     :param signs: Value for `signs`.
@@ -75,58 +178,27 @@ def _inventory_emissions_by_fair_species(
     :returns: Return value.
     :rtype: pd.DataFrame
     :raises ValueError: If an error occurs."""
-    inv = trails.inventory
-    if inv is None:
-        raise ValueError("Trails.inventory is empty; run LCA first.")
+    if not flow_pos_to_key:
+        return pd.DataFrame(index=inv_years)
 
-    if "root activity" in inv.dims:
-        inv_sum = inv.sum(dim=["activity", "root activity"])
-    else:
-        inv_sum = inv.sum(dim=["activity"])
+    n_year = len(inv_years)
+    species_order: list[str] = []
+    species_to_idx: dict[str, int] = {}
+    flow_to_species = np.full(n_flow, -1, dtype=int)
+    flow_to_sign = np.ones(n_flow, dtype=float)
 
-    inv_sum = inv_sum.transpose("flow", "year")
-    years = [int(y) for y in inv_sum.coords["year"].values.tolist()]
-
-    # flow position -> name
-    flow_coord = inv_sum.coords["flow"].values
-    coord_value_to_pos = {int(v): i for i, v in enumerate(flow_coord)}
-
-    flow_pos_to_key: dict[int, tuple[str, str, str] | str] = {}
-    for _label, meta in getattr(trails, "biosphere_indices", {}).items():
-        for fid, md in meta.items():
-            if not isinstance(md, dict):
-                continue
-            name = md.get("name")
-            if not name:
-                continue
-            compartment = (md.get("compartment") or "").strip()
-            subcompartment = (md.get("subcompartment") or "").strip()
-            flow_key = (str(name), compartment, subcompartment)
-            fid_int = int(fid)
-            if fid_int in coord_value_to_pos:
-                pos = coord_value_to_pos[fid_int]
-            elif 0 <= fid_int < len(flow_coord):
-                pos = fid_int
-            else:
-                continue
-            flow_pos_to_key.setdefault(pos, flow_key)
-
-    data = inv_sum.data
-    if hasattr(data, "todense"):
-        dense = pd.DataFrame(
-            data.todense(), index=range(len(flow_coord)), columns=years
-        )
-    else:
-        dense = pd.DataFrame(data, index=range(len(flow_coord)), columns=years)
-
-    agg: Dict[str, pd.Series] = {}
     for pos, flow_key in flow_pos_to_key.items():
         fair_species = species_map.get(flow_key)
         if fair_species is None and isinstance(flow_key, tuple):
             fair_species = species_map.get(flow_key[0])
         if fair_species is None:
             continue
-        sign = float(
+        specie = str(fair_species)
+        if specie not in species_to_idx:
+            species_to_idx[specie] = len(species_order)
+            species_order.append(specie)
+        flow_to_species[int(pos)] = species_to_idx[specie]
+        flow_to_sign[int(pos)] = float(
             signs.get(
                 flow_key,
                 signs.get(
@@ -134,15 +206,32 @@ def _inventory_emissions_by_fair_species(
                 ),
             )
         )
-        series = dense.loc[pos]
-        if sign != 1.0:
-            series = series.abs() * sign
-        agg[fair_species] = agg.get(fair_species, 0.0) + series
 
-    if not agg:
-        return pd.DataFrame(index=years)
+    if not species_order:
+        return pd.DataFrame(index=inv_years)
 
-    out = pd.DataFrame(agg)
+    coo = inv_data
+
+    flow_idx = coo.coords[0].astype(int, copy=False)
+    year_idx = coo.coords[1].astype(int, copy=False)
+    vals = coo.data.astype(float, copy=False)
+
+    specie_idx = flow_to_species[flow_idx]
+    valid = specie_idx >= 0
+    agg = np.zeros((len(species_order), n_year), dtype=float)
+    if np.any(valid):
+        specie_valid = specie_idx[valid]
+        year_valid = year_idx[valid]
+        vals_valid = vals[valid]
+        signs_valid = flow_to_sign[flow_idx[valid]]
+        signed_vals = np.where(
+            signs_valid == 1.0, vals_valid, np.abs(vals_valid) * signs_valid
+        )
+        flat_idx = specie_valid * n_year + year_valid
+        flat = agg.reshape(-1)
+        np.add.at(flat, flat_idx, signed_vals)
+
+    out = pd.DataFrame(agg.T, index=inv_years, columns=species_order)
     out.index.name = "year"
     return out
 
@@ -215,7 +304,6 @@ def _run_fair_emissions(
             if properties_csv is None:
                 properties_csv = _default_properties_file()
     properties_csv = Path(properties_csv)
-    species, properties = read_properties(filename=str(properties_csv), species=species)
 
     if config_csv is None:
         config_csv = _find_any_fair_repo_file(
@@ -272,24 +360,25 @@ def _run_fair_emissions(
             config_name = cfg.index[0]
         configs = [_normalize_config_name(config_name)]
 
-    if temperature_prescribed is None:
-        f = fair.FAIR()
-    else:
-        f = fair.FAIR(temperature_prescribed=bool(temperature_prescribed))
-    if ghg_method is not None:
-        f.ghg_method = ghg_method
-    f.define_time(start_year, end_year, 1)
-    f.define_scenarios([scenario])
-    f.define_configs(configs)
-    f.define_species(species, properties)
-    f.allocate()
-    f.fill_species_configs(filename=str(properties_csv))
-    f.override_defaults(str(config_csv))
-    # Initialize temperature and forcing arrays to avoid NaNs in FaIR outputs.
-
-    initialise(f.temperature, 0)
-    initialise(f.forcing, 0)
-    f.fill_from_pandas(mode="emissions", df=df)
+    template = _build_fair_template_cached(
+        scenario=str(scenario),
+        start_year=float(start_year),
+        end_year=float(end_year),
+        config_csv=str(config_csv.resolve()),
+        properties_csv=str(properties_csv.resolve()),
+        species_key=tuple(str(s) for s in species),
+        configs_key=tuple(configs),
+        ghg_method=ghg_method,
+        temperature_prescribed=temperature_prescribed,
+    )
+    f = copy.deepcopy(template)
+    _fill_emissions_from_df_fast(
+        f,
+        df,
+        scenario=str(scenario),
+        year_cols=year_cols,
+        year_vals=year_vals,
+    )
     f.run(progress=progress)
     if not np.isfinite(f.forcing.values).any():
         forcing = _compute_ghg_forcing_from_concentration(f)
@@ -480,6 +569,7 @@ def run_fair_delta_rf(
     validate_rtol: float = 1e-6,
     validate_raise: bool = False,
     per_species_runs: bool = True,
+    per_species_workers: int | None = None,
     quantiles: list[float] | None = None,
 ) -> xr.DataArray:
     """Run fair delta rf.
@@ -520,6 +610,9 @@ def run_fair_delta_rf(
     :type validate_raise: bool
     :param per_species_runs: Value for `per_species_runs`.
     :type per_species_runs: bool
+    :param per_species_workers: Number of workers for per-species FaIR runs.
+        If ``None``, an automatic worker count is used.
+    :type per_species_workers: int | None
     :param quantiles: Value for `quantiles`.
     :type quantiles: list[float] | None
     :returns: Return value.
@@ -533,6 +626,10 @@ def run_fair_delta_rf(
             raise ValueError("scale_target_fraction must be > 0.")
     elif scale_factor <= 0:
         raise ValueError("scale_factor must be > 0.")
+    if per_species_workers is not None and int(per_species_workers) < 1:
+        raise ValueError("per_species_workers must be >= 1 when provided.")
+    if per_species_workers is not None:
+        per_species_workers = int(per_species_workers)
     df = load_emissions_csv(emissions_csv)
     species_map, signs = load_species_mapping(mapping_yaml)
     if quantiles is None:
@@ -551,6 +648,69 @@ def run_fair_delta_rf(
             cfg = pd.read_csv(cfg_path, index_col=0)
             config_names = [str(x) for x in cfg.index.tolist()]
 
+    inv = trails.inventory
+    if inv is None:
+        raise ValueError("Trails.inventory is empty; run LCA first.")
+
+    if "root activity" not in inv.dims:
+        raise ValueError("Trails.inventory must include 'root activity' for delta RF.")
+
+    dims = list(inv.dims)
+    if "activity" not in dims or "flow" not in dims or "year" not in dims:
+        raise ValueError("Trails.inventory must include activity/flow/year dimensions.")
+    activity_axis = dims.index("activity")
+    flow_axis = dims.index("flow")
+    year_axis = dims.index("year")
+    root_axis = dims.index("root activity")
+
+    inv_raw = inv.data
+    if isinstance(inv_raw, sparse.COO):
+        coo_full = inv_raw
+    else:
+        coo_full = sparse.COO.from_numpy(np.asarray(inv_raw, dtype=float))
+
+    # Reduce once over activity and reuse this COO for both species deltas and
+    # per-flow/root allocations to avoid duplicate sparse reductions.
+    inv_data = coo_full.sum(axis=activity_axis)
+    remaining_axes = [i for i in range(coo_full.ndim) if i != activity_axis]
+    flow_new_axis = remaining_axes.index(flow_axis)
+    year_new_axis = remaining_axes.index(year_axis)
+    root_new_axis = remaining_axes.index(root_axis)
+    if inv_data.ndim != 3:
+        raise ValueError(
+            "Unexpected inventory shape after aggregation to flow/year/root."
+        )
+    if (flow_new_axis, year_new_axis, root_new_axis) != (0, 1, 2):
+        inv_data = inv_data.transpose((flow_new_axis, year_new_axis, root_new_axis))
+
+    n_flow = int(inv.sizes["flow"])
+    n_root = int(inv.sizes["root activity"])
+
+    flow_coord = inv.coords["flow"].values
+    coord_value_to_pos = {int(v): i for i, v in enumerate(flow_coord)}
+
+    flow_pos_to_key: dict[int, tuple[str, str, str] | str] = {}
+    for _label, meta in getattr(trails, "biosphere_indices", {}).items():
+        for fid, md in meta.items():
+            if not isinstance(md, dict):
+                continue
+            name = md.get("name")
+            if not name:
+                continue
+            compartment = (md.get("compartment") or "").strip()
+            subcompartment = (md.get("subcompartment") or "").strip()
+            flow_key = (str(name), compartment, subcompartment)
+            key = int(fid)
+            if key in coord_value_to_pos:
+                pos = coord_value_to_pos[key]
+            elif 0 <= key < len(flow_coord):
+                pos = key
+            else:
+                continue
+            flow_pos_to_key.setdefault(pos, flow_key)
+
+    inv_years = [int(y) for y in inv.coords["year"].values.tolist()]
+
     # Baseline run
     f_base = _run_fair_emissions(
         df,
@@ -565,12 +725,18 @@ def run_fair_delta_rf(
         progress=False,
     )
 
-    # Build perturbations from Trails inventory
-    delta_by_species = _inventory_emissions_by_fair_species(trails, species_map, signs)
+    # Build perturbations from activity-reduced inventory (single sparse reduction path).
+    delta_by_species = _inventory_emissions_by_fair_species(
+        inv_data,
+        inv_years,
+        n_flow,
+        flow_pos_to_key,
+        species_map,
+        signs,
+    )
     no_perturbation = delta_by_species.empty
-    if no_perturbation:
-        if scale_factor is None:
-            scale_factor = 1.0
+    if no_perturbation and scale_factor is None:
+        scale_factor = 1.0
 
     # Determine if the emissions baseline uses half-year columns (e.g., 1750.5)
     base_year_cols, base_year_vals = _extract_year_columns(df)
@@ -743,51 +909,11 @@ def run_fair_delta_rf(
     fair_years = [float(y) for y in forcing_base.coords["timebounds"].values.tolist()]
     year_to_fair_idx = {y: i for i, y in enumerate(fair_years)}
 
-    inv = trails.inventory
-    if inv is None:
-        raise ValueError("Trails.inventory is empty; run LCA first.")
-
-    if "root activity" not in inv.dims:
-        raise ValueError("Trails.inventory must include 'root activity' for delta RF.")
-
-    inv_sum = inv.sum(dim=["activity"]).transpose("flow", "year", "root activity")
-    inv_data = inv_sum.data
-    if not isinstance(inv_data, sparse.COO):
-        inv_data = sparse.COO.from_numpy(np.asarray(inv_data))
-
-    n_flow = int(inv_sum.sizes["flow"])
-    n_root = int(inv_sum.sizes["root activity"])
-
-    flow_coord = inv_sum.coords["flow"].values
-    coord_value_to_pos = {int(v): i for i, v in enumerate(flow_coord)}
-
-    flow_pos_to_key: dict[int, tuple[str, str, str] | str] = {}
-    for _label, meta in getattr(trails, "biosphere_indices", {}).items():
-        for fid, md in meta.items():
-            if not isinstance(md, dict):
-                continue
-            name = md.get("name")
-            if not name:
-                continue
-            compartment = (md.get("compartment") or "").strip()
-            subcompartment = (md.get("subcompartment") or "").strip()
-            flow_key = (str(name), compartment, subcompartment)
-            key = int(fid)
-            if key in coord_value_to_pos:
-                pos = coord_value_to_pos[key]
-            elif 0 <= key < len(flow_coord):
-                pos = key
-            else:
-                continue
-            flow_pos_to_key.setdefault(pos, flow_key)
-
     # Build per-species sparse entries
     flow_idx = inv_data.coords[0]
     year_idx = inv_data.coords[1]
     root_idx = inv_data.coords[2]
     data = inv_data.data.astype(float, copy=False)
-
-    inv_years = [int(y) for y in inv_sum.coords["year"].values.tolist()]
 
     coords_out = []
     data_out = []
@@ -1028,160 +1154,139 @@ def run_fair_delta_rf(
         temp_coords_out.append(np.vstack([q_out, y_out, f_out, r_out]))
         temp_data_out.append(TEMP_alloc[row_idx, col_idx].astype(float, copy=False))
 
+    def _compute_species_quantiles(
+        specie: str, delta_series: pd.Series
+    ) -> tuple[np.ndarray, np.ndarray] | None:
+        df_pert = _build_perturbed_df(df, specie, delta_series)
+        f_pert = _run_fair_emissions(
+            df_pert,
+            scenario,
+            config_csv=config_csv,
+            properties_csv=properties_csv,
+            config_name=config_name,
+            config_names=config_names,
+            ghg_method=ghg_method,
+            temperature_prescribed=temperature_prescribed,
+            debug=debug,
+            progress=False,
+        )
+        if config_names is not None and len(config_names) > 1:
+            forcing_pert = f_pert.forcing.sel(scenario=scenario)
+            temp_pert = f_pert.temperature.sel(scenario=scenario)
+        else:
+            forcing_pert = f_pert.forcing.sel(
+                scenario=scenario, config=f_pert.configs[0]
+            )
+            temp_pert = f_pert.temperature.sel(
+                scenario=scenario, config=f_pert.configs[0]
+            )
+        delta_forcing = forcing_pert - forcing_base
+        delta_temp = temp_pert - temp_base
+        if debug:
+            try:
+                arr = np.asarray(delta_temp.values, dtype=float)
+                print(
+                    "FAIR debug: delta_temp min/max/finite",
+                    float(np.nanmin(arr)),
+                    float(np.nanmax(arr)),
+                    int(np.isfinite(arr).sum()),
+                )
+            except Exception:
+                pass
+
+        effective_scale = 1.0 if scale_factor is None else float(scale_factor)
+        if effective_scale != 1.0:
+            delta_forcing = delta_forcing / effective_scale
+            delta_temp = delta_temp / effective_scale
+
+        alias = rf_alias.get(specie, specie)
+        if alias not in delta_forcing.coords["specie"].values:
+            return None
+
+        if config_names is not None and len(config_names) > 1:
+            rf_series = _extract_fair_timeseries_by_config(
+                delta_forcing.sel(specie=alias)
+            )
+            rf_quant = _safe_nanpercentile(rf_series, quantiles)
+            temp_series = _extract_fair_timeseries_by_config(delta_temp)
+            temp_quant = _safe_nanpercentile(temp_series, quantiles)
+        else:
+            rf_series = np.asarray(delta_forcing.sel(specie=alias).values, dtype=float)
+            rf_series = np.nan_to_num(rf_series, nan=0.0)
+            rf_series = np.ravel(rf_series)
+            rf_quant = np.tile(rf_series[None, :], (n_quant, 1))
+            temp_series = _extract_fair_timeseries(delta_temp)
+            temp_series = np.nan_to_num(temp_series, nan=0.0)
+            temp_quant = np.tile(temp_series[None, :], (n_quant, 1))
+        return rf_quant, temp_quant
+
     if no_perturbation:
         if debug:
             print("FAIR debug: no perturbations; delta RF will be zero.")
     elif per_species_runs:
         delta_by_species_pos = delta_by_species.clip(lower=0.0)
         delta_by_species_neg = delta_by_species.clip(upper=0.0)
-        pbar = tqdm(
-            delta_by_species.columns.tolist(),
-            desc="FaIR per-species",
-            unit="specie",
-        )
-        for specie in pbar:
-            pbar.set_postfix_str(str(specie))
+
+        work_items: list[tuple[str, str, pd.Series]] = []
+        for specie in delta_by_species.columns.tolist():
+            specie_str = str(specie)
             series_pos = delta_by_species_pos[specie]
             if np.any(series_pos.values != 0):
-                df_pert = _build_perturbed_df(df, specie, series_pos)
-                f_pert = _run_fair_emissions(
-                    df_pert,
-                    scenario,
-                    config_csv=config_csv,
-                    properties_csv=properties_csv,
-                    config_name=config_name,
-                    config_names=config_names,
-                    ghg_method=ghg_method,
-                    temperature_prescribed=temperature_prescribed,
-                    debug=debug,
-                    progress=False,
-                )
-                if config_names is not None and len(config_names) > 1:
-                    forcing_pert = f_pert.forcing.sel(scenario=scenario)
-                    temp_pert = f_pert.temperature.sel(scenario=scenario)
-                else:
-                    forcing_pert = f_pert.forcing.sel(
-                        scenario=scenario, config=f_pert.configs[0]
-                    )
-                    temp_pert = f_pert.temperature.sel(
-                        scenario=scenario, config=f_pert.configs[0]
-                    )
-                delta_forcing = forcing_pert - forcing_base
-                delta_temp = temp_pert - temp_base
-                if debug:
-                    try:
-                        arr = np.asarray(delta_temp.values, dtype=float)
-                        print(
-                            "FAIR debug: delta_temp min/max/finite",
-                            float(np.nanmin(arr)),
-                            float(np.nanmax(arr)),
-                            int(np.isfinite(arr).sum()),
-                        )
-                    except Exception:
-                        pass
-                if scale_factor is None:
-                    scale_factor = 1.0
-                if scale_factor != 1.0:
-                    delta_forcing = delta_forcing / float(scale_factor)
-                    delta_temp = delta_temp / float(scale_factor)
-
-                alias = rf_alias.get(specie, specie)
-                if alias in delta_forcing.coords["specie"].values:
-                    if config_names is not None and len(config_names) > 1:
-                        rf_series = _extract_fair_timeseries_by_config(
-                            delta_forcing.sel(specie=alias)
-                        )
-                        rf_quant = _safe_nanpercentile(rf_series, quantiles)
-                        temp_series = _extract_fair_timeseries_by_config(delta_temp)
-                        temp_quant = _safe_nanpercentile(temp_series, quantiles)
-                    else:
-                        rf_series = np.asarray(
-                            delta_forcing.sel(specie=alias).values, dtype=float
-                        )
-                        rf_series = np.nan_to_num(rf_series, nan=0.0)
-                        rf_series = np.ravel(rf_series)
-                        rf_quant = np.tile(rf_series[None, :], (n_quant, 1))
-                        temp_series = _extract_fair_timeseries(delta_temp)
-                        temp_series = np.nan_to_num(temp_series, nan=0.0)
-                        temp_quant = np.tile(temp_series[None, :], (n_quant, 1))
-                    for qi in range(n_quant):
-                        _append_allocated_rf(
-                            specie, rf_quant[qi], "pos", quantile_idx=qi
-                        )
-                        _append_allocated_temp(
-                            specie, temp_quant[qi], "pos", quantile_idx=qi
-                        )
-
+                work_items.append((specie_str, "pos", series_pos.copy()))
             series_neg = delta_by_species_neg[specie]
             if np.any(series_neg.values != 0):
-                df_pert = _build_perturbed_df(df, specie, series_neg)
-                f_pert = _run_fair_emissions(
-                    df_pert,
-                    scenario,
-                    config_csv=config_csv,
-                    properties_csv=properties_csv,
-                    config_name=config_name,
-                    config_names=config_names,
-                    ghg_method=ghg_method,
-                    temperature_prescribed=temperature_prescribed,
-                    debug=debug,
-                    progress=False,
-                )
-                if config_names is not None and len(config_names) > 1:
-                    forcing_pert = f_pert.forcing.sel(scenario=scenario)
-                    temp_pert = f_pert.temperature.sel(scenario=scenario)
-                else:
-                    forcing_pert = f_pert.forcing.sel(
-                        scenario=scenario, config=f_pert.configs[0]
-                    )
-                    temp_pert = f_pert.temperature.sel(
-                        scenario=scenario, config=f_pert.configs[0]
-                    )
-                delta_forcing = forcing_pert - forcing_base
-                delta_temp = temp_pert - temp_base
-                if debug:
-                    try:
-                        arr = np.asarray(delta_temp.values, dtype=float)
-                        print(
-                            "FAIR debug: delta_temp min/max/finite",
-                            float(np.nanmin(arr)),
-                            float(np.nanmax(arr)),
-                            int(np.isfinite(arr).sum()),
-                        )
-                    except Exception:
-                        pass
-                if scale_factor is None:
-                    scale_factor = 1.0
-                if scale_factor != 1.0:
-                    delta_forcing = delta_forcing / float(scale_factor)
-                    delta_temp = delta_temp / float(scale_factor)
+                work_items.append((specie_str, "neg", series_neg.copy()))
 
-                alias = rf_alias.get(specie, specie)
-                if alias in delta_forcing.coords["specie"].values:
-                    if config_names is not None and len(config_names) > 1:
-                        rf_series = _extract_fair_timeseries_by_config(
-                            delta_forcing.sel(specie=alias)
-                        )
-                        rf_quant = _safe_nanpercentile(rf_series, quantiles)
-                        temp_series = _extract_fair_timeseries_by_config(delta_temp)
-                        temp_quant = _safe_nanpercentile(temp_series, quantiles)
-                    else:
-                        rf_series = np.asarray(
-                            delta_forcing.sel(specie=alias).values, dtype=float
-                        )
-                        rf_series = np.nan_to_num(rf_series, nan=0.0)
-                        rf_series = np.ravel(rf_series)
-                        rf_quant = np.tile(rf_series[None, :], (n_quant, 1))
-                        temp_series = _extract_fair_timeseries(delta_temp)
-                        temp_series = np.nan_to_num(temp_series, nan=0.0)
-                        temp_quant = np.tile(temp_series[None, :], (n_quant, 1))
-                    for qi in range(n_quant):
-                        _append_allocated_rf(
-                            specie, rf_quant[qi], "neg", quantile_idx=qi
-                        )
-                        _append_allocated_temp(
-                            specie, temp_quant[qi], "neg", quantile_idx=qi
-                        )
+        results: dict[tuple[str, str], tuple[np.ndarray, np.ndarray] | None] = {}
+        if work_items:
+            if per_species_workers is None:
+                auto_workers = os.cpu_count() or 1
+                max_workers = min(4, auto_workers, len(work_items))
+            else:
+                max_workers = min(per_species_workers, len(work_items))
+            max_workers = max(1, int(max_workers))
+            if debug:
+                print(
+                    "FAIR debug: per-species workers",
+                    max_workers,
+                    "items",
+                    len(work_items),
+                )
+
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                future_to_key = {
+                    executor.submit(
+                        _compute_species_quantiles,
+                        specie,
+                        series,
+                    ): (specie, sign_mode)
+                    for specie, sign_mode, series in work_items
+                }
+                with tqdm(
+                    total=len(work_items),
+                    desc="FaIR per-species",
+                    unit="run",
+                ) as pbar:
+                    for future in as_completed(future_to_key):
+                        key = future_to_key[future]
+                        results[key] = future.result()
+                        pbar.set_postfix_str(f"{key[0]}:{key[1]}")
+                        pbar.update(1)
+
+        for specie in delta_by_species.columns.tolist():
+            specie_str = str(specie)
+            for sign_mode in ("pos", "neg"):
+                quantiles_pair = results.get((specie_str, sign_mode))
+                if quantiles_pair is None:
+                    continue
+                rf_quant, temp_quant = quantiles_pair
+                for qi in range(n_quant):
+                    _append_allocated_rf(
+                        specie_str, rf_quant[qi], sign_mode, quantile_idx=qi
+                    )
+                    _append_allocated_temp(
+                        specie_str, temp_quant[qi], sign_mode, quantile_idx=qi
+                    )
     else:
         df_pert = _build_perturbed_df(df, None)
         f_pert = _run_fair_emissions(
@@ -1271,8 +1376,8 @@ def run_fair_delta_rf(
         coords={
             "quantile": np.array(quantiles, dtype=float),
             "year": year_coord,
-            "flow": inv_sum.coords["flow"],
-            "root activity": inv_sum.coords["root activity"],
+            "flow": inv.coords["flow"],
+            "root activity": inv.coords["root activity"],
         },
     )
     if temp_coords_out:
@@ -1295,8 +1400,8 @@ def run_fair_delta_rf(
         coords={
             "quantile": np.array(quantiles, dtype=float),
             "year": year_coord,
-            "flow": inv_sum.coords["flow"],
-            "root activity": inv_sum.coords["root activity"],
+            "flow": inv.coords["flow"],
+            "root activity": inv.coords["root activity"],
         },
     )
     return trails.instant_radiative_forcing

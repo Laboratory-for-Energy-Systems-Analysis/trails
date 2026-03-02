@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional, Callable
 import importlib
 import importlib.util
 from collections import defaultdict, deque
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import numpy as np
@@ -503,6 +504,10 @@ class Trails:
         self._inventory_year_index = {int(y): int(i) for i, y in enumerate(years)}
         self._inventory_has_root = bool(attribute_to_roots)
 
+        # Linearized inventory builders (fast append + finalize dedup)
+        self._inv_key_parts = []
+        self._inv_value_parts = []
+
         # Initialize inventory chunk builders (block-based appends)
         self._inv_chunk_act = []
         self._inv_chunk_year = []
@@ -844,6 +849,33 @@ class Trails:
                     max_offset = max(max_offset, int(offset_max))
         return min_offset, max_offset
 
+    def _linearize_inventory_entries(
+        self,
+        act_idx: np.ndarray,
+        flow_idx: np.ndarray,
+        year_idx: np.ndarray,
+        *,
+        root_idx: np.ndarray | None = None,
+    ) -> np.ndarray:
+        """Linearize inventory coordinates into 1D integer keys."""
+        if self.A is None or self.B is None or self._inventory_years is None:
+            raise RuntimeError(
+                "Inventory dimensions not initialized. Call reset_inventory() first."
+            )
+
+        n_acts = int(self.A.shape[1])
+        n_flows = int(self.B.shape[2])
+        n_years = int(self._inventory_years.size)
+
+        acts = np.asarray(act_idx, dtype=np.int64)
+        flows = np.asarray(flow_idx, dtype=np.int64)
+        years = np.asarray(year_idx, dtype=np.int64)
+        keys = ((acts * n_flows) + flows) * n_years + years
+        if root_idx is not None:
+            roots = np.asarray(root_idx, dtype=np.int64)
+            keys = keys * n_acts + roots
+        return keys
+
     def _append_inventory_entries(
         self,
         act_idx: int,
@@ -867,10 +899,10 @@ class Trails:
         :type root_activity: int | None
         :raises RuntimeError: If an error occurs.
         :raises ValueError: If an error occurs."""
-        # Chunk builders must exist (single source of truth)
-        if not hasattr(self, "_inv_chunk_len"):
+        # Inventory builders must exist
+        if not hasattr(self, "_inv_key_parts"):
             raise RuntimeError(
-                "Inventory chunk builders not initialized. Call reset_inventory() first."
+                "Inventory builders not initialized. Call reset_inventory() first."
             )
 
         y = self._clamp_year_to_inventory(int(year))
@@ -915,18 +947,23 @@ class Trails:
         if n == 0:
             return
 
-        # Append one chunk
-        self._inv_chunk_act.append(int(act_idx))
-        self._inv_chunk_year.append(int(year_idx))
-
+        acts = np.full(n, int(act_idx), dtype=np.int64)
+        years = np.full(n, int(year_idx), dtype=np.int64)
         if getattr(self, "_inventory_has_root", False):
             if root_activity is None:
                 root_activity = int(act_idx)
-            self._inv_chunk_root.append(int(root_activity))
+            roots = np.full(n, int(root_activity), dtype=np.int64)
+        else:
+            roots = None
 
-        self._inv_chunk_flows.append(flows_i64)
-        self._inv_chunk_values.append(vals_out)
-        self._inv_chunk_len.append(n)
+        keys = self._linearize_inventory_entries(
+            acts,
+            flows_i64,
+            years,
+            root_idx=roots,
+        )
+        self._inv_key_parts.append(keys)
+        self._inv_value_parts.append(vals_out)
 
     def _append_scores_bulk(
         self,
@@ -1028,9 +1065,9 @@ class Trails:
         :type root_activity: int | np.ndarray | None
         :raises RuntimeError: If an error occurs.
         :raises ValueError: If an error occurs."""
-        if not hasattr(self, "_inv_bulk_flow"):
+        if not hasattr(self, "_inv_key_parts"):
             raise RuntimeError(
-                "Inventory bulk builders not initialized. Call reset_inventory() first."
+                "Inventory builders not initialized. Call reset_inventory() first."
             )
 
         acts_arr = np.asarray(act_idx)
@@ -1047,29 +1084,25 @@ class Trails:
                 "act, flow, and value arrays must have the same length for bulk append."
             )
 
+        years_axis = self._inventory_years
+        if years_axis is None or years_axis.size == 0:
+            raise RuntimeError(
+                "Inventory years not initialized. Call reset_inventory() first."
+            )
+        y0 = int(years_axis[0])
+        y1 = int(years_axis[-1])
+
         if isinstance(year, np.ndarray):
             years_arr = np.asarray(year)
             if years_arr.shape[0] != flows_arr.shape[0]:
                 raise ValueError(
                     "year array must match act/flow/value length for bulk append."
                 )
-            years_arr = np.asarray(year)
-            y0 = int(self._inventory_years[0])
-            y1 = int(self._inventory_years[-1])
             years_clamped = np.clip(years_arr.astype(np.int64, copy=False), y0, y1)
-
-            year_idx = np.fromiter(
-                (self._inventory_year_index[int(y)] for y in years_clamped),
-                dtype=np.int64,
-                count=years_clamped.size,
-            )
+            year_idx = years_clamped - y0
         else:
             y = self._clamp_year_to_inventory(int(year))
-            year_idx_val = self._inventory_year_index.get(y)
-            if year_idx_val is None:
-                return
-
-            year_idx = np.full(flows_arr.shape[0], int(year_idx_val), dtype=np.int64)
+            year_idx = np.full(flows_arr.shape[0], int(y - y0), dtype=np.int64)
 
         mask = vals_arr != 0.0
         if not np.any(mask):
@@ -1084,11 +1117,6 @@ class Trails:
         else:
             vals_out = vals_arr[mask]
 
-        self._inv_bulk_act.append(acts_out)
-        self._inv_bulk_year.append(years_out)
-        self._inv_bulk_flow.append(flows_out)
-        self._inv_bulk_value.append(vals_out)
-
         if getattr(self, "_inventory_has_root", False):
             if root_activity is None:
                 root_arr = acts_out
@@ -1102,7 +1130,18 @@ class Trails:
                     )
                 else:
                     root_arr = root_arr[mask]
-            self._inv_bulk_root.append(np.asarray(root_arr, dtype=np.int64))
+            root_out = np.asarray(root_arr, dtype=np.int64)
+        else:
+            root_out = None
+
+        keys = self._linearize_inventory_entries(
+            acts_out,
+            flows_out,
+            years_out,
+            root_idx=root_out,
+        )
+        self._inv_key_parts.append(keys)
+        self._inv_value_parts.append(vals_out)
 
     def finalize_inventory(self) -> xr.DataArray:
         """Finalize inventory.
@@ -1120,72 +1159,98 @@ class Trails:
                 "Inventory years not initialized. Call reset_inventory()."
             )
 
-        if not hasattr(self, "_inv_chunk_len"):
+        if not hasattr(self, "_inv_key_parts"):
             raise RuntimeError(
-                "Inventory chunk builders not initialized. Call reset_inventory()."
+                "Inventory builders not initialized. Call reset_inventory()."
             )
 
         n_activities = int(self.A.shape[1])
         n_flows = int(self.B.shape[2])
         has_root = bool(getattr(self, "_inventory_has_root", False))
 
-        coords_parts: list[np.ndarray] = []
-        data_parts: list[np.ndarray] = []
-        root_parts: list[np.ndarray] = []
+        if self._inv_key_parts:
+            if len(self._inv_key_parts) != len(self._inv_value_parts):
+                raise RuntimeError(
+                    "Inventory key/value builders are inconsistent. "
+                    "Call reset_inventory() and rerun lca()."
+                )
 
-        if self._inv_chunk_len:
-            flows_chunk = np.concatenate(self._inv_chunk_flows).astype(
-                np.int64, copy=False
-            )
-            data_chunk = np.concatenate(self._inv_chunk_values)
-
-            lens = np.asarray(self._inv_chunk_len, dtype=np.int64)
-
-            act_chunk = np.repeat(np.asarray(self._inv_chunk_act, dtype=np.int64), lens)
-            year_chunk = np.repeat(
-                np.asarray(self._inv_chunk_year, dtype=np.int64), lens
+            keys = np.concatenate(self._inv_key_parts).astype(np.int64, copy=False)
+            data = np.concatenate(self._inv_value_parts).astype(
+                self.value_dtype, copy=False
             )
 
-            coords_parts.append(np.vstack([act_chunk, flows_chunk, year_chunk]))
-            data_parts.append(data_chunk)
+            # Free builder references once contiguous arrays are materialized.
+            self._inv_key_parts.clear()
+            self._inv_value_parts.clear()
 
-            if has_root:
-                root_chunk = np.repeat(
-                    np.asarray(self._inv_chunk_root, dtype=np.int64), lens
+            if keys.size:
+                # Reassign sorted arrays to drop pre-sort buffers earlier and
+                # keep the fast argsort path.
+                order = np.argsort(keys, kind="quicksort")
+                keys = keys[order]
+                data = data[order]
+                del order
+
+                first = np.empty(keys.size, dtype=bool)
+                first[0] = True
+                first[1:] = keys[1:] != keys[:-1]
+                group_starts = np.flatnonzero(first)
+                data_agg = np.add.reduceat(data, group_starts).astype(
+                    self.value_dtype, copy=False
                 )
-                root_parts.append(root_chunk)
+                keys_agg = keys[group_starts].copy()
 
-        if self._inv_bulk_flow:
-            act_bulk = np.concatenate(self._inv_bulk_act).astype(np.int64, copy=False)
-            flow_bulk = np.concatenate(self._inv_bulk_flow).astype(np.int64, copy=False)
-            year_bulk = np.concatenate(self._inv_bulk_year).astype(np.int64, copy=False)
-            data_bulk = np.concatenate(self._inv_bulk_value)
-            coords_parts.append(np.vstack([act_bulk, flow_bulk, year_bulk]))
-            data_parts.append(data_bulk)
+                keep = data_agg != 0.0
+                keys_agg = keys_agg[keep]
+                data_agg = data_agg[keep]
 
+                del first
+                del group_starts
+            else:
+                keys_agg = np.empty(0, dtype=np.int64)
+                data_agg = np.empty(0, dtype=self.value_dtype)
+
+            n_years = int(len(years))
             if has_root:
-                root_bulk = np.concatenate(self._inv_bulk_root).astype(
-                    np.int64, copy=False
-                )
-                root_parts.append(root_bulk)
+                shape = (n_activities, n_flows, n_years, n_activities)
+            else:
+                shape = (n_activities, n_flows, n_years)
 
-        if data_parts:
-            coords_base = np.hstack(coords_parts)
-            data = np.concatenate(data_parts)
-            if has_root:
-                root_all = np.concatenate(root_parts)
-                coords = np.vstack([coords_base, root_all])
+            # Keep inventory coordinates int64 to avoid uint64 reduce index
+            # promotion in sparse reductions on large reshaped arrays.
+            coord_dtype = np.int64
+
+            if keys_agg.size:
+                # Decode linearized keys in-place to avoid allocating several
+                # large temporary coordinate arrays.
+                if has_root:
+                    coords = np.empty((4, keys_agg.size), dtype=coord_dtype)
+                    q = keys_agg
+                    np.remainder(q, n_activities, out=coords[3])
+                    np.floor_divide(q, n_activities, out=q)
+                    np.remainder(q, n_years, out=coords[2])
+                    np.floor_divide(q, n_years, out=q)
+                    np.remainder(q, n_flows, out=coords[1])
+                    np.floor_divide(q, n_flows, out=coords[0])
+                else:
+                    coords = np.empty((3, keys_agg.size), dtype=coord_dtype)
+                    q = keys_agg
+                    np.remainder(q, n_years, out=coords[2])
+                    np.floor_divide(q, n_years, out=q)
+                    np.remainder(q, n_flows, out=coords[1])
+                    np.floor_divide(q, n_flows, out=coords[0])
+
                 inv = sparse.COO(
                     coords,
-                    data,
-                    shape=(n_activities, n_flows, len(years), n_activities),
+                    data_agg,
+                    shape=shape,
+                    has_duplicates=False,
+                    sorted=True,
+                    idx_dtype=coord_dtype,
                 )
             else:
-                inv = sparse.COO(
-                    coords_base,
-                    data,
-                    shape=(n_activities, n_flows, len(years)),
-                )
+                inv = sparse.zeros(shape, dtype=self.value_dtype)
         else:
             if has_root:
                 inv = sparse.zeros(
@@ -1208,6 +1273,9 @@ class Trails:
             coords_xr["root activity"] = np.arange(n_activities, dtype=int)
 
         self.inventory = xr.DataArray(inv, dims=dims, coords=coords_xr)
+        # Builders are no longer needed once inventory is finalized.
+        self._inv_key_parts = []
+        self._inv_value_parts = []
         return self.inventory
 
     # ------------------------------------------------------------------
@@ -3503,7 +3571,6 @@ class Trails:
                     if pulses is None:
                         pulses = pulses_from_key(k)
                         pulse_cache[k] = pulses
-
                     if not pulses:
                         continue
 
@@ -3629,7 +3696,9 @@ class Trails:
         :param use_temporal_distributions: Value for `use_temporal_distributions`.
         :type use_temporal_distributions: bool
         :param debug: Value for `debug`.
-        :type debug: bool"""
+        :type debug: bool
+        :param workers: Optional worker count used by the no-TD batch fast path.
+        :type workers: int | None"""
         dbg = self._get_debug_flow_filters(debug=debug)
 
         if not supply_by_activity:
@@ -3647,6 +3716,9 @@ class Trails:
         tpl_label = ctx.tpl_label
         td_expanded_cache = ctx.td_expanded_cache
         pulse_cache = ctx.pulse_cache
+        if not hasattr(self, "_td_pulse_array_cache"):
+            self._td_pulse_array_cache = {}  # type: ignore[attr-defined]
+        pulse_array_cache = self._td_pulse_array_cache  # type: ignore[attr-defined]
 
         year_map_cache = ctx.year_map_cache
         t_eff_cache = ctx.t_eff_cache
@@ -3724,16 +3796,87 @@ class Trails:
             )
             return
 
-        append_entries = self._append_inventory_entries
         append_bulk = self._append_inventory_entries_bulk
         has_root = bool(getattr(self, "_inventory_has_root", False))
         store_act = int(store_activity) if store_activity is not None else None
+        base_t = int(ctx.t)
 
         dbg_flow_id = None if dbg is None else dbg.get("flow_id")
         dbg_year = None if dbg is None else dbg.get("year")
         dbg_act = None if dbg is None else dbg.get("act")
         dbg_max_pulses = 0 if dbg is None else int(dbg.get("max_pulses", 12))
         dbg_max_matches = 0 if dbg is None else int(dbg.get("max_matches", 50))
+        ported_kernel = self._get_numba_ported_kernel()
+
+        queued_act_values: list[int] = []
+        queued_year_parts: list[np.ndarray | int] = []
+        queued_flow_parts: list[np.ndarray] = []
+        queued_value_parts: list[np.ndarray] = []
+        queued_root_values: list[int] = []
+        queued_nnz = 0
+        flush_nnz = int(getattr(self, "_bio_inventory_flush_nnz", 2_000_000))
+        if flush_nnz < 100_000:
+            flush_nnz = 100_000
+        matrix_year_groups_cache: dict[
+            tuple, list[tuple[int, np.ndarray, np.ndarray]]
+        ] = {}
+
+        def flush_queued_inventory() -> None:
+            nonlocal queued_nnz
+            if not queued_flow_parts:
+                return
+            if len(queued_flow_parts) == 1:
+                flow_all = queued_flow_parts[0]
+                value_all = queued_value_parts[0]
+                total_nnz = int(flow_all.size)
+                year_part = queued_year_parts[0]
+                if isinstance(year_part, np.ndarray):
+                    year_all = year_part
+                else:
+                    year_all = np.empty(total_nnz, dtype=np.int64)
+                    year_all.fill(int(year_part))
+                act_all = np.empty(total_nnz, dtype=np.int64)
+                act_all.fill(int(queued_act_values[0]))
+                if has_root:
+                    root_all = np.empty(total_nnz, dtype=np.int64)
+                    root_all.fill(int(queued_root_values[0]))
+                else:
+                    root_all = None
+            else:
+                flow_all = np.concatenate(queued_flow_parts)
+                value_all = np.concatenate(queued_value_parts)
+                total_nnz = int(flow_all.size)
+
+                year_all = np.empty(total_nnz, dtype=np.int64)
+                act_all = np.empty(total_nnz, dtype=np.int64)
+                root_all = np.empty(total_nnz, dtype=np.int64) if has_root else None
+                cursor = 0
+                for i, flow_part in enumerate(queued_flow_parts):
+                    n = int(flow_part.size)
+                    year_part = queued_year_parts[i]
+                    if isinstance(year_part, np.ndarray):
+                        year_all[cursor : cursor + n] = year_part
+                    else:
+                        year_all[cursor : cursor + n] = int(year_part)
+                    act_all[cursor : cursor + n] = int(queued_act_values[i])
+                    if has_root and root_all is not None:
+                        root_all[cursor : cursor + n] = int(queued_root_values[i])
+                    cursor += n
+
+            append_bulk(
+                act_all,
+                year_all,
+                flow_all,
+                value_all,
+                root_activity=root_all,
+            )
+
+            queued_act_values.clear()
+            queued_year_parts.clear()
+            queued_flow_parts.clear()
+            queued_value_parts.clear()
+            queued_root_values.clear()
+            queued_nnz = 0
 
         for act_idx, supply_amt in supply_by_activity.items():
             supply_amt = float(supply_amt)
@@ -3759,6 +3902,13 @@ class Trails:
             vals_full = data_sorted[start:end]
 
             scaled_full = supply_amt * vals_full.astype(np.float64, copy=False)
+            flows_full_i64 = flows_full.astype(np.int64, copy=False)
+
+            anchor_flow_parts: list[np.ndarray] = []
+            anchor_value_parts: list[np.ndarray] = []
+            row_flow_parts: list[np.ndarray] = []
+            row_year_parts: list[np.ndarray] = []
+            row_value_parts: list[np.ndarray] = []
 
             if dbg is not None and dbg_flow_id is not None:
                 if dbg_act is None or int(dbg_act) == int(a):
@@ -3783,53 +3933,10 @@ class Trails:
             else:
                 temporalize = None
 
-            # TD metadata is keyed by (tpl_label, act, flow) and does not depend on scenario slice t.
-            cache_key = (tpl_label, int(a))
+            # TD metadata is stable for a given template/scenario-slice/activity row signature.
+            cache_key = (tpl_label, base_t, int(a), int(start), int(end))
 
             td_struct = td_expanded_cache.get(cache_key)
-            if td_struct is not None:
-                row_len = int(end - start)
-                no_td_idx, ported_groups, matrix_entries = td_struct
-                stale = False
-
-                if no_td_idx is not None and no_td_idx.size:
-                    if (
-                        no_td_idx.max(initial=-1) >= row_len
-                        or no_td_idx.min(initial=0) < 0
-                    ):
-                        stale = True
-
-                if not stale and ported_groups:
-                    for idx_full in ported_groups.values():
-                        if idx_full is None or idx_full.size == 0:
-                            continue
-                        if (
-                            idx_full.max(initial=-1) >= row_len
-                            or idx_full.min(initial=0) < 0
-                        ):
-                            stale = True
-                            break
-
-                if not stale and matrix_entries:
-                    if isinstance(matrix_entries, list):
-                        for p, _tex in matrix_entries:
-                            if p < 0 or p >= row_len:
-                                stale = True
-                                break
-                    else:
-                        for idx_full, _offs, _w in matrix_entries.values():
-                            if idx_full is None or idx_full.size == 0:
-                                continue
-                            if (
-                                idx_full.max(initial=-1) >= row_len
-                                or idx_full.min(initial=0) < 0
-                            ):
-                                stale = True
-                                break
-
-                if stale:
-                    td_expanded_cache.pop(cache_key, None)
-                    td_struct = None
 
             if td_struct is None:
                 no_td_pos: list[int] = []
@@ -3870,13 +3977,8 @@ class Trails:
             if no_td_idx is not None:
                 idx = no_td_idx
                 if idx.size:
-                    append_entries(
-                        inventory_act,
-                        base_year,
-                        flows_full[idx],
-                        scaled_full[idx],
-                        root_activity=root_activity,
-                    )
+                    anchor_flow_parts.append(flows_full[idx])
+                    anchor_value_parts.append(scaled_full[idx])
                     if dbg is not None and dbg_flow_id is not None:
                         if dbg_act is None or int(dbg_act) == int(a):
                             pos = idx[flows_full[idx] == int(dbg_flow_id)]
@@ -3895,23 +3997,9 @@ class Trails:
             # PORTED TD groups (min_amount controls temporalization only)
             # -------------------------
             if ported_groups:
-                row_len = int(end - start)
-                thr = float(min_amount)
-
                 for k, idx_full in ported_groups.items():
                     if idx_full is None or idx_full.size == 0:
                         continue
-
-                    # Defensive: ensure indices are within current row bounds (stale cache protection)
-                    if (
-                        idx_full.max(initial=-1) >= row_len
-                        or idx_full.min(initial=0) < 0
-                    ):
-                        # Cache is stale -> drop it and rebuild next time
-                        td_expanded_cache.pop(cache_key, None)
-                        idx_full = idx_full[(idx_full >= 0) & (idx_full < row_len)]
-                        if idx_full.size == 0:
-                            continue
 
                     if temporalize is None:
                         # No thresholding requested: everything temporalized
@@ -3924,13 +4012,8 @@ class Trails:
 
                     # 1) Anchor below-threshold contributions at base_year
                     if idx_anchor is not None and idx_anchor.size:
-                        append_entries(
-                            inventory_act,
-                            base_year,
-                            flows_full[idx_anchor],
-                            scaled_full[idx_anchor],
-                            root_activity=root_activity,
-                        )
+                        anchor_flow_parts.append(flows_full[idx_anchor])
+                        anchor_value_parts.append(scaled_full[idx_anchor])
 
                     # 2) Temporalize above-threshold contributions
                     if idx_td.size == 0:
@@ -3969,13 +4052,8 @@ class Trails:
 
                     if not pulses:
                         # If TD produces nothing, treat as anchor (still not omitted)
-                        append_entries(
-                            inventory_act,
-                            base_year,
-                            flows_full[idx_td],
-                            scaled_full[idx_td],
-                            root_activity=root_activity,
-                        )
+                        anchor_flow_parts.append(flows_full[idx_td])
+                        anchor_value_parts.append(scaled_full[idx_td])
                         continue
 
                     if dbg is not None and dbg_flow_id is not None:
@@ -3998,32 +4076,42 @@ class Trails:
                                         )
 
                     # Expand pulses in a vectorized way:
-                    idx_rep = np.repeat(idx_td, len(pulses))
-                    offsets_arr = np.fromiter(
-                        (o for o, _ in pulses), dtype=np.int64, count=len(pulses)
-                    )
-                    weights_arr = np.fromiter(
-                        (w for _, w in pulses), dtype=np.float64, count=len(pulses)
-                    )
+                    pulse_arrays = pulse_array_cache.get(k)
+                    if pulse_arrays is None:
+                        offsets_arr = np.fromiter(
+                            (o for o, _ in pulses), dtype=np.int64, count=len(pulses)
+                        )
+                        weights_arr = np.fromiter(
+                            (w for _, w in pulses), dtype=np.float64, count=len(pulses)
+                        )
+                        pulse_array_cache[k] = (offsets_arr, weights_arr)
+                    else:
+                        offsets_arr, weights_arr = pulse_arrays
+                    if ported_kernel is not None:
+                        flows_use, years_use, contrib = ported_kernel(
+                            flows_full_i64,
+                            scaled_full,
+                            idx_td.astype(np.int64, copy=False),
+                            offsets_arr,
+                            weights_arr,
+                            int(base_year),
+                        )
+                    else:
+                        idx_rep = np.repeat(idx_td, len(pulses))
+                        offsets_rep = np.tile(offsets_arr, idx_td.size)
+                        weights_rep = np.tile(weights_arr, idx_td.size)
 
-                    offsets_rep = np.tile(offsets_arr, idx_td.size)
-                    weights_rep = np.tile(weights_arr, idx_td.size)
+                        # Build contributions
+                        flows_use = flows_full[idx_rep]
+                        years_use = base_year + offsets_rep
+                        contrib = scaled_full[idx_rep] * weights_rep
 
-                    # Build contributions
-                    flows_use = flows_full[idx_rep]
-                    years_use = base_year + offsets_rep
-                    contrib = scaled_full[idx_rep] * weights_rep
-
-                    acts_use = np.full_like(flows_use, inventory_act, dtype=np.int64)
-                    append_bulk(
-                        acts_use,
-                        years_use,
-                        flows_use,
-                        contrib,
-                        root_activity=root_activity,
-                    )
+                    row_flow_parts.append(flows_use)
+                    row_year_parts.append(years_use)
+                    row_value_parts.append(contrib)
 
             if matrix_entries:
+                matrix_kernel = self._get_numba_matrix_kernel()
                 if isinstance(matrix_entries, list):
                     grouped: dict[tuple, tuple[list[int], TemporalExchange]] = {}
                     for p, tex in matrix_entries:
@@ -4057,45 +4145,52 @@ class Trails:
                     matrix_entries = matrix_groups
 
                 for k, (idx_full, offsets_arr, weights_arr) in matrix_entries.items():  # type: ignore[union-attr]
-                    row_len = int(end - start)
                     idx = idx_full
-                    if idx.size and (
-                        idx.max(initial=-1) >= row_len or idx.min(initial=0) < 0
-                    ):
-                        # Stale cache protection
-                        idx = idx[(idx >= 0) & (idx < row_len)]
-                        if idx.size == 0:
-                            td_expanded_cache.pop(cache_key, None)
-                            continue
                     if temporalize is not None:
                         # anchor below-threshold
                         idx_anchor = idx[~temporalize[idx]]
                         if idx_anchor.size:
-                            append_entries(
-                                inventory_act,
-                                base_year,
-                                flows_full[idx_anchor],
-                                scaled_full[idx_anchor],
-                                root_activity=root_activity,
-                            )
+                            anchor_flow_parts.append(flows_full[idx_anchor])
+                            anchor_value_parts.append(scaled_full[idx_anchor])
                         # TD only for above-threshold
                         idx = idx[temporalize[idx]]
                         if idx.size == 0:
                             continue
 
                     f_arr = flows_full[idx]
+                    if f_arr.size == 0:
+                        continue
+                    f_arr_i64 = f_arr.astype(np.int64, copy=False)
 
-                    year_groups: dict[int, list[tuple[int, float]]] = {}
-                    for offset, weight in zip(offsets_arr, weights_arr):
-                        if weight == 0.0:
-                            continue
-                        raw_year = base_year + int(offset)
-                        y_eff = map_year_cached(raw_year)
-                        year_groups.setdefault(int(y_eff), []).append(
-                            (int(raw_year), float(weight))
-                        )
+                    year_groups_cached = matrix_year_groups_cache.get(k)
+                    if year_groups_cached is None:
+                        year_groups: dict[int, list[tuple[int, float]]] = {}
+                        for offset, weight in zip(offsets_arr, weights_arr):
+                            if weight == 0.0:
+                                continue
+                            raw_year = base_year + int(offset)
+                            y_eff = map_year_cached(raw_year)
+                            year_groups.setdefault(int(y_eff), []).append(
+                                (int(raw_year), float(weight))
+                            )
+                        year_groups_cached = []
+                        for y_eff, year_weights in year_groups.items():
+                            years_vec = np.fromiter(
+                                (yw[0] for yw in year_weights),
+                                dtype=np.int64,
+                                count=len(year_weights),
+                            )
+                            weights_vec = np.fromiter(
+                                (yw[1] for yw in year_weights),
+                                dtype=np.float64,
+                                count=len(year_weights),
+                            )
+                            year_groups_cached.append(
+                                (int(y_eff), years_vec, weights_vec)
+                            )
+                        matrix_year_groups_cache[k] = year_groups_cached
 
-                    for y_eff, year_weights in year_groups.items():
+                    for y_eff, years_vec, weights_vec in year_groups_cached:
                         t_eff = t_eff_cache.get(y_eff)
                         if t_eff is None and y_eff not in t_eff_cache:
                             t_eff = scenario_index_get(str(y_eff))
@@ -4108,7 +4203,7 @@ class Trails:
                         if cached_eff is None:
                             cached_eff = self._get_B_row_cache_for_t(t_eff_i)
                             B_row_cache_local[t_eff_i] = cached_eff
-                        row_ptr_eff, flow_sorted_eff, data_sorted_eff = cached_eff
+                        row_ptr_eff, _flow_sorted_eff, data_sorted_eff = cached_eff
 
                         start_eff = int(row_ptr_eff[a])
                         end_eff = int(row_ptr_eff[a + 1])
@@ -4116,13 +4211,10 @@ class Trails:
                             continue
 
                         row_vals_eff = data_sorted_eff[start_eff:end_eff]
-                        if f_arr.size == 0:
-                            continue
                         row_index_map = self._get_B_row_index_map_for_t_act(t_eff_i, a)
-                        matrix_kernel = self._get_numba_matrix_kernel()
                         if matrix_kernel is not None:
                             vals_eff, valid = matrix_kernel(
-                                f_arr.astype(np.int64, copy=False),
+                                f_arr_i64,
                                 row_index_map,
                                 row_vals_eff,
                             )
@@ -4131,7 +4223,7 @@ class Trails:
                             vals_eff = vals_eff[valid]
                             f_use = f_arr[valid]
                         else:
-                            pos = row_index_map[f_arr]
+                            pos = row_index_map[f_arr_i64]
                             valid = pos >= 0
                             if not np.any(valid):
                                 continue
@@ -4142,8 +4234,10 @@ class Trails:
                             if dbg_act is None or int(dbg_act) == int(a):
                                 flow_mask = f_use == int(dbg_flow_id)
                                 if np.any(flow_mask):
-                                    for (raw_year, weight), v in zip(
-                                        year_weights, vals_eff[flow_mask]
+                                    for raw_year, weight, v in zip(
+                                        years_vec,
+                                        weights_vec,
+                                        vals_eff[flow_mask],
                                     ):
                                         if dbg_year is None or int(raw_year) == int(
                                             dbg_year
@@ -4164,13 +4258,6 @@ class Trails:
                                                 float(contrib),
                                             )
 
-                        years_vec = np.array(
-                            [yw[0] for yw in year_weights], dtype=np.int64
-                        )
-                        weights_vec = np.array(
-                            [yw[1] for yw in year_weights], dtype=np.float64
-                        )
-
                         flows_rep = np.repeat(f_use, weights_vec.size)
                         years_rep = np.tile(years_vec, f_use.size)
                         contrib = (
@@ -4182,16 +4269,80 @@ class Trails:
                             * np.tile(weights_vec, f_use.size)
                         )
 
-                        acts_use = np.full_like(
-                            flows_rep, inventory_act, dtype=np.int64
+                        row_flow_parts.append(flows_rep)
+                        row_year_parts.append(years_rep)
+                        row_value_parts.append(contrib)
+
+            if anchor_flow_parts:
+                if len(anchor_flow_parts) == 1:
+                    flows_anchor = anchor_flow_parts[0]
+                    values_anchor = anchor_value_parts[0]
+                else:
+                    flows_anchor = np.concatenate(anchor_flow_parts)
+                    values_anchor = np.concatenate(anchor_value_parts)
+                if flows_anchor.size:
+                    nnz_anchor = int(flows_anchor.size)
+                    queued_act_values.append(int(inventory_act))
+                    queued_year_parts.append(int(base_year))
+                    if (
+                        flows_anchor.dtype == np.int64
+                        and flows_anchor.flags.c_contiguous
+                    ):
+                        queued_flow_parts.append(flows_anchor)
+                    else:
+                        queued_flow_parts.append(
+                            np.asarray(flows_anchor, dtype=np.int64, order="C")
                         )
-                        append_bulk(
-                            acts_use,
-                            years_rep,
-                            flows_rep,
-                            contrib,
-                            root_activity=root_activity,
+                    if values_anchor.dtype == np.float64:
+                        queued_value_parts.append(values_anchor)
+                    else:
+                        queued_value_parts.append(
+                            np.asarray(values_anchor, dtype=np.float64)
                         )
+                    if has_root:
+                        queued_root_values.append(int(root_activity))
+                    queued_nnz += nnz_anchor
+                    if queued_nnz >= flush_nnz:
+                        flush_queued_inventory()
+
+            if row_flow_parts:
+                if len(row_flow_parts) == 1:
+                    flows_all = row_flow_parts[0]
+                    years_all = row_year_parts[0]
+                    values_all = row_value_parts[0]
+                else:
+                    flows_all = np.concatenate(row_flow_parts)
+                    years_all = np.concatenate(row_year_parts)
+                    values_all = np.concatenate(row_value_parts)
+
+                if flows_all.size:
+                    nnz_all = int(flows_all.size)
+                    queued_act_values.append(int(inventory_act))
+                    if years_all.dtype == np.int64 and years_all.flags.c_contiguous:
+                        queued_year_parts.append(years_all)
+                    else:
+                        queued_year_parts.append(
+                            np.asarray(years_all, dtype=np.int64, order="C")
+                        )
+                    if flows_all.dtype == np.int64 and flows_all.flags.c_contiguous:
+                        queued_flow_parts.append(flows_all)
+                    else:
+                        queued_flow_parts.append(
+                            np.asarray(flows_all, dtype=np.int64, order="C")
+                        )
+                    if values_all.dtype == np.float64:
+                        queued_value_parts.append(values_all)
+                    else:
+                        queued_value_parts.append(
+                            np.asarray(values_all, dtype=np.float64)
+                        )
+                    if has_root:
+                        queued_root_values.append(int(root_activity))
+                    queued_nnz += nnz_all
+                    if queued_nnz >= flush_nnz:
+                        flush_queued_inventory()
+
+        flush_queued_inventory()
 
     def _get_numba_ported_kernel(self) -> Callable | None:
         """get numba ported kernel.
@@ -4214,9 +4365,9 @@ class Trails:
         def _ported_kernel(
             flows_full: np_local.ndarray,
             scaled_full: np_local.ndarray,
-            ported_flow_idx: np_local.ndarray,
-            ported_offsets: np_local.ndarray,
-            ported_weights: np_local.ndarray,
+            flow_idx: np_local.ndarray,
+            offsets: np_local.ndarray,
+            weights: np_local.ndarray,
             base_year: int,
         ) -> tuple[np_local.ndarray, np_local.ndarray, np_local.ndarray]:
             """ported kernel.
@@ -4225,25 +4376,32 @@ class Trails:
             :type flows_full: np_local.ndarray
             :param scaled_full: Value for `scaled_full`.
             :type scaled_full: np_local.ndarray
-            :param ported_flow_idx: Value for `ported_flow_idx`.
-            :type ported_flow_idx: np_local.ndarray
-            :param ported_offsets: Value for `ported_offsets`.
-            :type ported_offsets: np_local.ndarray
-            :param ported_weights: Value for `ported_weights`.
-            :type ported_weights: np_local.ndarray
+            :param flow_idx: Value for `flow_idx`.
+            :type flow_idx: np_local.ndarray
+            :param offsets: Value for `offsets`.
+            :type offsets: np_local.ndarray
+            :param weights: Value for `weights`.
+            :type weights: np_local.ndarray
             :param base_year: Value for `base_year`.
             :type base_year: int
             :returns: Return value.
             :rtype: tuple[np_local.ndarray, np_local.ndarray, np_local.ndarray]"""
-            n = ported_flow_idx.size
+            n_flows = flow_idx.size
+            n_pulses = offsets.size
+            n = n_flows * n_pulses
             flows_out = np_local.empty(n, dtype=np_local.int64)
             years_out = np_local.empty(n, dtype=np_local.int64)
             contrib_out = np_local.empty(n, dtype=np_local.float64)
-            for i in range(n):
-                idx = ported_flow_idx[i]
-                flows_out[i] = flows_full[idx]
-                years_out[i] = base_year + ported_offsets[i]
-                contrib_out[i] = scaled_full[idx] * ported_weights[i]
+            k = 0
+            for i in range(n_flows):
+                idx = flow_idx[i]
+                flow = flows_full[idx]
+                scaled = scaled_full[idx]
+                for j in range(n_pulses):
+                    flows_out[k] = flow
+                    years_out[k] = base_year + offsets[j]
+                    contrib_out[k] = scaled * weights[j]
+                    k += 1
             return flows_out, years_out, contrib_out
 
         setattr(self, "_numba_ported_kernel", _ported_kernel)
@@ -4302,6 +4460,7 @@ class Trails:
         *,
         min_amount: float,
         debug: bool,
+        workers: int | None = None,
     ) -> bool:
         """accumulate no td batch.
 
@@ -4344,8 +4503,16 @@ class Trails:
             return True
 
         chunk_size = 200_000
-        for start in range(0, nnz, chunk_size):
-            end = min(start + chunk_size, nnz)
+        chunk_bounds = [
+            (start, min(start + chunk_size, nnz)) for start in range(0, nnz, chunk_size)
+        ]
+
+        workers_i = int(workers) if workers is not None else 1
+        if workers_i < 1:
+            workers_i = 1
+
+        def compute_chunk(bounds: tuple[int, int]) -> tuple[np.ndarray, ...]:
+            start, end = bounds
             act_chunk = ctx.act_coords[start:end].astype(np.int64, copy=False)
             flow_chunk = ctx.flow_coords[start:end].astype(np.int64, copy=False)
             data_chunk = ctx.data[start:end].astype(np.float64, copy=False)
@@ -4357,14 +4524,30 @@ class Trails:
             flows_rep = np.repeat(flow_chunk, n_roots)
             roots_rep = np.tile(root_ids, int(act_chunk.size))
             values_flat = values.ravel()
+            return acts_rep, flows_rep, roots_rep, values_flat
 
-            self._append_inventory_entries_bulk(
-                acts_rep,
-                base_year,
-                flows_rep,
-                values_flat,
-                root_activity=roots_rep,
-            )
+        if workers_i > 1 and len(chunk_bounds) > 1:
+            with ThreadPoolExecutor(max_workers=workers_i) as executor:
+                for acts_rep, flows_rep, roots_rep, values_flat in executor.map(
+                    compute_chunk, chunk_bounds
+                ):
+                    self._append_inventory_entries_bulk(
+                        acts_rep,
+                        base_year,
+                        flows_rep,
+                        values_flat,
+                        root_activity=roots_rep,
+                    )
+        else:
+            for bounds in chunk_bounds:
+                acts_rep, flows_rep, roots_rep, values_flat = compute_chunk(bounds)
+                self._append_inventory_entries_bulk(
+                    acts_rep,
+                    base_year,
+                    flows_rep,
+                    values_flat,
+                    root_activity=roots_rep,
+                )
 
         return True
 
@@ -4433,6 +4616,7 @@ class Trails:
         min_amount: float = 0.0,
         use_temporal_distributions: bool = True,
         debug: bool = False,
+        workers: int | None = None,
     ) -> None:
         """Accumulate temporalized biosphere inventory batch.
 
@@ -4465,7 +4649,11 @@ class Trails:
             )
         if not use_temporal_distributions:
             if self._accumulate_no_td_batch(
-                ctx, supplies, min_amount=min_amount, debug=debug
+                ctx,
+                supplies,
+                min_amount=min_amount,
+                debug=debug,
+                workers=workers,
             ):
                 return
 

@@ -97,8 +97,10 @@ The primary entry point is ``trails.lca.lca``:
     )
 
 Temporal LCA results are stored on the Trails instance. Use ``trails.scores``
-for impact scores (when compute_score=True) and ``trails.inventory`` or
-``trails.characterized_inventory`` for time-resolved inventories.
+for impact scores (when ``compute_score=True``). If you run
+``lca(..., store_inventory=True)``, TRAILS also stores ``trails.inventory``;
+with ``compute_score=True`` and ``store_inventory=True``, it also stores
+``trails.characterized_inventory``.
 
 Importing Excel inventories
 ---------------------------
@@ -183,36 +185,23 @@ Temporal distributions
 ----------------------
 
 Temporal distributions control how exchanges are spread across impact years.
-TRAILS can use the distribution data included in the package, or collapse the
-effects into scalar multipliers for a static approximation:
+In the main temporal workflow, ``temporal_routing`` and ``lca`` use temporal
+exchange distributions by default:
 
 .. code-block:: python
 
-    # Use full temporal distributions (default)
     trails.temporal_routing(
         start_year=2030,
         start_act_idx=start_act_idx,
         max_depth=3,
         min_amount=1e-18,
-        use_temporal_distributions=True,
     )
     lca(
         trails=trails,
         methods=[method],
     )
 
-    # Collapse temporal distributions for a faster static view
-    trails.temporal_routing(
-        start_year=2030,
-        start_act_idx=start_act_idx,
-        max_depth=3,
-        min_amount=1e-18,
-        use_temporal_distributions=False,
-    )
-    lca(
-        trails=trails,
-        methods=[method],
-    )
+For a non-temporal baseline in a single year, use ``trails.static_lca(...)``.
 
 Plotting results
 ----------------
@@ -235,8 +224,9 @@ first-level suppliers:
 Interpreting outputs
 --------------------
 
-Impact time series can be accessed from ``trails.scores`` (if computed) or
-from ``trails.characterized_inventory`` after characterization.
+Impact time series can be accessed from ``trails.scores`` (if computed). When
+``store_inventory=True``, you can also inspect ``trails.inventory`` and (if
+``compute_score=True``) ``trails.characterized_inventory``.
 
 Troubleshooting and diagnostics
 -------------------------------
@@ -245,6 +235,12 @@ Troubleshooting and diagnostics
   the nearest available year and emit a warning.
 * Set ``debug=True`` to enable detailed logging and retain additional
   diagnostics on the Trails instance.
+* Advanced performance tuning:
+  - For FaIR perturbation parallelism, use
+    ``run_fair_delta_rf(..., per_species_workers=<int>)``.
+  - For TD biosphere accumulation buffering, set
+    ``trails._bio_inventory_flush_nnz`` before calling ``lca``.
+    Default is ``2_000_000``. This is an advanced/private knob.
 
 
 FaIR_ radiative forcing
@@ -263,17 +259,37 @@ across all FaIR_ configurations as quantiles (2.5, 25, 50, 75, 97.5).
 
 .. code-block:: python
 
+    from trails import lca
     from trails.fair_rf import run_fair_delta_rf
+
+    # Ensure an inventory with root attribution is available
+    lca(
+        trails=trails,
+        methods=[method],
+        store_inventory=True,
+    )
 
     rf = run_fair_delta_rf(
         trails,
-        scenario="high-extension",
+        scenario="REMIND|SSP2-PkBudg650",
+        # defaults shown explicitly:
+        per_species_runs=True,
+        per_species_workers=None,  # auto: min(4, cpu_count, n_work_items)
     )
 
 The outputs are stored on:
 
 * ``trails.instant_radiative_forcing`` with dims ``(quantile, year, flow, root activity)``
 * ``trails.delta_temperature`` with dims ``(quantile, year, flow, root activity)``
+
+Notes:
+
+* ``run_fair_delta_rf`` requires ``trails.inventory`` with a
+  ``root activity`` dimension. Run ``lca(..., store_inventory=True)`` first.
+* ``scenario`` must match a scenario label present in the emissions CSV used by
+  ``run_fair_delta_rf``.
+* If ``config_name`` and ``config_names`` are omitted, TRAILS evaluates all
+  available FaIR configurations and stores quantiles across the ensemble.
 
 Visualization helpers default to the 50th quantile:
 

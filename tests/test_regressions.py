@@ -401,6 +401,28 @@ def test_sanitize_emissions_year_values_fills_missing() -> None:
     assert float(out.loc[0, "2002.5"]) == pytest.approx(3.5)
 
 
+def test_sanitize_emissions_year_values_handles_string_dtype_column() -> None:
+    df = pd.DataFrame(
+        {
+            "scenario": ["s"],
+            "region": ["World"],
+            "variable": ["CH4"],
+            "unit": ["Mt CH4/yr"],
+            "2000.5": [1.0],
+            "2001.5": [np.nan],
+            "2002.5": ["3.5"],
+        }
+    )
+    df["2002.5"] = df["2002.5"].astype("string")
+
+    out = _sanitize_emissions_year_values(df)
+
+    assert float(out.loc[0, "2000.5"]) == pytest.approx(1.0)
+    assert float(out.loc[0, "2001.5"]) == pytest.approx(0.0)
+    assert float(out.loc[0, "2002.5"]) == pytest.approx(3.5)
+    assert pd.api.types.is_numeric_dtype(out["2002.5"])
+
+
 def test_fair_quantiles_suppress_all_nan_warning(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
