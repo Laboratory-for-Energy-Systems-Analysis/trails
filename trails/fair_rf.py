@@ -42,9 +42,10 @@ def _sanitize_emissions_year_values(df: pd.DataFrame) -> pd.DataFrame:
     if not year_cols:
         return df
     out = df.copy()
-    out.loc[:, year_cols] = (
-        out.loc[:, year_cols].apply(pd.to_numeric, errors="coerce").fillna(0.0)
-    )
+    # Assign each year column explicitly so pandas>=3 doesn't try in-place casts
+    # on existing StringDtype blocks during a multi-column .loc assignment.
+    for col in year_cols:
+        out[col] = pd.to_numeric(out[col], errors="coerce").fillna(0.0)
     return out
 
 
