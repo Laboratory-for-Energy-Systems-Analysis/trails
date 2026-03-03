@@ -64,6 +64,77 @@ def _safe_nanpercentile(values: np.ndarray, quantiles: list[float]) -> np.ndarra
     return np.nan_to_num(out, nan=0.0)
 
 
+# Emissions precursor species whose forcing mostly appears in derived FaIR species.
+_PRECURSOR_RESPONSE_SPECIES: dict[str, tuple[str, ...]] = {
+    "CO": ("Ozone",),
+    "NH3": ("Aerosol-radiation interactions", "Ozone"),
+    "NOx": ("Ozone", "Aerosol-radiation interactions"),
+    "Sulfur": (
+        "Aerosol-radiation interactions",
+        "Aerosol-cloud interactions",
+        "Ozone",
+    ),
+    "VOC": ("Ozone", "Aerosol-radiation interactions"),
+    "BC": (
+        "Aerosol-radiation interactions",
+        "Aerosol-cloud interactions",
+        "Light absorbing particles on snow and ice",
+    ),
+    "OC": ("Aerosol-radiation interactions", "Aerosol-cloud interactions"),
+}
+
+
+def _ensure_response_species_rows(
+    emissions_df: pd.DataFrame,
+    *,
+    scenario: str,
+    drivers: list[str],
+    debug: bool = False,
+) -> pd.DataFrame:
+    """Ensure required calculated response species exist as zero rows in emissions."""
+    needed: set[str] = set()
+    for driver in drivers:
+        needed.update(_PRECURSOR_RESPONSE_SPECIES.get(str(driver), ()))
+    if not needed:
+        return emissions_df
+
+    out = _normalize_emissions_columns(emissions_df)
+    scen_mask = (out["scenario"] == scenario) & (out["region"].str.lower() == "world")
+    if not bool(np.any(scen_mask)):
+        return out
+
+    year_cols, _ = _extract_year_columns(out)
+    if not year_cols:
+        return out
+
+    existing = set(out.loc[scen_mask, "variable"].astype(str).tolist())
+    add_rows: list[dict[str, object]] = []
+    for specie in sorted(needed):
+        if specie in existing:
+            continue
+        row: dict[str, object] = {
+            "scenario": scenario,
+            "region": "World",
+            "variable": specie,
+            # Calculated forcing channels are represented in forcing units.
+            "unit": "W m-2",
+        }
+        for col in year_cols:
+            row[col] = 0.0
+        add_rows.append(row)
+
+    if not add_rows:
+        return out
+
+    out = pd.concat([out, pd.DataFrame(add_rows)], ignore_index=True)
+    if debug:
+        print(
+            "FAIR debug: added response species rows",
+            [str(r["variable"]) for r in add_rows],
+        )
+    return out
+
+
 @lru_cache(maxsize=2)
 def _build_fair_template_cached(
     *,
@@ -711,6 +782,30 @@ def run_fair_delta_rf(
 
     inv_years = [int(y) for y in inv.coords["year"].values.tolist()]
 
+    # Build perturbations from activity-reduced inventory (single sparse reduction path).
+    delta_by_species = _inventory_emissions_by_fair_species(
+        inv_data,
+        inv_years,
+        n_flow,
+        flow_pos_to_key,
+        species_map,
+        signs,
+    )
+    no_perturbation = delta_by_species.empty
+    if no_perturbation and scale_factor is None:
+        scale_factor = 1.0
+
+    # Precursor species (NOx, VOC, etc.) force climate through calculated
+    # response channels (Ozone, ARI/ACI, ...). Add zero rows so FaIR includes
+    # these channels in the run when needed.
+    if not no_perturbation:
+        df = _ensure_response_species_rows(
+            df,
+            scenario=scenario,
+            drivers=[str(s) for s in delta_by_species.columns.tolist()],
+            debug=debug,
+        )
+
     # Baseline run
     f_base = _run_fair_emissions(
         df,
@@ -724,19 +819,6 @@ def run_fair_delta_rf(
         debug=debug,
         progress=False,
     )
-
-    # Build perturbations from activity-reduced inventory (single sparse reduction path).
-    delta_by_species = _inventory_emissions_by_fair_species(
-        inv_data,
-        inv_years,
-        n_flow,
-        flow_pos_to_key,
-        species_map,
-        signs,
-    )
-    no_perturbation = delta_by_species.empty
-    if no_perturbation and scale_factor is None:
-        scale_factor = 1.0
 
     # Determine if the emissions baseline uses half-year columns (e.g., 1750.5)
     base_year_cols, base_year_vals = _extract_year_columns(df)
@@ -1199,21 +1281,37 @@ def run_fair_delta_rf(
             delta_forcing = delta_forcing / effective_scale
             delta_temp = delta_temp / effective_scale
 
-        alias = rf_alias.get(specie, specie)
-        if alias not in delta_forcing.coords["specie"].values:
+        available_species = {
+            str(s) for s in delta_forcing.coords["specie"].values.tolist()
+        }
+        primary = rf_alias.get(specie, specie)
+        target_species: list[str] = []
+        for candidate in [primary, *_PRECURSOR_RESPONSE_SPECIES.get(primary, ())]:
+            cand = str(candidate)
+            if cand in available_species and cand not in target_species:
+                target_species.append(cand)
+        if not target_species:
             return None
 
         if config_names is not None and len(config_names) > 1:
-            rf_series = _extract_fair_timeseries_by_config(
-                delta_forcing.sel(specie=alias)
-            )
+            rf_parts = [
+                _extract_fair_timeseries_by_config(delta_forcing.sel(specie=target))
+                for target in target_species
+            ]
+            if len(rf_parts) == 1:
+                rf_series = rf_parts[0]
+            else:
+                rf_series = np.sum(np.stack(rf_parts, axis=0), axis=0)
             rf_quant = _safe_nanpercentile(rf_series, quantiles)
             temp_series = _extract_fair_timeseries_by_config(delta_temp)
             temp_quant = _safe_nanpercentile(temp_series, quantiles)
         else:
-            rf_series = np.asarray(delta_forcing.sel(specie=alias).values, dtype=float)
-            rf_series = np.nan_to_num(rf_series, nan=0.0)
-            rf_series = np.ravel(rf_series)
+            rf_series = np.zeros(len(fair_years), dtype=float)
+            for target in target_species:
+                part = np.asarray(delta_forcing.sel(specie=target).values, dtype=float)
+                part = np.nan_to_num(part, nan=0.0)
+                part = np.ravel(part)
+                rf_series += part
             rf_quant = np.tile(rf_series[None, :], (n_quant, 1))
             temp_series = _extract_fair_timeseries(delta_temp)
             temp_series = np.nan_to_num(temp_series, nan=0.0)

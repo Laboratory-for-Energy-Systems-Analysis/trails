@@ -381,6 +381,136 @@ def test_fair_quantile_dimensions(monkeypatch: pytest.MonkeyPatch) -> None:
     assert int(getattr(rf.data, "nnz", 0)) > 0
 
 
+def test_fair_precursor_response_species_are_captured(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class DummyTrailsPrecursor:
+        def __init__(self) -> None:
+            self.debug = False
+            data = np.array([1.0e9], dtype=float)
+            coords = np.array([[0], [0], [1], [0]], dtype=int)
+            inv = sparse.COO(coords=coords, data=data, shape=(1, 1, 2, 1))
+            self.inventory = xr.DataArray(
+                inv,
+                dims=("activity", "flow", "year", "root activity"),
+                coords={
+                    "activity": [0],
+                    "flow": [0],
+                    "year": [2000, 2001],
+                    "root activity": [0],
+                },
+            )
+            self.biosphere_indices = {
+                "2000": {
+                    0: {
+                        "name": "Nitrogen oxides",
+                        "compartment": "air",
+                        "subcompartment": "",
+                    }
+                }
+            }
+
+    class DummyFairRunPrecursor:
+        def __init__(
+            self,
+            scenario: str,
+            config_names: list[str],
+            species: list[str],
+            ozone_response: float,
+        ) -> None:
+            timebounds = np.array([2000.5, 2001.5], dtype=float)
+            forcing_vals = np.zeros(
+                (1, len(config_names), len(timebounds), len(species)),
+                dtype=float,
+            )
+            if "Ozone" in species:
+                forcing_vals[:, :, 1, species.index("Ozone")] = float(ozone_response)
+            forcing = xr.DataArray(
+                forcing_vals,
+                dims=("scenario", "config", "timebounds", "specie"),
+                coords={
+                    "scenario": [scenario],
+                    "config": config_names,
+                    "timebounds": timebounds,
+                    "specie": species,
+                },
+            )
+            temperature_vals = np.zeros((1, len(config_names), len(timebounds)))
+            temperature_vals[:, :, 1] = float(ozone_response)
+            temperature = xr.DataArray(
+                temperature_vals,
+                dims=("scenario", "config", "timebounds"),
+                coords={
+                    "scenario": [scenario],
+                    "config": config_names,
+                    "timebounds": timebounds,
+                },
+            )
+            self.forcing = forcing
+            self.temperature = temperature
+
+    trails = DummyTrailsPrecursor()
+
+    def fake_load_emissions_csv(*args: Any, **kwargs: Any) -> pd.DataFrame:
+        return pd.DataFrame(
+            {
+                "scenario": ["s"],
+                "region": ["World"],
+                "variable": ["NOx"],
+                "unit": ["Mt NO2/yr"],
+                "2000.5": [0.0],
+                "2001.5": [0.0],
+            }
+        )
+
+    def fake_load_species_mapping(
+        *args: Any, **kwargs: Any
+    ) -> tuple[dict[object, str], dict[object, float]]:
+        return {("Nitrogen oxides", "air", ""): "NOx"}, {}
+
+    def fake_run_fair_emissions(*args: Any, **kwargs: Any) -> DummyFairRunPrecursor:
+        emissions_df = args[0]
+        scenario = kwargs.get("scenario") or args[1]
+        config_names = kwargs.get("config_names") or ["c1", "c2"]
+        local = emissions_df[
+            (emissions_df["scenario"] == scenario)
+            & (emissions_df["region"].str.lower() == "world")
+        ].copy()
+        species = sorted(local["variable"].astype(str).unique().tolist())
+        nox_rows = local[local["variable"] == "NOx"]
+        if nox_rows.empty:
+            ozone_response = 0.0
+        else:
+            ozone_response = float(
+                pd.to_numeric(nox_rows["2001.5"], errors="coerce").fillna(0.0).iloc[0]
+            )
+        return DummyFairRunPrecursor(
+            str(scenario),
+            list(config_names),
+            species,
+            ozone_response,
+        )
+
+    monkeypatch.setattr("trails.fair_rf.load_emissions_csv", fake_load_emissions_csv)
+    monkeypatch.setattr(
+        "trails.fair_rf.load_species_mapping", fake_load_species_mapping
+    )
+    monkeypatch.setattr("trails.fair_rf._run_fair_emissions", fake_run_fair_emissions)
+
+    rf = run_fair_delta_rf(
+        trails,
+        scenario="s",
+        config_names=["c1", "c2"],
+        per_species_runs=True,
+        validate_emissions_delta=False,
+        scale_factor=1.0,
+        quantiles=[50.0],
+    )
+
+    arr = np.asarray(rf.data.todense(), dtype=float)
+    assert float(np.max(np.abs(arr))) > 0.0
+
+
 def test_sanitize_emissions_year_values_fills_missing() -> None:
     df = pd.DataFrame(
         {
