@@ -12,15 +12,30 @@ species_map:
   "Carbon monoxide, fossil": CO
   "Carbon monoxide, non-fossil": CO
   "Carbon monoxide, from soil or biomass stock": CO
+  "NMVOC, non-methane volatile organic compounds": VOC
   "VOC, volatile organic compounds": VOC
   "Nitric oxide": NOx
+  "Nitrogen oxides": NOx
   "Sulfur hexafluoride": SF6
+  "Sulfur oxides": Sulfur
   "Tetrafluoromethane": CF4
   "Hexafluoroethane": C2F6
   "Trifluoromethane": HFC-23
+  "1,1,1-Trifluoroethane": HFC-143a
+  "1,1-Difluoroethane": HFC-152a
   "1,1,1,2-Tetrafluoroethane": HFC-134a
+  "1,1,2-Trichloro-1,2,2-trifluoroethane": CFC-113
+  "1,2-Dichloro-1,1,2,2-tetrafluoroethane": CFC-114
+  "Bromochlorodifluoromethane": Halon-1211
+  "Bromotrifluoromethane": Halon-1301
+  "Chlorodifluoromethane": HCFC-22
+  "Dichlorodifluoromethane": CFC-12
   "Difluoromethane": HFC-32
+  "Trichlorofluoromethane": CFC-11
   "Pentafluoroethane": HFC-125
+  "Ammonia": NH3
+  "Sulfur dioxide": Sulfur
+
 
 signs:
   "Carbon dioxide, in air": -1
