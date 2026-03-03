@@ -13,7 +13,6 @@ from openpyxl import load_workbook
 
 from trails import Trails
 
-
 DEFAULT_METHODS = [
     "IPCC 2021 (incl. biogenic CO2) - climate change: total (incl. biogenic CO2) - global warming potential (GWP100)"
 ]
@@ -52,9 +51,10 @@ def _read_activity_and_exchanges(ws) -> tuple[ActivityDef | None, list[dict[str,
 
     header_row = None
     for r in range(1, 120):
-        if _normalize(ws.cell(r, 1).value).lower() == "name" and _normalize(
-            ws.cell(r, 10).value
-        ).lower() == "type":
+        if (
+            _normalize(ws.cell(r, 1).value).lower() == "name"
+            and _normalize(ws.cell(r, 10).value).lower() == "type"
+        ):
             header_row = r
             break
 
@@ -92,7 +92,9 @@ def collect_terminal_activities(inventory_paths: Iterable[Path]) -> list[Activit
                     technosphere_supplier_names.append(supplier_name)
 
     suppliers_used_by_imported = {
-        supplier for supplier in technosphere_supplier_names if supplier in activity_names
+        supplier
+        for supplier in technosphere_supplier_names
+        if supplier in activity_names
     }
 
     terminal = [a for a in all_activities if a.name not in suppliers_used_by_imported]
@@ -117,7 +119,9 @@ def _metadata_by_idx(trails: Trails) -> dict[int, dict]:
     return {int(k): v for k, v in by_idx.items()}
 
 
-def match_activity_indices(trails: Trails, targets: list[ActivityDef]) -> dict[ActivityDef, int]:
+def match_activity_indices(
+    trails: Trails, targets: list[ActivityDef]
+) -> dict[ActivityDef, int]:
     by_idx = _metadata_by_idx(trails)
     out: dict[ActivityDef, int] = {}
 
@@ -186,7 +190,9 @@ def run(args: argparse.Namespace) -> int:
     idx_map = match_activity_indices(trails, terminals)
 
     if not idx_map:
-        raise RuntimeError("No terminal imported activities could be matched to indices.")
+        raise RuntimeError(
+            "No terminal imported activities could be matched to indices."
+        )
 
     depths = [1, 5]
     methods = list(args.methods)
@@ -234,8 +240,12 @@ def run(args: argparse.Namespace) -> int:
 
         for m_i, method in enumerate(methods):
             static_score = float(static_vec[m_i if m_i < len(static_vec) else 0])
-            d1 = float(temporal_by_depth[1][m_i if m_i < len(temporal_by_depth[1]) else 0])
-            d5 = float(temporal_by_depth[5][m_i if m_i < len(temporal_by_depth[5]) else 0])
+            d1 = float(
+                temporal_by_depth[1][m_i if m_i < len(temporal_by_depth[1]) else 0]
+            )
+            d5 = float(
+                temporal_by_depth[5][m_i if m_i < len(temporal_by_depth[5]) else 0]
+            )
             rows.append(
                 {
                     "activity_index": int(idx),
@@ -261,7 +271,9 @@ def run(args: argparse.Namespace) -> int:
 
     print("\nTerminal imported activities analyzed:")
     for act_def, idx in sorted(idx_map.items(), key=lambda x: x[1]):
-        print(f"- idx={idx} | {act_def.name} ({act_def.reference_product}, {act_def.location})")
+        print(
+            f"- idx={idx} | {act_def.name} ({act_def.reference_product}, {act_def.location})"
+        )
 
     print(f"\nWrote results: {out_path}")
     return 0
@@ -284,10 +296,26 @@ def build_parser() -> argparse.ArgumentParser:
         "--inventories",
         nargs="+",
         default=[
-            str(Path("/Users/romain/GitHub/trails/dev/lci-case-study-daccs_storage_risk.xlsx")),
-            str(Path("/Users/romain/GitHub/trails/dev/lci-case-study-fertilizer_n2o_timing.xlsx")),
-            str(Path("/Users/romain/GitHub/trails/dev/lci-case-study-marine_fuel_switch.xlsx")),
-            str(Path("/Users/romain/GitHub/trails/dev/lci-case-study-biomass_growth_vs_gas_heat.xlsx")),
+            str(
+                Path(
+                    "/Users/romain/GitHub/trails/dev/lci-case-study-daccs_storage_risk.xlsx"
+                )
+            ),
+            str(
+                Path(
+                    "/Users/romain/GitHub/trails/dev/lci-case-study-fertilizer_n2o_timing.xlsx"
+                )
+            ),
+            str(
+                Path(
+                    "/Users/romain/GitHub/trails/dev/lci-case-study-marine_fuel_switch.xlsx"
+                )
+            ),
+            str(
+                Path(
+                    "/Users/romain/GitHub/trails/dev/lci-case-study-biomass_growth_vs_gas_heat.xlsx"
+                )
+            ),
             str(Path("/Users/romain/GitHub/trails/dev/lci-pass_cars.xlsx")),
         ],
         help="Excel inventory files to import.",

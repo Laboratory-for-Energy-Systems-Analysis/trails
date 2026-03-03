@@ -14,7 +14,6 @@ from datapackage import Package
 from trails import Trails
 from trails.fair_rf import run_fair_delta_rf
 
-
 HERE = Path(__file__).resolve().parent
 DEFAULT_DP = "/Users/romain/GitHub/premise/dev/trails_2026-02-22.zip"
 DEFAULT_INVENTORY = str(HERE.parent / "lci-case-study-daccs_storage_risk.xlsx")
@@ -108,7 +107,9 @@ def main() -> None:
     parser.add_argument("--max-depth", type=int, default=2)
     parser.add_argument("--repeat", type=int, default=1)
     parser.add_argument("--per-species-runs", action="store_true", default=True)
-    parser.add_argument("--no-per-species-runs", dest="per_species_runs", action="store_false")
+    parser.add_argument(
+        "--no-per-species-runs", dest="per_species_runs", action="store_false"
+    )
     parser.add_argument("--per-species-workers", type=int, default=None)
     parser.add_argument("--config-name", default=None)
     args = parser.parse_args()
