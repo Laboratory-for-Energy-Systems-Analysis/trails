@@ -16,8 +16,12 @@ species_map:
   "VOC, volatile organic compounds": VOC
   "Nitric oxide": NOx
   "Nitrogen oxides": NOx
+  "Dinitrogen tetroxide": NOx
   "Sulfur hexafluoride": SF6
   "Sulfur oxides": Sulfur
+  "Sulfur": Sulfur
+  "Sulfur trioxide": Sulfur
+  "Sulfuryl fluoride": SO2F2
   "Tetrafluoromethane": CF4
   "Hexafluoroethane": C2F6
   "Trifluoromethane": HFC-23
@@ -28,8 +32,10 @@ species_map:
   "1,2-Dichloro-1,1,2,2-tetrafluoroethane": CFC-114
   "Bromochlorodifluoromethane": Halon-1211
   "Bromotrifluoromethane": Halon-1301
+  "Bromomethane": CH3Br
   "Chlorodifluoromethane": HCFC-22
   "Dichlorodifluoromethane": CFC-12
+  "Dichloromethane": CH2Cl2
   "Difluoromethane": HFC-32
   "Trichlorofluoromethane": CFC-11
   "Pentafluoroethane": HFC-125
