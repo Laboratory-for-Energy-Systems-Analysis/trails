@@ -12,6 +12,8 @@ import pytest
 import sparse
 import xarray as xr
 
+import trails.fair_rf as fair_rf_module
+from trails.fair_io import DEFAULT_MAPPING_YAML, load_species_mapping
 from trails.cache_interpolation import cache_dir_for_package
 from trails.fair_rf import _sanitize_emissions_year_values, run_fair_delta_rf
 from trails.lca import lca_static
@@ -509,6 +511,189 @@ def test_fair_precursor_response_species_are_captured(
 
     arr = np.asarray(rf.data.todense(), dtype=float)
     assert float(np.max(np.abs(arr))) > 0.0
+
+
+def test_fair_all_mapped_species_return_non_null_rf(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    species_map, signs = load_species_mapping(DEFAULT_MAPPING_YAML)
+    mapping_items = list(species_map.items())
+    assert mapping_items
+
+    n_flow = len(mapping_items)
+    years = np.array([2000, 2001], dtype=int)
+    flow_ids = np.arange(n_flow, dtype=int)
+    data = np.full(n_flow, 1.0e9, dtype=float)
+    year_idx = np.ones(n_flow, dtype=int)
+
+    biosphere_meta: dict[int, dict[str, str]] = {}
+    for i, (flow_key, _specie) in enumerate(mapping_items):
+        if isinstance(flow_key, tuple):
+            name = str(flow_key[0]) if len(flow_key) >= 1 else ""
+            compartment = str(flow_key[1]) if len(flow_key) >= 2 else "air"
+            subcompartment = str(flow_key[2]) if len(flow_key) >= 3 else ""
+            name_key: object = name
+        else:
+            name = str(flow_key)
+            compartment = "air"
+            subcompartment = ""
+            name_key = name
+
+        sign_value = float(signs.get(flow_key, signs.get(name_key, 1.0)))
+        year_idx[i] = 0 if sign_value < 0 else 1
+        biosphere_meta[int(i)] = {
+            "name": name,
+            "compartment": compartment,
+            "subcompartment": subcompartment,
+        }
+
+    coords = np.vstack(
+        [
+            np.zeros(n_flow, dtype=int),  # activity
+            flow_ids,  # flow
+            year_idx,  # year
+            np.zeros(n_flow, dtype=int),  # root activity
+        ]
+    )
+    inv = sparse.COO(coords=coords, data=data, shape=(1, n_flow, len(years), 1))
+
+    class DummyTrailsAllMapped:
+        def __init__(self) -> None:
+            self.debug = False
+            self.inventory = xr.DataArray(
+                inv,
+                dims=("activity", "flow", "year", "root activity"),
+                coords={
+                    "activity": [0],
+                    "flow": flow_ids,
+                    "year": years,
+                    "root activity": [0],
+                },
+            )
+            self.biosphere_indices = {"2000": biosphere_meta}
+
+    trails = DummyTrailsAllMapped()
+
+    mapped_species = sorted({str(v) for v in species_map.values()})
+    base_rows = [
+        {
+            "scenario": "s",
+            "region": "World",
+            "variable": specie,
+            "unit": f"Mt {specie}/yr",
+            "2000": 0.0,
+            "2001": 0.0,
+        }
+        for specie in mapped_species
+    ]
+    base_df = pd.DataFrame(base_rows)
+    base_lookup = {
+        str(row["variable"]): np.array([float(row["2000"]), float(row["2001"])])
+        for _, row in base_df.iterrows()
+    }
+
+    response_species = {
+        rsp
+        for values in fair_rf_module._PRECURSOR_RESPONSE_SPECIES.values()
+        for rsp in values
+    }
+    forcing_species = sorted(
+        {
+            (
+                "CO2"
+                if specie in {"CO2 FFI", "CO2 AFOLU"}
+                else str(specie)
+            )
+            for specie in mapped_species
+        }
+        | response_species
+    )
+    forcing_index = {specie: i for i, specie in enumerate(forcing_species)}
+
+    def fake_load_emissions_csv(*args: Any, **kwargs: Any) -> pd.DataFrame:
+        return base_df.copy()
+
+    def fake_run_fair_emissions(*args: Any, **kwargs: Any) -> Any:
+        emissions_df = args[0]
+        scenario = kwargs.get("scenario") or args[1]
+        config_names = kwargs.get("config_names") or ["c1", "c2"]
+        local = fair_rf_module._normalize_emissions_columns(emissions_df)
+        local = local[
+            (local["scenario"] == scenario)
+            & (local["region"].str.lower() == "world")
+        ].copy()
+
+        forcing_vals = np.zeros(
+            (1, len(config_names), len(years), len(forcing_species)),
+            dtype=float,
+        )
+        for _, row in local.iterrows():
+            variable = str(row["variable"])
+            if variable not in base_lookup:
+                continue
+            row_vals = np.array(
+                [
+                    float(pd.to_numeric(row.get("2000", 0.0), errors="coerce") or 0.0),
+                    float(pd.to_numeric(row.get("2001", 0.0), errors="coerce") or 0.0),
+                ],
+                dtype=float,
+            )
+            delta = row_vals - base_lookup[variable]
+            if not np.any(delta):
+                continue
+
+            primary = "CO2" if variable in {"CO2 FFI", "CO2 AFOLU"} else variable
+            forcing_vals[:, :, :, forcing_index[primary]] += delta[None, None, :]
+            for response in fair_rf_module._PRECURSOR_RESPONSE_SPECIES.get(
+                primary, ()
+            ):
+                forcing_vals[:, :, :, forcing_index[response]] += (
+                    0.5 * delta[None, None, :]
+                )
+
+        forcing = xr.DataArray(
+            forcing_vals,
+            dims=("scenario", "config", "timebounds", "specie"),
+            coords={
+                "scenario": [str(scenario)],
+                "config": list(config_names),
+                "timebounds": np.array([2000.0, 2001.0], dtype=float),
+                "specie": forcing_species,
+            },
+        )
+        temperature = xr.DataArray(
+            np.sum(forcing_vals, axis=3),
+            dims=("scenario", "config", "timebounds"),
+            coords={
+                "scenario": [str(scenario)],
+                "config": list(config_names),
+                "timebounds": np.array([2000.0, 2001.0], dtype=float),
+            },
+        )
+        return types.SimpleNamespace(forcing=forcing, temperature=temperature)
+
+    monkeypatch.setattr("trails.fair_rf.load_emissions_csv", fake_load_emissions_csv)
+    monkeypatch.setattr("trails.fair_rf._run_fair_emissions", fake_run_fair_emissions)
+
+    rf = run_fair_delta_rf(
+        trails,
+        scenario="s",
+        mapping_yaml=DEFAULT_MAPPING_YAML,
+        config_names=["c1", "c2"],
+        per_species_runs=True,
+        per_species_workers=1,
+        validate_emissions_delta=False,
+        scale_factor=1.0,
+        quantiles=[50.0],
+    )
+
+    arr = np.asarray(rf.data.todense(), dtype=float)
+    assert arr.shape == (1, len(years), n_flow, 1)
+
+    for flow_pos, (flow_key, _specie) in enumerate(mapping_items):
+        series = arr[0, :, flow_pos, 0]
+        assert np.all(np.isfinite(series)), f"non-finite RF for mapped flow {flow_key!r}"
+        assert np.any(np.abs(series) > 0), f"null RF for mapped flow {flow_key!r}"
 
 
 def test_sanitize_emissions_year_values_fills_missing() -> None:
