@@ -599,11 +599,7 @@ def test_fair_all_mapped_species_return_non_null_rf(
     }
     forcing_species = sorted(
         {
-            (
-                "CO2"
-                if specie in {"CO2 FFI", "CO2 AFOLU"}
-                else str(specie)
-            )
+            ("CO2" if specie in {"CO2 FFI", "CO2 AFOLU"} else str(specie))
             for specie in mapped_species
         }
         | response_species
@@ -619,8 +615,7 @@ def test_fair_all_mapped_species_return_non_null_rf(
         config_names = kwargs.get("config_names") or ["c1", "c2"]
         local = fair_rf_module._normalize_emissions_columns(emissions_df)
         local = local[
-            (local["scenario"] == scenario)
-            & (local["region"].str.lower() == "world")
+            (local["scenario"] == scenario) & (local["region"].str.lower() == "world")
         ].copy()
 
         forcing_vals = np.zeros(
@@ -644,9 +639,7 @@ def test_fair_all_mapped_species_return_non_null_rf(
 
             primary = "CO2" if variable in {"CO2 FFI", "CO2 AFOLU"} else variable
             forcing_vals[:, :, :, forcing_index[primary]] += delta[None, None, :]
-            for response in fair_rf_module._PRECURSOR_RESPONSE_SPECIES.get(
-                primary, ()
-            ):
+            for response in fair_rf_module._PRECURSOR_RESPONSE_SPECIES.get(primary, ()):
                 forcing_vals[:, :, :, forcing_index[response]] += (
                     0.5 * delta[None, None, :]
                 )
@@ -692,7 +685,9 @@ def test_fair_all_mapped_species_return_non_null_rf(
 
     for flow_pos, (flow_key, _specie) in enumerate(mapping_items):
         series = arr[0, :, flow_pos, 0]
-        assert np.all(np.isfinite(series)), f"non-finite RF for mapped flow {flow_key!r}"
+        assert np.all(
+            np.isfinite(series)
+        ), f"non-finite RF for mapped flow {flow_key!r}"
         assert np.any(np.abs(series) > 0), f"null RF for mapped flow {flow_key!r}"
 
 
