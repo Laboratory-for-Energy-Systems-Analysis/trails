@@ -169,6 +169,9 @@ trails.temporal_routing(
 lca(
     trails=trails,
     methods=[method],
+    # defaults shown explicitly:
+    solver_mode="iterative",
+    iterative_rtol=1e-3,
 )
 
 # Plot temporal impact scores
@@ -336,7 +339,8 @@ Core modules and responsibilities:
 
 * `trails/datapackage.py`: load matrices, indices, and temporal metadata.
 * `trails/trails.py`: main wrapper, temporal traversal, inventory/score accumulation.
-* `trails/lca.py`: orchestration of traversal + per-year solves using `bw2calc`.
+* `trails/lca.py`: orchestration of traversal + per-year solves (`iterative`,
+  `direct`, or `bw2calc`; default is `iterative`).
 * `trails/lcia.py`: bundled LCIA methods and characterization factor matrices.
 * `trails/plotting.py`: time-series visualization helpers.
 
@@ -380,7 +384,11 @@ pip install trails
 
 ## Solver Performance Notes
 
-`TRAILS` relies on `bw2calc` for linear system solves. Performance depends on the
+`TRAILS` defaults to an iterative GMRES solve (`solver_mode="iterative"`) with
+`iterative_rtol=1e-3`. You can also use `solver_mode="bw2calc"` or
+`solver_mode="direct"` depending on your workflow.
+
+For `bw2calc` and direct sparse-factorization paths, performance depends on the
 available sparse solver backend:
 
 - **PC users**: `bw2calc` will use `pypardiso` with **MKL’s PARDISO** solver (fast).

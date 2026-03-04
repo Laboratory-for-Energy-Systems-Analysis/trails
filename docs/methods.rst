@@ -39,6 +39,9 @@ Use methods in temporal LCA
         trails=trails,
         methods=[method],
         ei_version="3.11",
+        # defaults shown explicitly:
+        solver_mode="iterative",
+        iterative_rtol=1e-3,
     )
 
 Inspect LCIA flow factors

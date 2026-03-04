@@ -517,8 +517,8 @@ def lca(
     store_inventory: bool = False,
     compute_score: bool = True,
     ei_version: str = "3.11",
-    solver_mode: Literal["bw2calc", "direct", "iterative"] = "bw2calc",
-    iterative_rtol: float = 1e-6,
+    solver_mode: Literal["bw2calc", "direct", "iterative"] = "iterative",
+    iterative_rtol: float = 1e-3,
     iterative_atol: float = 0.0,
     iterative_restart: int | None = 50,
     iterative_maxiter: int | None = 300,
@@ -546,9 +546,10 @@ def lca(
     :type compute_score: bool
     :param ei_version: Value for `ei_version`.
     :type ei_version: str
-    :param solver_mode: Value for `solver_mode`.
+    :param solver_mode: Solver backend mode. Defaults to ``"iterative"``.
     :type solver_mode: Literal["bw2calc", "direct", "iterative"]
-    :param iterative_rtol: Value for `iterative_rtol`.
+    :param iterative_rtol: Relative tolerance for iterative solves.
+        Defaults to ``1e-3``.
     :type iterative_rtol: float
     :param iterative_atol: Value for `iterative_atol`.
     :type iterative_atol: float

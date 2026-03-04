@@ -65,6 +65,9 @@ Run a temporal LCA
     lca(
         trails=trails,
         methods=[method],
+        # defaults shown explicitly:
+        solver_mode="iterative",
+        iterative_rtol=1e-3,
     )
 
     # Plot temporal impact scores

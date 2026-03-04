@@ -94,6 +94,9 @@ The primary entry point is ``trails.lca.lca``:
     lca(
         trails=trails,
         methods=[method],
+        # defaults shown explicitly:
+        solver_mode="iterative",
+        iterative_rtol=1e-3,
     )
 
 Temporal LCA results are stored on the Trails instance. Use ``trails.scores``

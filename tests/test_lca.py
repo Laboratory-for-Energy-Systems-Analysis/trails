@@ -1,4 +1,5 @@
 import importlib
+import inspect
 import bw2calc as bc
 import numpy as np
 import sparse
@@ -477,3 +478,10 @@ def test_lca_invalid_solver_mode_raises(example_trails: Trails) -> None:
             attribute_to_roots=False,
             solver_mode="invalid-mode",  # type: ignore[arg-type]
         )
+
+
+def test_lca_defaults_use_iterative_solver_mode() -> None:
+    """Public lca() defaults should prefer iterative solves."""
+    sig = inspect.signature(lca_module.lca)
+    assert sig.parameters["solver_mode"].default == "iterative"
+    assert sig.parameters["iterative_rtol"].default == 1e-3
