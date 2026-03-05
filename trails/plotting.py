@@ -231,6 +231,63 @@ def _add_root_traces(
 
         root_label = label_for_root(root)
         root_label_wrapped = _wrap_hover_label(root_label, max_chars=45)
+        legend_group = f"root::{root}"
+
+        if stacked:
+            y_vals = np.asarray(Y[:, ri], dtype=float)
+            y_pos = np.where(y_vals > 0.0, y_vals, 0.0)
+            y_neg = np.where(y_vals < 0.0, y_vals, 0.0)
+            has_pos = bool(np.any(y_pos != 0.0))
+            has_neg = bool(np.any(y_neg != 0.0))
+
+            if has_pos:
+                fig.add_trace(
+                    go.Scatter(
+                        x=years,
+                        y=y_pos,
+                        name=root_label,
+                        meta=root_label_wrapped,
+                        legendgroup=legend_group,
+                        showlegend=showlegend,
+                        mode="lines",
+                        hoverinfo="skip" if not showhover else None,
+                        hovertemplate=(
+                            (
+                                "<b>%{meta}</b><br>"
+                                "Year: %{x}<br>"
+                                f"{method_label}: %{{y:.6g}}<extra></extra>"
+                            )
+                            if showhover
+                            else None
+                        ),
+                        stackgroup="positive",
+                    )
+                )
+
+            if has_neg:
+                fig.add_trace(
+                    go.Scatter(
+                        x=years,
+                        y=y_neg,
+                        name=root_label,
+                        meta=root_label_wrapped,
+                        legendgroup=legend_group,
+                        showlegend=(showlegend and not has_pos),
+                        mode="lines",
+                        hoverinfo="skip" if not showhover else None,
+                        hovertemplate=(
+                            (
+                                "<b>%{meta}</b><br>"
+                                "Year: %{x}<br>"
+                                f"{method_label}: %{{y:.6g}}<extra></extra>"
+                            )
+                            if showhover
+                            else None
+                        ),
+                        stackgroup="negative",
+                    )
+                )
+            continue
 
         fig.add_trace(
             go.Scatter(
@@ -238,6 +295,7 @@ def _add_root_traces(
                 y=Y[:, ri],
                 name=root_label,  # keep legend name as before
                 meta=root_label_wrapped,  # wrapped version for hover
+                legendgroup=legend_group,
                 showlegend=showlegend,
                 mode="lines",
                 hoverinfo="skip" if not showhover else None,
@@ -250,15 +308,9 @@ def _add_root_traces(
                     if showhover
                     else None
                 ),
-                **(
-                    {"stackgroup": "one"}
-                    if stacked
-                    else {
-                        "fill": "tozeroy",
-                        "line": dict(width=2),
-                        "opacity": alpha,
-                    }
-                ),
+                fill="tozeroy",
+                line=dict(width=2),
+                opacity=alpha,
             )
         )
 
@@ -1376,6 +1428,8 @@ def _apply_base_layout(
             font=dict(size=10),
             entrywidth=entry_w,
             entrywidthmode="pixels",
+            tracegroupgap=0,
+            groupclick="togglegroup",
         ),
         margin=dict(
             l=60,

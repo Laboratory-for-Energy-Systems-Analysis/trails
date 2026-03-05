@@ -252,6 +252,17 @@ def _inventory_emissions_by_fair_species(
     if not flow_pos_to_key:
         return pd.DataFrame(index=inv_years)
 
+    def _flow_name(flow_key: object) -> str:
+        if isinstance(flow_key, tuple) and len(flow_key) >= 1:
+            return str(flow_key[0])
+        return str(flow_key)
+
+    def _resolve_mapping(mapping: dict[object, Any], flow_key: object) -> Any:
+        name_key = _flow_name(flow_key)
+        if name_key in mapping:
+            return mapping[name_key]
+        return mapping.get(flow_key)
+
     n_year = len(inv_years)
     species_order: list[str] = []
     species_to_idx: dict[str, int] = {}
@@ -259,9 +270,7 @@ def _inventory_emissions_by_fair_species(
     flow_to_sign = np.ones(n_flow, dtype=float)
 
     for pos, flow_key in flow_pos_to_key.items():
-        fair_species = species_map.get(flow_key)
-        if fair_species is None and isinstance(flow_key, tuple):
-            fair_species = species_map.get(flow_key[0])
+        fair_species = _resolve_mapping(species_map, flow_key)
         if fair_species is None:
             continue
         specie = str(fair_species)
@@ -269,14 +278,8 @@ def _inventory_emissions_by_fair_species(
             species_to_idx[specie] = len(species_order)
             species_order.append(specie)
         flow_to_species[int(pos)] = species_to_idx[specie]
-        flow_to_sign[int(pos)] = float(
-            signs.get(
-                flow_key,
-                signs.get(
-                    flow_key[0] if isinstance(flow_key, tuple) else flow_key, 1.0
-                ),
-            )
-        )
+        sign_value = _resolve_mapping(signs, flow_key)
+        flow_to_sign[int(pos)] = 1.0 if sign_value is None else float(sign_value)
 
     if not species_order:
         return pd.DataFrame(index=inv_years)
@@ -760,6 +763,16 @@ def run_fair_delta_rf(
     flow_coord = inv.coords["flow"].values
     coord_value_to_pos = {int(v): i for i, v in enumerate(flow_coord)}
 
+    def _is_flow_category_mappable(compartment: str, subcompartment: str) -> bool:
+        """Restrict inventory-to-FaIR mapping to atmospheric exchanges."""
+        comp = str(compartment).strip().lower()
+        sub = str(subcompartment).strip().lower()
+        if comp == "air":
+            return True
+        if comp == "natural resource" and sub in {"air", "in air"}:
+            return True
+        return False
+
     flow_pos_to_key: dict[int, tuple[str, str, str] | str] = {}
     for _label, meta in getattr(trails, "biosphere_indices", {}).items():
         for fid, md in meta.items():
@@ -770,6 +783,8 @@ def run_fair_delta_rf(
                 continue
             compartment = (md.get("compartment") or "").strip()
             subcompartment = (md.get("subcompartment") or "").strip()
+            if not _is_flow_category_mappable(compartment, subcompartment):
+                continue
             flow_key = (str(name), compartment, subcompartment)
             key = int(fid)
             if key in coord_value_to_pos:
@@ -1003,11 +1018,20 @@ def run_fair_delta_rf(
     temp_data_out = []
     n_quant = len(quantiles)
 
+    def _flow_name(flow_key: object) -> str:
+        if isinstance(flow_key, tuple) and len(flow_key) >= 1:
+            return str(flow_key[0])
+        return str(flow_key)
+
+    def _resolve_mapping(mapping: dict[object, Any], flow_key: object) -> Any:
+        name_key = _flow_name(flow_key)
+        if name_key in mapping:
+            return mapping[name_key]
+        return mapping.get(flow_key)
+
     species_to_positions: Dict[str, list[int]] = {}
     for pos, flow_key in flow_pos_to_key.items():
-        specie = species_map.get(flow_key)
-        if specie is None and isinstance(flow_key, tuple):
-            specie = species_map.get(flow_key[0])
+        specie = _resolve_mapping(species_map, flow_key)
         if specie is None:
             continue
         species_to_positions.setdefault(specie, []).append(pos)
@@ -1051,15 +1075,8 @@ def run_fair_delta_rf(
             sign_arr = np.ones_like(vals)
             for i, p in enumerate(f_idx):
                 flow_key = flow_pos_to_key.get(int(p))
-                sign_val = float(
-                    signs.get(
-                        flow_key,
-                        signs.get(
-                            flow_key[0] if isinstance(flow_key, tuple) else flow_key,
-                            1.0,
-                        ),
-                    )
-                )
+                sign_value = _resolve_mapping(signs, flow_key)
+                sign_val = 1.0 if sign_value is None else float(sign_value)
                 if sign_val != 1.0:
                     sign_arr[i] = sign_val
             vals = np.abs(vals) * sign_arr
@@ -1163,15 +1180,8 @@ def run_fair_delta_rf(
             sign_arr = np.ones_like(vals)
             for i, p in enumerate(f_idx):
                 flow_key = flow_pos_to_key.get(int(p))
-                sign_val = float(
-                    signs.get(
-                        flow_key,
-                        signs.get(
-                            flow_key[0] if isinstance(flow_key, tuple) else flow_key,
-                            1.0,
-                        ),
-                    )
-                )
+                sign_value = _resolve_mapping(signs, flow_key)
+                sign_val = 1.0 if sign_value is None else float(sign_value)
                 if sign_val != 1.0:
                     sign_arr[i] = sign_val
             vals = np.abs(vals) * sign_arr
@@ -1428,29 +1438,221 @@ def run_fair_delta_rf(
             delta_forcing = delta_forcing / float(scale_factor)
             delta_temp = delta_temp / float(scale_factor)
 
-        for specie in delta_forcing.coords["specie"].values:
+        # Fast (single-run) mode can't isolate species-specific temperature from
+        # FaIR directly. Allocate total delta temperature to each specie by its
+        # yearly RF share so species contributions sum back to total temperature.
+        if "specie" in delta_forcing.dims:
+            total_forcing = delta_forcing.sum(dim="specie")
+        else:
+            total_forcing = delta_forcing
+
+        def _rf_share(numer: np.ndarray, denom: np.ndarray) -> np.ndarray:
+            numer_arr = np.nan_to_num(np.asarray(numer, dtype=float), nan=0.0)
+            denom_arr = np.nan_to_num(np.asarray(denom, dtype=float), nan=0.0)
+            # Use exact non-zero denominator masking. A fixed absolute cutoff can
+            # zero-out physically meaningful tiny signals.
+            return np.divide(
+                numer_arr,
+                denom_arr,
+                out=np.zeros_like(numer_arr, dtype=float),
+                where=np.isfinite(denom_arr) & (denom_arr != 0.0),
+            )
+
+        available_species = set()
+        if "specie" in delta_forcing.dims:
+            available_species = {
+                str(s) for s in delta_forcing.coords["specie"].values.tolist()
+            }
+
+        source_species = [str(s) for s in delta_by_species.columns.tolist()]
+        if not source_species and "specie" in delta_forcing.dims:
+            source_species = [
+                str(s) for s in delta_forcing.coords["specie"].values.tolist()
+            ]
+
+        source_to_primary = {
+            str(specie): str(rf_alias.get(str(specie), str(specie)))
+            for specie in source_species
+        }
+        primary_to_sources: dict[str, list[str]] = {}
+        for source_specie, primary in source_to_primary.items():
+            primary_to_sources.setdefault(primary, []).append(source_specie)
+
+        def _cumulative_source_emissions(source_specie: str) -> np.ndarray:
+            out = np.zeros(len(fair_years), dtype=float)
+            if source_specie not in delta_by_species.columns:
+                return out
+            series = delta_by_species[source_specie]
+            for year, val in series.items():
+                y_key = float(int(year)) + (0.5 if has_half_years else 0.0)
+                fi = year_to_fair_idx.get(y_key)
+                if fi is None:
+                    continue
+                out[int(fi)] += float(val)
+            return np.cumsum(out)
+
+        cumulative_by_source = {
+            source_specie: _cumulative_source_emissions(source_specie)
+            for source_specie in source_species
+            if source_specie in delta_by_species.columns
+        }
+
+        if config_names is not None and len(config_names) > 1:
+            rf_total_series_cfg = _extract_fair_timeseries_by_config(total_forcing)
+            temp_total_series_cfg = _extract_fair_timeseries_by_config(delta_temp)
+        else:
+            rf_total_series_1d = _extract_fair_timeseries(total_forcing)
+            rf_total_series_1d = np.nan_to_num(rf_total_series_1d, nan=0.0)
+            rf_total_series_1d = np.ravel(rf_total_series_1d)
+            temp_total_series_1d = _extract_fair_timeseries(delta_temp)
+            temp_total_series_1d = np.nan_to_num(temp_total_series_1d, nan=0.0)
+            temp_total_series_1d = np.ravel(temp_total_series_1d)
+
+        for source_specie in source_species:
+            primary = source_to_primary.get(source_specie, source_specie)
+            target_species: list[str] = []
+            for candidate in [primary, *_PRECURSOR_RESPONSE_SPECIES.get(primary, ())]:
+                cand = str(candidate)
+                if cand in available_species and cand not in target_species:
+                    target_species.append(cand)
+            if not target_species:
+                if source_specie in available_species:
+                    target_species = [source_specie]
+                else:
+                    continue
+
             if config_names is not None and len(config_names) > 1:
-                rf_series = _extract_fair_timeseries_by_config(
-                    delta_forcing.sel(specie=specie)
+                rf_parts = [
+                    _extract_fair_timeseries_by_config(
+                        delta_forcing.sel(specie=target)
+                    )
+                    for target in target_species
+                ]
+                if len(rf_parts) == 1:
+                    rf_target = rf_parts[0]
+                else:
+                    rf_target = np.sum(np.stack(rf_parts, axis=0), axis=0)
+
+                same_sources = [
+                    s
+                    for s in primary_to_sources.get(primary, [source_specie])
+                    if s in cumulative_by_source
+                ]
+                if len(same_sources) > 1 and source_specie in cumulative_by_source:
+                    total_cum = np.sum(
+                        np.stack(
+                            [cumulative_by_source[s] for s in same_sources], axis=0
+                        ),
+                        axis=0,
+                    )
+                    frac = _rf_share(cumulative_by_source[source_specie], total_cum)
+                    rf_series = rf_target * frac[None, :]
+                else:
+                    rf_series = rf_target
+
+                share = _rf_share(rf_series, rf_total_series_cfg)
+                temp_series = np.asarray(temp_total_series_cfg, dtype=float) * np.nan_to_num(
+                    share, nan=0.0
                 )
                 rf_quant = _safe_nanpercentile(rf_series, quantiles)
-                temp_series = _extract_fair_timeseries_by_config(delta_temp)
                 temp_quant = _safe_nanpercentile(temp_series, quantiles)
             else:
-                rf_series = np.asarray(
-                    delta_forcing.sel(specie=specie).values, dtype=float
-                )
-                rf_series = np.nan_to_num(rf_series, nan=0.0)
-                rf_series = np.ravel(rf_series)
+                rf_target = np.zeros(len(fair_years), dtype=float)
+                for target in target_species:
+                    part = np.asarray(delta_forcing.sel(specie=target).values, dtype=float)
+                    part = np.nan_to_num(part, nan=0.0)
+                    rf_target += np.ravel(part)
+
+                same_sources = [
+                    s
+                    for s in primary_to_sources.get(primary, [source_specie])
+                    if s in cumulative_by_source
+                ]
+                if len(same_sources) > 1 and source_specie in cumulative_by_source:
+                    total_cum = np.sum(
+                        np.stack(
+                            [cumulative_by_source[s] for s in same_sources], axis=0
+                        ),
+                        axis=0,
+                    )
+                    frac = _rf_share(cumulative_by_source[source_specie], total_cum)
+                    rf_series = rf_target * frac
+                else:
+                    rf_series = rf_target
+
+                share = _rf_share(rf_series, rf_total_series_1d)
+                temp_series = temp_total_series_1d * np.nan_to_num(share, nan=0.0)
                 rf_quant = np.tile(rf_series[None, :], (n_quant, 1))
-                temp_series = _extract_fair_timeseries(delta_temp)
-                temp_series = np.nan_to_num(temp_series, nan=0.0)
                 temp_quant = np.tile(temp_series[None, :], (n_quant, 1))
+
+            has_pos = True
+            has_neg = False
+            if source_specie in delta_by_species.columns:
+                vals = np.asarray(delta_by_species[source_specie].values, dtype=float)
+                has_pos = bool(np.any(vals > 0.0))
+                has_neg = bool(np.any(vals < 0.0))
+
             for qi in range(n_quant):
-                _append_allocated_rf(str(specie), rf_quant[qi], "pos", quantile_idx=qi)
-                _append_allocated_temp(
-                    str(specie), temp_quant[qi], "pos", quantile_idx=qi
-                )
+                rf_q = np.asarray(rf_quant[qi], dtype=float)
+                temp_q = np.asarray(temp_quant[qi], dtype=float)
+
+                if has_pos and has_neg:
+                    rf_pos = np.maximum(rf_q, 0.0)
+                    rf_neg = np.minimum(rf_q, 0.0)
+                    temp_pos = np.maximum(temp_q, 0.0)
+                    temp_neg = np.minimum(temp_q, 0.0)
+                    if np.any(rf_pos) or np.any(temp_pos):
+                        _append_allocated_rf(
+                            source_specie,
+                            rf_pos,
+                            "pos",
+                            quantile_idx=qi,
+                        )
+                        _append_allocated_temp(
+                            source_specie,
+                            temp_pos,
+                            "pos",
+                            quantile_idx=qi,
+                        )
+                    if np.any(rf_neg) or np.any(temp_neg):
+                        _append_allocated_rf(
+                            source_specie,
+                            rf_neg,
+                            "neg",
+                            quantile_idx=qi,
+                        )
+                        _append_allocated_temp(
+                            source_specie,
+                            temp_neg,
+                            "neg",
+                            quantile_idx=qi,
+                        )
+                elif has_neg and not has_pos:
+                    _append_allocated_rf(
+                        source_specie,
+                        rf_q,
+                        "neg",
+                        quantile_idx=qi,
+                    )
+                    _append_allocated_temp(
+                        source_specie,
+                        temp_q,
+                        "neg",
+                        quantile_idx=qi,
+                    )
+                else:
+                    _append_allocated_rf(
+                        source_specie,
+                        rf_q,
+                        "pos",
+                        quantile_idx=qi,
+                    )
+                    _append_allocated_temp(
+                        source_specie,
+                        temp_q,
+                        "pos",
+                        quantile_idx=qi,
+                    )
 
     if coords_out:
         coords = np.hstack(coords_out)

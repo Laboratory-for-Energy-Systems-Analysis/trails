@@ -383,6 +383,727 @@ def test_fair_quantile_dimensions(monkeypatch: pytest.MonkeyPatch) -> None:
     assert int(getattr(rf.data, "nnz", 0)) > 0
 
 
+def test_fair_fast_mode_temperature_not_duplicated_across_species(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class DummyTrailsTwoFlows:
+        def __init__(self) -> None:
+            self.debug = False
+            coords = np.array(
+                [
+                    [0, 0, 0, 0],  # activity
+                    [0, 0, 1, 1],  # flow
+                    [0, 1, 0, 1],  # year
+                    [0, 0, 0, 0],  # root activity
+                ],
+                dtype=int,
+            )
+            data = np.array([1.0, 1.0, 1.0, 1.0], dtype=float)
+            inv = sparse.COO(coords=coords, data=data, shape=(1, 2, 2, 1))
+            self.inventory = xr.DataArray(
+                inv,
+                dims=("activity", "flow", "year", "root activity"),
+                coords={
+                    "activity": [0],
+                    "flow": [0, 1],
+                    "year": [2000, 2001],
+                    "root activity": [0],
+                },
+            )
+            self.biosphere_indices = {
+                "2000": {
+                    0: {"name": "CO2", "compartment": "air", "subcompartment": ""},
+                    1: {"name": "CH4", "compartment": "air", "subcompartment": ""},
+                }
+            }
+
+    trails = DummyTrailsTwoFlows()
+    state: dict[str, np.ndarray] = {}
+
+    def fake_load_emissions_csv(*args: Any, **kwargs: Any) -> pd.DataFrame:
+        return pd.DataFrame(
+            {
+                "scenario": ["s", "s"],
+                "region": ["World", "World"],
+                "variable": ["CO2", "CH4"],
+                "unit": ["Gt CO2/yr", "Mt CH4/yr"],
+                "2000.5": [0.0, 0.0],
+                "2001.5": [0.0, 0.0],
+            }
+        )
+
+    def fake_load_species_mapping(
+        *args: Any, **kwargs: Any
+    ) -> tuple[dict[object, str], dict[object, float]]:
+        return {
+            ("CO2", "air", ""): "CO2",
+            ("CH4", "air", ""): "CH4",
+        }, {}
+
+    def fake_run_fair_emissions(*args: Any, **kwargs: Any) -> Any:
+        emissions_df = args[0]
+        scenario = kwargs.get("scenario") or args[1]
+        config_names = kwargs.get("config_names") or ["c1"]
+
+        local = fair_rf_module._normalize_emissions_columns(emissions_df)
+        local = local[
+            (local["scenario"] == scenario) & (local["region"].str.lower() == "world")
+        ].copy()
+        years = np.array([2000.5, 2001.5], dtype=float)
+        species = ["CO2", "CH4"]
+        forcing_vals = np.zeros((1, len(config_names), len(years), len(species)))
+
+        for i, specie in enumerate(species):
+            rows = local[local["variable"] == specie]
+            if rows.empty:
+                continue
+            row = rows.iloc[0]
+            forcing_vals[:, :, :, i] = np.array(
+                [
+                    float(pd.to_numeric(row.get("2000.5", 0.0), errors="coerce") or 0),
+                    float(pd.to_numeric(row.get("2001.5", 0.0), errors="coerce") or 0),
+                ],
+                dtype=float,
+            )[None, None, :]
+
+        temperature_vals = np.sum(forcing_vals, axis=3)
+        if "baseline_temp" not in state:
+            state["baseline_temp"] = temperature_vals[0, 0, :].copy()
+        else:
+            state["pert_temp"] = temperature_vals[0, 0, :].copy()
+
+        forcing = xr.DataArray(
+            forcing_vals,
+            dims=("scenario", "config", "timebounds", "specie"),
+            coords={
+                "scenario": [str(scenario)],
+                "config": list(config_names),
+                "timebounds": years,
+                "specie": species,
+            },
+        )
+        temperature = xr.DataArray(
+            temperature_vals,
+            dims=("scenario", "config", "timebounds"),
+            coords={
+                "scenario": [str(scenario)],
+                "config": list(config_names),
+                "timebounds": years,
+            },
+        )
+        return types.SimpleNamespace(
+            forcing=forcing,
+            temperature=temperature,
+            configs=list(config_names),
+        )
+
+    monkeypatch.setattr("trails.fair_rf.load_emissions_csv", fake_load_emissions_csv)
+    monkeypatch.setattr(
+        "trails.fair_rf.load_species_mapping", fake_load_species_mapping
+    )
+    monkeypatch.setattr("trails.fair_rf._run_fair_emissions", fake_run_fair_emissions)
+
+    run_fair_delta_rf(
+        trails,
+        scenario="s",
+        config_names=["c1"],
+        per_species_runs=False,
+        validate_emissions_delta=False,
+        scale_factor=1.0,
+        quantiles=[50.0],
+    )
+
+    allocated = np.asarray(trails.delta_temperature.data.todense(), dtype=float)
+    allocated_total = allocated[0].sum(axis=(1, 2))
+    expected_total = state["pert_temp"] - state["baseline_temp"]
+
+    np.testing.assert_allclose(
+        allocated_total,
+        expected_total,
+        rtol=1e-12,
+        atol=1e-15,
+    )
+
+
+def test_fair_fast_mode_keeps_tiny_temperature_signal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class DummyTrailsTwoFlowsTiny:
+        def __init__(self) -> None:
+            self.debug = False
+            coords = np.array(
+                [
+                    [0, 0, 0, 0],  # activity
+                    [0, 0, 1, 1],  # flow
+                    [0, 1, 0, 1],  # year
+                    [0, 0, 0, 0],  # root activity
+                ],
+                dtype=int,
+            )
+            data = np.array([1.0, 1.0, 1.0, 1.0], dtype=float)
+            inv = sparse.COO(coords=coords, data=data, shape=(1, 2, 2, 1))
+            self.inventory = xr.DataArray(
+                inv,
+                dims=("activity", "flow", "year", "root activity"),
+                coords={
+                    "activity": [0],
+                    "flow": [0, 1],
+                    "year": [2000, 2001],
+                    "root activity": [0],
+                },
+            )
+            self.biosphere_indices = {
+                "2000": {
+                    0: {"name": "CO2", "compartment": "air", "subcompartment": ""},
+                    1: {"name": "CH4", "compartment": "air", "subcompartment": ""},
+                }
+            }
+
+    trails = DummyTrailsTwoFlowsTiny()
+    call_state = {"count": 0}
+
+    def fake_load_emissions_csv(*args: Any, **kwargs: Any) -> pd.DataFrame:
+        return pd.DataFrame(
+            {
+                "scenario": ["s", "s"],
+                "region": ["World", "World"],
+                "variable": ["CO2", "CH4"],
+                "unit": ["Gt CO2/yr", "Mt CH4/yr"],
+                "2000.5": [0.0, 0.0],
+                "2001.5": [0.0, 0.0],
+            }
+        )
+
+    def fake_load_species_mapping(
+        *args: Any, **kwargs: Any
+    ) -> tuple[dict[object, str], dict[object, float]]:
+        return {
+            ("CO2", "air", ""): "CO2",
+            ("CH4", "air", ""): "CH4",
+        }, {}
+
+    def fake_run_fair_emissions(*args: Any, **kwargs: Any) -> Any:
+        scenario = kwargs.get("scenario") or args[1]
+        config_names = kwargs.get("config_names") or ["c1"]
+        years = np.array([2000.5, 2001.5], dtype=float)
+        species = ["CO2", "CH4"]
+        forcing_vals = np.zeros((1, len(config_names), len(years), len(species)))
+        if call_state["count"] > 0:
+            forcing_vals[0, :, :, 0] = np.array([1.0e-15, 2.0e-15])[None, :]
+            forcing_vals[0, :, :, 1] = np.array([2.0e-15, 1.0e-15])[None, :]
+        call_state["count"] += 1
+
+        forcing = xr.DataArray(
+            forcing_vals,
+            dims=("scenario", "config", "timebounds", "specie"),
+            coords={
+                "scenario": [str(scenario)],
+                "config": list(config_names),
+                "timebounds": years,
+                "specie": species,
+            },
+        )
+        temperature = xr.DataArray(
+            np.sum(forcing_vals, axis=3),
+            dims=("scenario", "config", "timebounds"),
+            coords={
+                "scenario": [str(scenario)],
+                "config": list(config_names),
+                "timebounds": years,
+            },
+        )
+        return types.SimpleNamespace(
+            forcing=forcing,
+            temperature=temperature,
+            configs=list(config_names),
+        )
+
+    monkeypatch.setattr("trails.fair_rf.load_emissions_csv", fake_load_emissions_csv)
+    monkeypatch.setattr(
+        "trails.fair_rf.load_species_mapping", fake_load_species_mapping
+    )
+    monkeypatch.setattr("trails.fair_rf._run_fair_emissions", fake_run_fair_emissions)
+
+    run_fair_delta_rf(
+        trails,
+        scenario="s",
+        config_names=["c1"],
+        per_species_runs=False,
+        validate_emissions_delta=False,
+        scale_factor=1.0,
+        quantiles=[50.0],
+    )
+
+    assert int(getattr(trails.delta_temperature.data, "nnz", 0)) > 0
+    assert float(trails.delta_temperature.sum().item()) != 0.0
+
+
+def test_fair_fast_mode_allocates_negative_emissions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class DummyTrailsNegativeOnly:
+        def __init__(self) -> None:
+            self.debug = False
+            coords = np.array(
+                [
+                    [0, 0],  # activity
+                    [0, 0],  # flow
+                    [0, 1],  # year
+                    [0, 0],  # root activity
+                ],
+                dtype=int,
+            )
+            data = np.array([1.0, 1.0], dtype=float)
+            inv = sparse.COO(coords=coords, data=data, shape=(1, 1, 2, 1))
+            self.inventory = xr.DataArray(
+                inv,
+                dims=("activity", "flow", "year", "root activity"),
+                coords={
+                    "activity": [0],
+                    "flow": [0],
+                    "year": [2000, 2001],
+                    "root activity": [0],
+                },
+            )
+            self.biosphere_indices = {
+                "2000": {
+                    0: {
+                        "name": "Carbon dioxide, in air",
+                        "compartment": "natural resource",
+                        "subcompartment": "in air",
+                    }
+                }
+            }
+
+    trails = DummyTrailsNegativeOnly()
+
+    def fake_load_emissions_csv(*args: Any, **kwargs: Any) -> pd.DataFrame:
+        return pd.DataFrame(
+            {
+                "scenario": ["s"],
+                "region": ["World"],
+                "variable": ["CO2 AFOLU"],
+                "unit": ["Gt CO2/yr"],
+                "2000.5": [0.0],
+                "2001.5": [0.0],
+            }
+        )
+
+    def fake_load_species_mapping(
+        *args: Any, **kwargs: Any
+    ) -> tuple[dict[object, str], dict[object, float]]:
+        key = ("Carbon dioxide, in air", "natural resource", "in air")
+        return {key: "CO2 AFOLU"}, {key: -1.0}
+
+    def fake_run_fair_emissions(*args: Any, **kwargs: Any) -> Any:
+        emissions_df = args[0]
+        scenario = kwargs.get("scenario") or args[1]
+        config_names = kwargs.get("config_names") or ["c1"]
+        local = fair_rf_module._normalize_emissions_columns(emissions_df)
+        local = local[
+            (local["scenario"] == scenario) & (local["region"].str.lower() == "world")
+        ].copy()
+        years = np.array([2000.5, 2001.5], dtype=float)
+        rows = local[local["variable"] == "CO2 AFOLU"]
+        vals = np.zeros(2, dtype=float)
+        if not rows.empty:
+            row = rows.iloc[0]
+            vals = np.array(
+                [
+                    float(pd.to_numeric(row.get("2000.5", 0.0), errors="coerce") or 0),
+                    float(pd.to_numeric(row.get("2001.5", 0.0), errors="coerce") or 0),
+                ],
+                dtype=float,
+            )
+
+        # Mimic FaIR returning aggregate CO2 forcing channel, not CO2 AFOLU.
+        forcing = xr.DataArray(
+            vals[None, None, :, None],
+            dims=("scenario", "config", "timebounds", "specie"),
+            coords={
+                "scenario": [str(scenario)],
+                "config": list(config_names),
+                "timebounds": years,
+                "specie": ["CO2"],
+            },
+        )
+        temperature = xr.DataArray(
+            vals[None, None, :],
+            dims=("scenario", "config", "timebounds"),
+            coords={
+                "scenario": [str(scenario)],
+                "config": list(config_names),
+                "timebounds": years,
+            },
+        )
+        return types.SimpleNamespace(
+            forcing=forcing,
+            temperature=temperature,
+            configs=list(config_names),
+        )
+
+    monkeypatch.setattr("trails.fair_rf.load_emissions_csv", fake_load_emissions_csv)
+    monkeypatch.setattr(
+        "trails.fair_rf.load_species_mapping", fake_load_species_mapping
+    )
+    monkeypatch.setattr("trails.fair_rf._run_fair_emissions", fake_run_fair_emissions)
+
+    run_fair_delta_rf(
+        trails,
+        scenario="s",
+        config_names=["c1"],
+        per_species_runs=False,
+        validate_emissions_delta=False,
+        scale_factor=1.0,
+        quantiles=[50.0],
+    )
+
+    rf = np.asarray(trails.instant_radiative_forcing.data.todense(), dtype=float)
+    temp = np.asarray(trails.delta_temperature.data.todense(), dtype=float)
+
+    assert np.any(rf < 0.0)
+    assert np.any(temp < 0.0)
+
+
+def test_fair_fast_mode_splits_aggregate_co2_between_emission_and_uptake(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class DummyTrailsCO2Split:
+        def __init__(self) -> None:
+            self.debug = False
+            coords = np.array(
+                [
+                    [0, 0, 0, 0],  # activity
+                    [0, 0, 1, 1],  # flow
+                    [0, 1, 0, 1],  # year
+                    [0, 0, 0, 0],  # root activity
+                ],
+                dtype=int,
+            )
+            # flow 0 (fossil) has +1, flow 1 (uptake) has +2 then sign override -1
+            data = np.array([1.0, 1.0, 2.0, 2.0], dtype=float)
+            inv = sparse.COO(coords=coords, data=data, shape=(1, 2, 2, 1))
+            self.inventory = xr.DataArray(
+                inv,
+                dims=("activity", "flow", "year", "root activity"),
+                coords={
+                    "activity": [0],
+                    "flow": [0, 1],
+                    "year": [2000, 2001],
+                    "root activity": [0],
+                },
+            )
+            self.biosphere_indices = {
+                "2000": {
+                    0: {
+                        "name": "Carbon dioxide, fossil",
+                        "compartment": "air",
+                        "subcompartment": "non-urban air or from high stacks",
+                    },
+                    1: {
+                        "name": "Carbon dioxide, in air",
+                        "compartment": "natural resource",
+                        "subcompartment": "in air",
+                    },
+                }
+            }
+
+    trails = DummyTrailsCO2Split()
+    call_state = {"count": 0}
+
+    def fake_load_emissions_csv(*args: Any, **kwargs: Any) -> pd.DataFrame:
+        return pd.DataFrame(
+            {
+                "scenario": ["s", "s"],
+                "region": ["World", "World"],
+                "variable": ["CO2 FFI", "CO2 AFOLU"],
+                "unit": ["Gt CO2/yr", "Gt CO2/yr"],
+                "2000.5": [0.0, 0.0],
+                "2001.5": [0.0, 0.0],
+            }
+        )
+
+    def fake_load_species_mapping(
+        *args: Any, **kwargs: Any
+    ) -> tuple[dict[object, str], dict[object, float]]:
+        fossil_key = (
+            "Carbon dioxide, fossil",
+            "air",
+            "non-urban air or from high stacks",
+        )
+        uptake_key = ("Carbon dioxide, in air", "natural resource", "in air")
+        return {fossil_key: "CO2 FFI", uptake_key: "CO2 AFOLU"}, {uptake_key: -1.0}
+
+    def fake_run_fair_emissions(*args: Any, **kwargs: Any) -> Any:
+        emissions_df = args[0]
+        scenario = kwargs.get("scenario") or args[1]
+        config_names = kwargs.get("config_names") or ["c1"]
+        local = fair_rf_module._normalize_emissions_columns(emissions_df)
+        local = local[
+            (local["scenario"] == scenario) & (local["region"].str.lower() == "world")
+        ].copy()
+
+        years = np.array([2000.5, 2001.5], dtype=float)
+        if call_state["count"] == 0:
+            net = np.zeros(2, dtype=float)
+        else:
+            ffi = local[local["variable"] == "CO2 FFI"]
+            afolu = local[local["variable"] == "CO2 AFOLU"]
+            ffi_vals = np.zeros(2, dtype=float)
+            afolu_vals = np.zeros(2, dtype=float)
+            if not ffi.empty:
+                row = ffi.iloc[0]
+                ffi_vals = np.array(
+                    [
+                        float(
+                            pd.to_numeric(row.get("2000.5", 0.0), errors="coerce") or 0
+                        ),
+                        float(
+                            pd.to_numeric(row.get("2001.5", 0.0), errors="coerce") or 0
+                        ),
+                    ],
+                    dtype=float,
+                )
+            if not afolu.empty:
+                row = afolu.iloc[0]
+                afolu_vals = np.array(
+                    [
+                        float(
+                            pd.to_numeric(row.get("2000.5", 0.0), errors="coerce") or 0
+                        ),
+                        float(
+                            pd.to_numeric(row.get("2001.5", 0.0), errors="coerce") or 0
+                        ),
+                    ],
+                    dtype=float,
+                )
+            # FaIR may expose CO2 as one aggregate channel.
+            net = ffi_vals + afolu_vals
+        call_state["count"] += 1
+
+        forcing = xr.DataArray(
+            net[None, None, :, None],
+            dims=("scenario", "config", "timebounds", "specie"),
+            coords={
+                "scenario": [str(scenario)],
+                "config": list(config_names),
+                "timebounds": years,
+                "specie": ["CO2"],
+            },
+        )
+        temperature = xr.DataArray(
+            net[None, None, :],
+            dims=("scenario", "config", "timebounds"),
+            coords={
+                "scenario": [str(scenario)],
+                "config": list(config_names),
+                "timebounds": years,
+            },
+        )
+        return types.SimpleNamespace(
+            forcing=forcing,
+            temperature=temperature,
+            configs=list(config_names),
+        )
+
+    monkeypatch.setattr("trails.fair_rf.load_emissions_csv", fake_load_emissions_csv)
+    monkeypatch.setattr(
+        "trails.fair_rf.load_species_mapping", fake_load_species_mapping
+    )
+    monkeypatch.setattr("trails.fair_rf._run_fair_emissions", fake_run_fair_emissions)
+
+    run_fair_delta_rf(
+        trails,
+        scenario="s",
+        config_names=["c1"],
+        per_species_runs=False,
+        validate_emissions_delta=False,
+        scale_factor=1.0,
+        quantiles=[50.0],
+    )
+
+    rf = np.asarray(trails.instant_radiative_forcing.data.todense(), dtype=float)
+    temp = np.asarray(trails.delta_temperature.data.todense(), dtype=float)
+    rf_by_flow = rf[0].sum(axis=(0, 2))
+    temp_by_flow = temp[0].sum(axis=(0, 2))
+
+    assert rf_by_flow[0] > 0.0
+    assert temp_by_flow[0] > 0.0
+    assert rf_by_flow[1] < 0.0
+    assert temp_by_flow[1] < 0.0
+
+
+def test_fair_flow_mapping_filters_non_atmospheric_categories(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class DummyTrailsSulfurFilter:
+        def __init__(self) -> None:
+            self.debug = False
+            coords = np.array(
+                [
+                    [0, 0],  # activity
+                    [0, 1],  # flow
+                    [0, 0],  # year
+                    [0, 0],  # root activity
+                ],
+                dtype=int,
+            )
+            data = np.array([1.0, 100.0], dtype=float)
+            inv = sparse.COO(coords=coords, data=data, shape=(1, 2, 1, 1))
+            self.inventory = xr.DataArray(
+                inv,
+                dims=("activity", "flow", "year", "root activity"),
+                coords={
+                    "activity": [0],
+                    "flow": [0, 1],
+                    "year": [2000],
+                    "root activity": [0],
+                },
+            )
+            self.biosphere_indices = {
+                "2000": {
+                    0: {
+                        "name": "Sulfur",
+                        "compartment": "air",
+                        "subcompartment": "non-urban air or from high stacks",
+                    },
+                    1: {
+                        "name": "Sulfur",
+                        "compartment": "natural resource",
+                        "subcompartment": "in ground",
+                    },
+                }
+            }
+
+    trails = DummyTrailsSulfurFilter()
+    call_state = {"count": 0}
+
+    def fake_load_emissions_csv(*args: Any, **kwargs: Any) -> pd.DataFrame:
+        return pd.DataFrame(
+            {
+                "scenario": ["s"],
+                "region": ["World"],
+                "variable": ["Sulfur"],
+                "unit": ["Mt Sulfur/yr"],
+                "2000.5": [0.0],
+            }
+        )
+
+    def fake_load_species_mapping(
+        *args: Any, **kwargs: Any
+    ) -> tuple[dict[object, str], dict[object, float]]:
+        return {"Sulfur": "Sulfur"}, {}
+
+    def fake_run_fair_emissions(*args: Any, **kwargs: Any) -> Any:
+        emissions_df = args[0]
+        scenario = kwargs.get("scenario") or args[1]
+        config_names = kwargs.get("config_names") or ["c1"]
+        local = fair_rf_module._normalize_emissions_columns(emissions_df)
+        local = local[
+            (local["scenario"] == scenario) & (local["region"].str.lower() == "world")
+        ].copy()
+        years = np.array([2000.5], dtype=float)
+        vals = np.zeros(1, dtype=float)
+        if call_state["count"] > 0:
+            rows = local[local["variable"] == "Sulfur"]
+            if not rows.empty:
+                row = rows.iloc[0]
+                vals = np.array(
+                    [float(pd.to_numeric(row.get("2000.5", 0.0), errors="coerce") or 0)],
+                    dtype=float,
+                )
+        call_state["count"] += 1
+
+        forcing = xr.DataArray(
+            vals[None, None, :, None],
+            dims=("scenario", "config", "timebounds", "specie"),
+            coords={
+                "scenario": [str(scenario)],
+                "config": list(config_names),
+                "timebounds": years,
+                "specie": ["Sulfur"],
+            },
+        )
+        temperature = xr.DataArray(
+            vals[None, None, :],
+            dims=("scenario", "config", "timebounds"),
+            coords={
+                "scenario": [str(scenario)],
+                "config": list(config_names),
+                "timebounds": years,
+            },
+        )
+        return types.SimpleNamespace(
+            forcing=forcing,
+            temperature=temperature,
+            configs=list(config_names),
+        )
+
+    monkeypatch.setattr("trails.fair_rf.load_emissions_csv", fake_load_emissions_csv)
+    monkeypatch.setattr(
+        "trails.fair_rf.load_species_mapping", fake_load_species_mapping
+    )
+    monkeypatch.setattr("trails.fair_rf._run_fair_emissions", fake_run_fair_emissions)
+
+    run_fair_delta_rf(
+        trails,
+        scenario="s",
+        config_names=["c1"],
+        per_species_runs=False,
+        validate_emissions_delta=False,
+        scale_factor=1.0,
+        quantiles=[50.0],
+    )
+
+    rf = np.asarray(trails.instant_radiative_forcing.data.todense(), dtype=float)
+    rf_by_flow = rf[0].sum(axis=(0, 2))
+
+    assert rf_by_flow[0] > 0.0
+    assert rf_by_flow[1] == 0.0
+
+
+def test_inventory_emissions_prefers_name_mapping_over_category_mapping() -> None:
+    inv_years = [2000, 2001]
+    # dims: (flow, year, root activity)
+    inv_data = sparse.COO(
+        coords=np.array(
+            [
+                [0, 0, 1, 1],  # flow
+                [0, 1, 0, 1],  # year
+                [0, 0, 0, 0],  # root activity
+            ],
+            dtype=int,
+        ),
+        data=np.array([1.0, 2.0, 3.0, 4.0], dtype=float),
+        shape=(2, 2, 1),
+    )
+    flow_pos_to_key = {
+        0: ("Methane, fossil", "air", "urban air close to ground"),
+        1: ("Methane, fossil", "air", "non-urban air or from high stacks"),
+    }
+    species_map: dict[object, str] = {
+        ("Methane, fossil", "air", "urban air close to ground"): "SF6",
+        ("Methane, fossil", "air", "non-urban air or from high stacks"): "N2O",
+        "Methane, fossil": "CH4",
+    }
+    signs: dict[object, float] = {}
+
+    out = fair_rf_module._inventory_emissions_by_fair_species(
+        inv_data=inv_data,
+        inv_years=inv_years,
+        n_flow=2,
+        flow_pos_to_key=flow_pos_to_key,
+        species_map=species_map,
+        signs=signs,
+    )
+
+    assert out.columns.tolist() == ["CH4"]
+    np.testing.assert_allclose(
+        out["CH4"].to_numpy(dtype=float),
+        np.array([4.0, 6.0], dtype=float),
+    )
+
+
 def test_fair_precursor_response_species_are_captured(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -848,6 +1569,63 @@ def test_plot_temporal_scores_auto_trims_year_window() -> None:
     x = list(fig.data[0].x)
     assert x[0] == 2003
     assert x[-1] == 2004
+
+
+def test_plot_temporal_scores_stacked_separates_sign_groups() -> None:
+    class DummyTrailsMixedSigns:
+        def __init__(self) -> None:
+            years = np.array([2000, 2001, 2002], dtype=int)
+            vals = np.array(
+                [
+                    [1.0, -1.0, 1.0],
+                    [-2.0, 2.0, -2.0],
+                ],
+                dtype=float,
+            )
+            self.scores = xr.DataArray(
+                vals,
+                dims=("activity", "year"),
+                coords={"activity": [0, 1], "year": years},
+            )
+            self.characterized_inventory = None
+            self.activity_indices = {
+                "2000": {
+                    0: {
+                        "name": "A0",
+                        "reference product": "P0",
+                        "location": "GLO",
+                    },
+                    1: {
+                        "name": "A1",
+                        "reference product": "P1",
+                        "location": "GLO",
+                    },
+                }
+            }
+
+    trails = DummyTrailsMixedSigns()
+    fig = plot_temporal_scores(
+        trails=trails,
+        stacked=True,
+        year_range=(2000, 2002),
+        show_flow_contributions=False,
+        show_cumulative_axis=False,
+        legend_top_n=2,
+    )
+
+    assert fig is not None
+    stackgroups = {getattr(trace, "stackgroup", None) for trace in fig.data}
+    assert "positive" in stackgroups
+    assert "negative" in stackgroups
+    assert "one" not in stackgroups
+
+    for trace in fig.data:
+        y = np.asarray(trace.y, dtype=float)
+        stackgroup = getattr(trace, "stackgroup", None)
+        if stackgroup == "positive":
+            assert np.all(y >= 0.0)
+        if stackgroup == "negative":
+            assert np.all(y <= 0.0)
 
 
 def test_cache_dir_uses_short_hash(example_package: Any) -> None:
