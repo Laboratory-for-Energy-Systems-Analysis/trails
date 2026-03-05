@@ -20,8 +20,9 @@ inventories in `dev/lci-case-study-*.xlsx`.
 
 - Added ancillary O&M inputs (diesel logistics, low-voltage auxiliaries, backup
   natural gas) and associated methane/N2O biosphere emissions.
-- Replaced several flat operational profiles with a ramp-and-decline empirical
-  profile over the 20-year plant life.
+- Modelled operation-related exchanges (including atmospheric CO2 uptake) with
+  a uniform profile over the 20-year plant life to represent continuous
+  operation.
 - Kept a long-tail post-closure leakage risk profile for fossil CO2 to preserve
   the original storage-risk focus.
 
@@ -62,4 +63,3 @@ inventories in `dev/lci-case-study-*.xlsx`.
 
 - CCU chain with captured CO2 input and delayed end-of-life non-fossil CO2
   release to demonstrate temporary carbon storage dynamics.
-
