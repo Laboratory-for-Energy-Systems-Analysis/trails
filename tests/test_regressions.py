@@ -1009,7 +1009,11 @@ def test_fair_flow_mapping_filters_non_atmospheric_categories(
             if not rows.empty:
                 row = rows.iloc[0]
                 vals = np.array(
-                    [float(pd.to_numeric(row.get("2000.5", 0.0), errors="coerce") or 0)],
+                    [
+                        float(
+                            pd.to_numeric(row.get("2000.5", 0.0), errors="coerce") or 0
+                        )
+                    ],
                     dtype=float,
                 )
         call_state["count"] += 1

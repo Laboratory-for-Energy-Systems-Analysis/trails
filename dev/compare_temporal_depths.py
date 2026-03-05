@@ -241,9 +241,7 @@ def _export_depth_plots(
     for i, fig in enumerate(fig_list):
         method_name = methods[i] if i < len(methods) else f"method_{i + 1}"
         safe_method = _slugify(method_name)[:80]
-        filename = (
-            f"idx_{int(activity_index)}_{safe_name}_depth_{int(depth)}_{safe_method}.png"
-        )
+        filename = f"idx_{int(activity_index)}_{safe_name}_depth_{int(depth)}_{safe_method}.png"
         out_path = output_dir / filename
         fig.write_image(str(out_path))
         paths.append(out_path)
@@ -401,9 +399,7 @@ def run(args: argparse.Namespace) -> int:
     ]
     if excluded_substrings:
         terminals = [
-            a
-            for a in terminals
-            if not _matches_substring(a.name, excluded_substrings)
+            a for a in terminals if not _matches_substring(a.name, excluded_substrings)
         ]
     if not terminals:
         raise RuntimeError("No terminal imported activities left after filtering.")
@@ -470,10 +466,7 @@ def run(args: argparse.Namespace) -> int:
                 reference_year=int(args.reference_year),
                 output_dir=plot_dir,
             )
-            print(
-                "  depth="
-                f"{depth}: wrote {len(plot_paths)} plot(s) to {plot_dir}"
-            )
+            print("  depth=" f"{depth}: wrote {len(plot_paths)} plot(s) to {plot_dir}")
 
             if bool(args.run_fair):
                 print(f"  depth={depth}: run_fair_delta_rf + RF/temperature plots ...")
@@ -560,7 +553,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--datapackage",
         type=Path,
-        default=Path("/Users/romain/Library/CloudStorage/OneDrive-PaulScherrerInstitut/trails/data/trails_2026-03-03.zip"),
+        default=Path(
+            "/Users/romain/Library/CloudStorage/OneDrive-PaulScherrerInstitut/trails/data/trails_2026-03-03.zip"
+        ),
         help="Path to Frictionless datapackage zip/json.",
     )
     parser.add_argument(

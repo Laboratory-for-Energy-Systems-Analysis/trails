@@ -1523,9 +1523,7 @@ def run_fair_delta_rf(
 
             if config_names is not None and len(config_names) > 1:
                 rf_parts = [
-                    _extract_fair_timeseries_by_config(
-                        delta_forcing.sel(specie=target)
-                    )
+                    _extract_fair_timeseries_by_config(delta_forcing.sel(specie=target))
                     for target in target_species
                 ]
                 if len(rf_parts) == 1:
@@ -1551,15 +1549,17 @@ def run_fair_delta_rf(
                     rf_series = rf_target
 
                 share = _rf_share(rf_series, rf_total_series_cfg)
-                temp_series = np.asarray(temp_total_series_cfg, dtype=float) * np.nan_to_num(
-                    share, nan=0.0
-                )
+                temp_series = np.asarray(
+                    temp_total_series_cfg, dtype=float
+                ) * np.nan_to_num(share, nan=0.0)
                 rf_quant = _safe_nanpercentile(rf_series, quantiles)
                 temp_quant = _safe_nanpercentile(temp_series, quantiles)
             else:
                 rf_target = np.zeros(len(fair_years), dtype=float)
                 for target in target_species:
-                    part = np.asarray(delta_forcing.sel(specie=target).values, dtype=float)
+                    part = np.asarray(
+                        delta_forcing.sel(specie=target).values, dtype=float
+                    )
                     part = np.nan_to_num(part, nan=0.0)
                     rf_target += np.ravel(part)
 
