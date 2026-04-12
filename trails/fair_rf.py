@@ -406,9 +406,16 @@ def _run_fair_emissions(
                 )
             )
     config_csv = Path(config_csv)
-    cfg = pd.read_csv(config_csv, index_col=0)
-    if cfg.empty:
-        raise ValueError(f"No configs found in {config_csv}.")
+    cfg: pd.DataFrame | None = None
+
+    def _load_cfg() -> pd.DataFrame:
+        """Load calibration configs only when name normalization requires them."""
+        nonlocal cfg
+        if cfg is None:
+            cfg = pd.read_csv(config_csv, index_col=0)
+            if cfg.empty:
+                raise ValueError(f"No configs found in {config_csv}.")
+        return cfg
 
     def _normalize_config_name(name: object) -> object:
         """normalize config name.
@@ -417,25 +424,30 @@ def _run_fair_emissions(
         :type name: object
         :returns: Return value.
         :rtype: object"""
-        if name in cfg.index:
+        cfg_index = _load_cfg().index
+        if name in cfg_index:
             return name
         try:
             name_str = str(name)
-            if name_str in cfg.index:
+            if name_str in cfg_index:
                 return name_str
         except Exception:
             pass
         try:
             name_int = int(name)
-            if name_int in cfg.index:
+            if name_int in cfg_index:
                 return name_int
         except Exception:
             pass
         return name
 
     if config_names is not None:
-        configs = [_normalize_config_name(c) for c in config_names]
+        if config_csv.exists():
+            configs = [_normalize_config_name(c) for c in config_names]
+        else:
+            configs = list(config_names)
     else:
+        cfg = _load_cfg()
         if config_name is None:
             config_name = cfg.index[0]
         configs = [_normalize_config_name(config_name)]
