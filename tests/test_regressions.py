@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 import sys
 import types
@@ -18,6 +19,79 @@ from trails.cache_interpolation import cache_dir_for_package
 from trails.fair_rf import _sanitize_emissions_year_values, run_fair_delta_rf
 from trails.lca import lca_static
 from trails.plotting import plot_temporal_sankey_graphlike, plot_temporal_scores
+
+
+def test_run_fair_emissions_serializes_fair_runs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    emissions = pd.DataFrame(
+        {
+            "scenario": ["s"],
+            "region": ["World"],
+            "variable": ["CO2"],
+            "unit": ["Gt CO2/yr"],
+            "2000.5": [0.0],
+            "2001.5": [0.0],
+        }
+    )
+
+    run_state = {"active": 0, "max_active": 0}
+
+    class FakeArray:
+        def __init__(self) -> None:
+            self.values = np.zeros((1, 1, 2, 1), dtype=float)
+            self.data = self.values
+
+        def __deepcopy__(self, memo: dict[int, object]) -> "FakeArray":
+            return FakeArray()
+
+    class FakeFair:
+        def __init__(self) -> None:
+            self.forcing = FakeArray()
+
+        def run(self, progress: bool = False) -> None:
+            del progress
+            run_state["active"] += 1
+            run_state["max_active"] = max(run_state["max_active"], run_state["active"])
+            if run_state["active"] > 1:
+                raise RuntimeError("concurrent FAIR.run detected")
+            import time
+
+            time.sleep(0.02)
+            run_state["active"] -= 1
+
+        def __deepcopy__(self, memo: dict[int, object]) -> "FakeFair":
+            del memo
+            return FakeFair()
+
+    monkeypatch.setattr(
+        fair_rf_module,
+        "_build_fair_template_cached",
+        lambda **kwargs: FakeFair(),
+    )
+    monkeypatch.setattr(
+        fair_rf_module,
+        "_fill_emissions_from_df_fast",
+        lambda *args, **kwargs: None,
+    )
+
+    with ThreadPoolExecutor(max_workers=3) as executor:
+        futures = [
+            executor.submit(
+                fair_rf_module._run_fair_emissions,
+                emissions,
+                "s",
+                config_csv="dummy.csv",
+                properties_csv="dummy.csv",
+                config_names=["c1", "c2"],
+                progress=False,
+            )
+            for _ in range(4)
+        ]
+        for future in futures:
+            future.result()
+
+    assert run_state["max_active"] == 1
 
 
 class DummyTrails:

@@ -7,6 +7,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from functools import lru_cache
 import os
 from pathlib import Path
+from threading import Lock
 from typing import Any, Dict, Tuple
 
 import pandas as pd
@@ -34,6 +35,12 @@ from .fair_io import (
     load_emissions_csv,
     load_species_mapping,
 )
+
+
+# FaIR ensemble runs are not reliably thread-safe with all SciPy/FaIR
+# combinations. Serialize the actual model execution so per-species threading in
+# ``run_fair_delta_rf`` cannot overlap calls into ``fair.FAIR.run``.
+_FAIR_RUN_LOCK = Lock()
 
 
 def _sanitize_emissions_year_values(df: pd.DataFrame) -> pd.DataFrame:
@@ -453,7 +460,8 @@ def _run_fair_emissions(
         year_cols=year_cols,
         year_vals=year_vals,
     )
-    f.run(progress=progress)
+    with _FAIR_RUN_LOCK:
+        f.run(progress=progress)
     if not np.isfinite(f.forcing.values).any():
         forcing = _compute_ghg_forcing_from_concentration(f)
         if forcing is not None:
