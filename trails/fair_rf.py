@@ -36,7 +36,6 @@ from .fair_io import (
     load_species_mapping,
 )
 
-
 # FaIR ensemble runs are not reliably thread-safe with all SciPy/FaIR
 # combinations. Serialize the actual model execution so per-species threading in
 # ``run_fair_delta_rf`` cannot overlap calls into ``fair.FAIR.run``.
