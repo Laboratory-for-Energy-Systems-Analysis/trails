@@ -82,9 +82,7 @@ def _extract_dynamic_score_vector(trails: Trails) -> np.ndarray:
 
 def _extract_characterized_inventory_vector(trails: Trails) -> np.ndarray:
     if trails.characterized_inventory is None:
-        raise RuntimeError(
-            "trails.characterized_inventory is None after temporal LCA."
-        )
+        raise RuntimeError("trails.characterized_inventory is None after temporal LCA.")
 
     char_da = trails.characterized_inventory
     if "method" in char_da.dims:
@@ -300,8 +298,10 @@ def main() -> None:
     if not args.fresh_trails_per_year:
         trails = _load_trails(package_path, debug=bool(args.debug))
 
-    header_trails = trails if trails is not None else _load_trails(
-        package_path, debug=bool(args.debug)
+    header_trails = (
+        trails
+        if trails is not None
+        else _load_trails(package_path, debug=bool(args.debug))
     )
     metadata_label, metadata = _activity_metadata(
         header_trails, int(args.activity_index)
