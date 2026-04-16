@@ -664,12 +664,21 @@ def lca(
     provenance: dict[tuple[int, int], dict[int, float]] = {}
     injected_supply_by_year_act: dict[tuple[int, int], float] = {}
     injected_supply_prov_by_year_act: dict[tuple[int, int], dict[int, float]] = {}
+    functional_unit_is_frontier = False
 
     for node, data in graph.nodes(data=True):
         year = int(data.get("year"))
         act = int(data.get("act_idx"))
+        depth = int(data.get("depth", 0))
         frontier_amt = float(data.get("frontier_amount") or 0.0)
         direct_bio_amt = float(data.get("direct_bio_amount") or 0.0)
+        if (
+            depth == 0
+            and year == start_year_int
+            and act == start_activity
+            and frontier_amt
+        ):
+            functional_unit_is_frontier = True
         if frontier_amt:
             key = (year, act)
             frontier[key] = float(frontier.get(key, 0.0)) + frontier_amt
@@ -694,8 +703,9 @@ def lca(
                         bucket.get(int(root_act), 0.0)
                     ) + float(amt)
 
-    # Inject FU directly only when it is not already in the frontier (e.g., max_depth=0).
-    if (start_year_int, start_activity) not in frontier:
+    # Inject FU directly only when the depth-0 FU node is frontier
+    # (for example when max_depth=0).
+    if not functional_unit_is_frontier:
         injected_supply_by_year_act[(start_year_int, start_activity)] = (
             float(
                 injected_supply_by_year_act.get((start_year_int, start_activity), 0.0)
