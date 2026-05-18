@@ -21,6 +21,8 @@ LCIA utilities
 
 .. autofunction:: trails.get_lcia_method_names
 
+.. autofunction:: trails.get_edges_lcia_method_names
+
 .. autofunction:: trails.lcia.get_lcia_methods
 
 .. autofunction:: trails.lcia.fill_characterization_factors_matrices

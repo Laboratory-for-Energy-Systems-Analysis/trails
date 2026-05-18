@@ -21,6 +21,7 @@ from .bw_interface import (
 from .iterative_solver import solve_many_rhs_jacobi_gmres
 from .characterization import build_characterized_inventory
 from .characterization import get_cf_vector
+from .edges_matrix import score_inventory_with_edges
 
 try:
     from scikits.umfpack import UmfpackContext, UmfpackWarning, UMFPACK_A
@@ -511,6 +512,7 @@ def lca_static(
 def lca(
     trails: Trails,
     methods: List[str] | None = None,
+    edges_methods: List[Any] | None = None,
     show_progress: bool = True,
     attribute_to_roots: bool | None = None,
     *,
@@ -526,6 +528,9 @@ def lca(
     iterative_preconditioner: Literal["jacobi", "ilu", "none"] = "jacobi",
     iterative_ilu_drop_tol: float = 1e-4,
     iterative_ilu_fill_factor: float = 10.0,
+    edges_additional_topologies: dict[str, Any] | None = None,
+    edges_strategies: list[str] | None = None,
+    edges_reuse_cached_cfs: bool = True,
     inventory_workers: int | None = None,
 ) -> None:
     """Lca.
@@ -534,6 +539,9 @@ def lca(
     :type trails: Trails
     :param methods: Value for `methods`.
     :type methods: List[str] | None
+    :param edges_methods: Optional EDGES method definitions or method names for
+        edge-level characterization factors. Mutually exclusive with ``methods``.
+    :type edges_methods: List[Any] | None
     :param show_progress: Value for `show_progress`.
     :type show_progress: bool
     :param attribute_to_roots: Value for `attribute_to_roots`. If ``None``,
@@ -565,6 +573,16 @@ def lca(
     :type iterative_ilu_drop_tol: float
     :param iterative_ilu_fill_factor: ILU fill factor (if ILU is selected).
     :type iterative_ilu_fill_factor: float
+    :param edges_additional_topologies: Optional topology definitions passed to
+        EDGES when resolving regionalized CF locations.
+    :type edges_additional_topologies: dict[str, Any] | None
+    :param edges_strategies: Optional explicit EDGES matching strategy sequence.
+    :type edges_strategies: list[str] | None
+    :param edges_reuse_cached_cfs: Reuse EDGES matched CF templates across
+        scenario years when supplier and consumer metadata signatures are the
+        same. Numeric CF values are still evaluated for each scenario year. Set
+        to ``False`` to force EDGES matching independently for every year.
+    :type edges_reuse_cached_cfs: bool
     :param inventory_workers: Optional worker count for no-TD inventory batching.
     :type inventory_workers: int | None
     :raises RuntimeError: If an error occurs.
@@ -577,6 +595,11 @@ def lca(
         raise ValueError(
             "iterative_preconditioner must be one of {'jacobi', 'ilu', 'none'}"
         )
+    if methods and edges_methods:
+        raise ValueError("methods and edges_methods are mutually exclusive.")
+
+    edge_mode = bool(edges_methods)
+    store_inventory_effective = bool(store_inventory or (edge_mode and compute_score))
 
     debug = bool(getattr(trails, "debug", False))
 
@@ -599,7 +622,13 @@ def lca(
 
     score_methods = (
         methods
-        if (compute_score and methods and len(methods) > 1 and not store_inventory)
+        if (
+            compute_score
+            and not edge_mode
+            and methods
+            and len(methods) > 1
+            and not store_inventory_effective
+        )
         else None
     )
     trails.reset_inventory(
@@ -612,7 +641,7 @@ def lca(
     )
 
     cf_vectors: list[np.ndarray] | None = None
-    if compute_score:
+    if compute_score and not edge_mode:
         if not methods:
             raise ValueError("methods must be provided when compute_score=True.")
         cf_vectors = [
@@ -627,7 +656,7 @@ def lca(
         ]
 
     # Ensure inventory builders are ready when we intend to store inventory data.
-    if store_inventory:
+    if store_inventory_effective:
         required = (
             hasattr(trails, "_inventory_years")
             and trails._inventory_years is not None
@@ -637,8 +666,8 @@ def lca(
         )
         if not required:
             raise RuntimeError(
-                "BUG: store_inventory=True but reset_inventory() did not initialize "
-                "chunk-based inventory builders."
+                "BUG: inventory storage is enabled but reset_inventory() did not "
+                "initialize chunk-based inventory builders."
             )
 
     if routing_attr_to_roots is not None and routing_attr_to_roots != bool(
@@ -782,8 +811,8 @@ def lca(
         activity_demand = {int(i): float(demand_vector[i]) for i in nonzero_indices}
         n_activities = int(trails.A.shape[1]) if trails.A is not None else 0
         supplies: list[tuple[Dict[int, float], int | None]] = []
-        need_supply_dicts = bool(store_inventory) or (
-            bool(compute_score) and not bool(attribute_to_roots)
+        need_supply_dicts = bool(store_inventory_effective) or (
+            bool(compute_score) and not edge_mode and not bool(attribute_to_roots)
         )
         use_direct_solver = bool(solver_mode in {"direct", "iterative"})
         use_iterative_solver = bool(solver_mode == "iterative")
@@ -1013,7 +1042,7 @@ def lca(
                         supplies.append((supply_total, None))
 
         # ---- Inventory ----
-        if supplies and store_inventory:
+        if supplies and store_inventory_effective:
             trails.accumulate_temporalized_biosphere_inventory_batch(
                 base_year=solve_year,
                 supplies=supplies,
@@ -1024,7 +1053,7 @@ def lca(
             )
 
         # ---- Scores ----
-        if compute_score:
+        if compute_score and not edge_mode:
             assert cf_vectors is not None
             # Build dense supply matrix (n_acts, n_roots_this_year).
             # Injected supplies remain dictionary-based because they are usually small.
@@ -1069,7 +1098,7 @@ def lca(
     # Injected/direct biosphere supplies should keep their raw calendar year,
     # while technosphere solving remains scenario-mapped.
     if attribute_to_roots:
-        if store_inventory:
+        if store_inventory_effective:
             for raw_year, per_root_injected in root_injected_by_year.items():
                 supplies_batch = [
                     (injected_supply, int(root_act))
@@ -1086,7 +1115,7 @@ def lca(
                     debug=debug,
                     workers=inventory_workers,
                 )
-        if compute_score:
+        if compute_score and not edge_mode:
             assert cf_vectors is not None
             for raw_year, per_root_injected in root_injected_by_year.items():
                 for root_act, injected_supply in per_root_injected.items():
@@ -1110,7 +1139,7 @@ def lca(
             bucket = injected_by_raw_year.setdefault(y, {})
             bucket[a] = bucket.get(a, 0.0) + float(v)
 
-        if store_inventory:
+        if store_inventory_effective:
             for raw_year, injected_supply in injected_by_raw_year.items():
                 if not injected_supply:
                     continue
@@ -1121,7 +1150,7 @@ def lca(
                     store_activity=None,
                     debug=debug,
                 )
-        if compute_score:
+        if compute_score and not edge_mode:
             assert cf_vectors is not None
             for raw_year, injected_supply in injected_by_raw_year.items():
                 if not injected_supply:
@@ -1152,11 +1181,23 @@ def lca(
         injected_by_raw_year.clear()
     gc.collect()
 
-    if store_inventory:
+    if store_inventory_effective:
         trails.finalize_inventory()
 
     if compute_score:
-        trails.finalize_scores()
+        if edge_mode:
+            score_inventory_with_edges(
+                trails,
+                list(edges_methods or []),
+                additional_topologies=edges_additional_topologies,
+                strategies=edges_strategies,
+                reuse_cached_cfs=edges_reuse_cached_cfs,
+                show_progress=show_progress,
+            )
+            if not store_inventory:
+                trails.inventory = None
+        else:
+            trails.finalize_scores()
 
         if trails.scores is None:
             raise RuntimeError(
@@ -1165,7 +1206,7 @@ def lca(
             )
 
     # Characterized inventory is optional and only meaningful when scoring.
-    if store_inventory and compute_score:
+    if store_inventory_effective and compute_score and not edge_mode:
         build_characterized_inventory(
             trails=trails, methods=methods, char_cache=_CHAR_CACHE
         )
