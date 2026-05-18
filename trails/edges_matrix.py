@@ -472,9 +472,7 @@ def _build_edges_characterization_matrices_for_year(
         }
         biosphere_inventory = sp.csr_matrix((n_flows, n_activities), dtype=float)
 
-    technosphere_matrix = sp.csr_matrix(
-        (int(a_shape[1]), int(a_shape[0])), dtype=float
-    )
+    technosphere_matrix = sp.csr_matrix((int(a_shape[1]), int(a_shape[0])), dtype=float)
     lca_obj = _TrailsLCAAdapter(
         inventory=biosphere_inventory,
         technosphere_matrix=technosphere_matrix,
@@ -504,14 +502,10 @@ def _build_edges_characterization_matrices_for_year(
             if mapping_caches is not None and method_idx < len(mapping_caches)
             else None
         )
-        cached_entries_by_edge: dict[
-            tuple[int, int], list[Mapping[str, Any]]
-        ] = {}
+        cached_entries_by_edge: dict[tuple[int, int], list[Mapping[str, Any]]] = {}
         edges_to_map = set(edge_pairs)
         if mapping_cache is not None:
-            entries_by_signature = mapping_cache.setdefault(
-                "entries_by_signature", {}
-            )
+            entries_by_signature = mapping_cache.setdefault("entries_by_signature", {})
             miss_signatures = mapping_cache.setdefault("miss_signatures", set())
             edges_to_map = set()
             for edge in edge_pairs:
@@ -576,9 +570,7 @@ def _build_edges_characterization_matrices_for_year(
                         biosphere_lookup,
                         technosphere_lookup,
                     )
-                    miss_signatures = mapping_cache.setdefault(
-                        "miss_signatures", set()
-                    )
+                    miss_signatures = mapping_cache.setdefault("miss_signatures", set())
                     for edge in edges_to_map - processed_edges:
                         miss_signatures.add(
                             _edge_signature(
@@ -886,7 +878,7 @@ def score_inventory_with_edges(
                                     ),
                                 ]
                             )
-                    )
+                        )
                     output_data.append(scored[keep])
 
             del matrix, matrices
