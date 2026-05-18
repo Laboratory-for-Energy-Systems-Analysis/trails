@@ -44,6 +44,36 @@ Use methods in temporal LCA
         iterative_rtol=1e-3,
     )
 
+Use EDGES methods
+-----------------
+
+TRAILS can also score the finalized temporal inventory with EDGES
+edge-level characterization factors. This requires the optional ``edges``
+package and currently supports EDGES methods whose supplier matrix is
+``"biosphere"``.
+
+.. code-block:: python
+
+    from trails import lca, get_edges_lcia_method_names
+
+    method = get_edges_lcia_method_names()[0]
+
+    trails.temporal_routing(
+        start_year=2030,
+        start_act_idx=start_act_idx,
+        max_depth=2,
+    )
+
+    lca(
+        trails=trails,
+        edges_methods=[method],
+        # edges_additional_topologies=topology,  # optional
+    )
+
+``edges_methods`` is mutually exclusive with regular ``methods``. In EDGES
+mode, TRAILS builds ``trails.inventory`` internally because edge-level CFs are
+applied after the temporalized biosphere inventory has been assembled.
+
 Inspect LCIA flow factors
 -------------------------
 
