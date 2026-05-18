@@ -225,6 +225,78 @@ def test_score_inventory_with_edges_reuses_cached_mappings_for_next_year(
     ]
 
 
+def test_score_inventory_with_edges_can_disable_cross_year_cache(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    inventory = xr.DataArray(
+        sparse.COO(
+            coords=np.array(
+                [
+                    [0, 0, 1],
+                    [0, 0, 1],
+                    [0, 1, 1],
+                ],
+                dtype=np.int64,
+            ),
+            data=np.array([5.0, 6.0, 7.0]),
+            shape=(2, 2, 2),
+        ),
+        dims=("activity", "flow", "year"),
+        coords={"activity": [0, 1], "flow": [0, 1], "year": [2000, 2001]},
+    )
+    trails = DummyScoringTrails(inventory)
+    mapped_edge_sets = []
+
+    class FakeEdgeLCIA:
+        def __init__(self, *args, **kwargs):
+            self.lca = kwargs["lca"]
+            self.raw_cfs_data = [{"supplier": {"matrix": "biosphere"}}]
+            self.cfs_mapping = []
+
+        def _preprocess_lookups(self, **kwargs):
+            return None
+
+        def apply_strategies(self, strategies):
+            mapped_edge_sets.append(set(self.biosphere_edges))
+            for edge in sorted(self.biosphere_edges):
+                self.cfs_mapping.append(
+                    {
+                        "supplier": {"matrix": "biosphere"},
+                        "consumer": {"matrix": "technosphere"},
+                        "positions": (edge,),
+                        "direction": "biosphere-technosphere",
+                        "value": 1.0,
+                    }
+                )
+
+        def _evaluate_cf_numeric_value(
+            self,
+            raw_value,
+            *,
+            resolved_params,
+            scenario_idx,
+        ):
+            return float(raw_value) * float(int(scenario_idx) - 1999)
+
+    monkeypatch.setattr(
+        "trails.edges_matrix._ensure_edges_available",
+        lambda: FakeEdgeLCIA,
+    )
+
+    scores = score_inventory_with_edges(
+        trails,
+        ["edge-method"],
+        reuse_cached_cfs=False,
+        show_progress=False,
+    )
+
+    assert mapped_edge_sets == [{(0, 0)}, {(0, 0), (1, 1)}]
+    assert np.asarray(scores.data.todense()).tolist() == [
+        [5.0, 12.0],
+        [0.0, 14.0],
+    ]
+
+
 def test_score_inventory_with_edges_uses_activity_specific_cfs(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

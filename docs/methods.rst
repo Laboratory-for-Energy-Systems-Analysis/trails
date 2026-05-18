@@ -68,11 +68,21 @@ package and currently supports EDGES methods whose supplier matrix is
         trails=trails,
         edges_methods=[method],
         # edges_additional_topologies=topology,  # optional
+        edges_reuse_cached_cfs=True,
     )
 
 ``edges_methods`` is mutually exclusive with regular ``methods``. In EDGES
 mode, TRAILS builds ``trails.inventory`` internally because edge-level CFs are
 applied after the temporalized biosphere inventory has been assembled.
+
+By default, ``edges_reuse_cached_cfs=True`` reuses EDGES matched CF templates
+across scenario years when the supplier and consumer metadata signatures are
+identical. The numeric CF values are still evaluated for each scenario year,
+which keeps yearly parameterized methods such as AWARE yearly factors
+year-specific while avoiding repeated exchange matching. Set
+``edges_reuse_cached_cfs=False`` if an EDGES method has year-specific matching
+rules or year-specific CF definitions that should be resolved independently for
+each year.
 
 Inspect LCIA flow factors
 -------------------------

@@ -650,9 +650,15 @@ def score_inventory_with_edges(
     *,
     additional_topologies: dict[str, Any] | None = None,
     strategies: list[str] | None = None,
+    reuse_cached_cfs: bool = True,
     show_progress: bool = True,
 ) -> xr.DataArray:
-    """Score ``trails.inventory`` using EDGES edge-level CF matrices."""
+    """Score ``trails.inventory`` using EDGES edge-level CF matrices.
+
+    ``reuse_cached_cfs`` reuses EDGES matched CF templates across scenario years
+    when supplier and consumer metadata signatures are identical. Numeric CF
+    values are still evaluated for each scenario year.
+    """
     if not methods:
         raise ValueError("edges_methods must contain at least one EDGES method.")
     if getattr(trails, "inventory", None) is None:
@@ -756,7 +762,9 @@ def score_inventory_with_edges(
     output_data: list[np.ndarray] = []
     year_groups: dict[int, list[int]] = {}
     edges_by_scenario_year: dict[int, set[tuple[int, int]]] = {}
-    mapping_caches: list[dict[str, Any]] = [{} for _method in methods]
+    mapping_caches: list[dict[str, Any]] | None = (
+        [{} for _method in methods] if reuse_cached_cfs else None
+    )
 
     for year_idx in np.unique(year_indices):
         raw_year = int(years[int(year_idx)])
