@@ -34,13 +34,15 @@ In parallel, prospective LCA has developed workflows for representing how backgr
 
 Time-explicit LCA brings these two perspectives together: processes occur at different times, and the background systems supplying those processes also evolve over time. Recent frameworks such as bw_timex explicitly combine temporal distributions with time-specific background databases and dynamic characterization (Müller et al. 2025; Diepers et al. 2026). Arblaster et al. (2026) further show that different temporal perspectives can change the design insights obtained from LCA, while also emphasizing that the value of added temporal complexity depends on how the system and decision context are understood. They distinguish *imminent-future static*, *advanced-future static*, *mosaic time-explicit*, and *metabolic time-explicit* perspectives. This is an important framing for TRAILS: the process of considering temporal distribution in the entire LCA system, not only in the foreground model under study, is not an end in itself, but a way to test whether upstream temporal dynamics are decision-relevant within the temporal perspective selected for the study. There remains a practical need for workflows in which temporal distributions can be represented throughout the supply chain, including in background exchanges, and not only in the foreground model or in links from foreground processes to time-specific backgrounds.
 
+This need is not fully addressed by current tools. bw_timex links dynamic LCA with prospective LCA databases by assigning temporally distributed foreground processes and emissions to time-specific background databases, but in common workflows most background exchanges do not themselves carry temporal distributions. DyPLCA, by contrast, supports deep temporalization through time-series convolution and temporal differentiation of the complete background database, but it operates on a single reference database rather than on a sequence of evolving prospective databases; inventories are distributed in time while retaining the process efficiencies represented in that reference database (Tiruta-Barna et al. 2016; Pigné et al. 2020). TRAILS is designed to fill the gap between these approaches. It temporally distributes the foreground system to prospective LCA databases, as in time-explicit prospective workflows, but also connects the prospective database slices through temporal distributions on background exchanges, creating a unified time-indexed system.
+
 We refer to this capability as *deep temporalization*, that is the ability to represent and propagate temporal distributions on exchanges throughout the supply chain, including exchanges far upstream from the functional unit. This is particularly relevant when prospective databases are not independent snapshots but connected time slices of an evolving technosphere. For example, infrastructure exchanges, fleet turnover, biomass growth, delayed end-of-life treatment, and technology lifetimes may occur in many background processes (Pinsonnault et al. 2014; Pigné et al. 2020). If these temporalized exchanges are ignored beyond the foreground, time-resolved results may miss dynamics that are relevant for long-lived systems and systems dependent on fast-evolving supply chains. And if these temporal distirbution are absent, we cannot realistically expect the practitionner to manually include such disitributions, which are often outside of the expertise area.
 
 We use TRAILS to implement *deep temporalization* in time-explicit LCA. TRAILS represents scenario-specific foreground and background inventories as a connected three-dimensional technosphere and biosphere system indexed by year. It applies graph-based temporal routing to build time-indexed demands and then uses year-wise matrix solves to calculate inventories and impacts while avoiding the computing struggle associated with resolving a single large time-expanded technosphere matrix (we demonstrate why this can be an issue in the ESI). This graph-matrix hybrid approach is intended to be practical for applied LCA users while preserving a clear connection to matrix-based LCA.
 
 The contribution of this paper is fourfold. First, we formalize *deep temporalization* as temporal routing over connected year-specific foreground and background matrices. Second, we describe the graph-matrix hybrid algorithm implemented in TRAILS, where explicit temporal routing is combined with conventional year-wise LCA solves. Third, we make explicit a modeling choice that is often implicit in time-explicit calculations: whether a temporally distributed exchange preserves the coefficient from the process year or is re-evaluated using the coefficient represented in the target year where the exchange occurs. Fourth, we demonstrate the method with case studies designed to test when deeper temporalization changes time-resolved LCA results.
 
-The paper is structured as follows. Section 2 defines the scope and concepts used in the manuscript. Section 3 describes the method. Section 4 presents TRAILS as the implementation used in the case studies. Section 5 describes the demonstration design and case-study selection strategy. Section 6 provides the planned result structure for the selected case studies. Section 7 discusses interpretation, applicability, and limitations.
+The paper is structured as follows. Section *Concepts and scope* defines the scope and concepts used in the manuscript. Section *Method* describes the method. Section *TRAILS implementation for the case studies* presents TRAILS as the implementation used in the case studies. Section *Demonstration design* describes the demonstration design and case-study selection strategy. Section *Results* provides the planned result structure for the selected case studies. Section *Discussion* discusses interpretation, applicability, and limitations.
 
 ## 2. Concepts and scope
 
@@ -64,7 +66,7 @@ TRAILS can also support metabolic time-explicit LCA when the functional unit is 
 
 ### 2.3 Deep temporalization
 
-We distinguish foreground-only temporalization from deep temporalization. Foreground-only temporalization assigns temporal distributions to exchanges or processes close to the functional unit and links those events to the appropriate time-specific background. Deep temporalization extends this principle to exchanges throughout the supply chain. Temporal distributions can therefore occur not only in the foreground inventory but also in background processes.
+We distinguish foreground-only temporalization from deep temporalization. Foreground-only temporalization assigns temporal distributions to exchanges or processes close to the functional unit and links those events to the appropriate time-specific background. This is typically what `bw_timex` is designed to achieve. Deep temporalization extends this principle to exchanges throughout the supply chain. Temporal distributions can therefore occur not only in the foreground inventory but also in background processes.
 
 This distinction matters when background processes include time-dependent mechanisms. Examples include infrastructure construction before operation, delayed replacement of capital goods, age distributions of vehicle fleets, growth and harvest cycles for biomass, storage and release of biogenic carbon, delayed waste treatment, and changing production technologies across scenarios. In such cases, the temporal profile of upstream exchanges can affect time-resolved inventories and impacts.
 
@@ -72,7 +74,7 @@ This distinction matters when background processes include time-dependent mechan
 
 Prospective LCA databases are usually created as scenario-year snapshots, often to represent how background systems change under integrated assessment model scenarios (Mendoza Beltran et al. 2020; Sacchi et al. 2022). A scenario may contain databases for 2020, 2030, 2050, and 2100, with changes in technology efficiencies, energy mixes, and process availability. TRAILS treats these snapshots as slices of a connected three-dimensional matrix system. Temporal routing can then move from an activity in one calendar year to an upstream activity in another calendar year according to the temporal distribution on the exchange.
 
-The approach does not require premise, but premise-generated prospective databases are an important supported pathway. In this workflow, temporal distributions can be added to exchanges across future ecoinvent-derived databases, for example to represent lifetimes, stock turnover, biomass-related delays, and infrastructure timing. The detailed parameterization of these temporal exchanges belongs in the electronic supplementary information.
+The approach does not require Premise, but Premise-generated prospective databases are an important supported pathway. In this workflow, temporal distributions can be added to exchanges across future ecoinvent-derived databases, for example to represent lifetimes, stock turnover, biomass-related delays, and infrastructure timing. The detailed parameterization of these temporal exchanges belongs in the electronic supplementary information.
 
 ## 3. Method
 
@@ -114,13 +116,15 @@ B[t, i, k]
 
 where \(t\) indexes the scenario year, \(i\) indexes the activity, \(j\) indexes the technosphere product or linked activity, and \(k\) indexes the biosphere flow. A slice \(A_y\) or \(B_y\) is selected for the year \(y\), after mapping the requested calendar year to the available scenario-year grid.
 
-Scenario-year matrices can be loaded directly or interpolated to an annual grid. In typical prospective applications, input databases may exist for selected years such as 2005, 2020, 2050, and 2100, reflecting the scenario-year structure common in prospective LCA workflows (Mendoza Beltran et al. 2020; Sacchi et al. 2022). TRAILS can linearly interpolate matrix values to annual resolution so that routing and solving can proceed on a yearly calendar. The main text treats interpolation as an implementation detail; full data schema and interpolation behavior are documented separately.
+Scenario-year matrices can be loaded directly or interpolated to an annual grid. In typical prospective applications, input databases may exist for selected years such as 2005, 2020, 2050, and 2100, reflecting the scenario-year structure common in prospective LCA workflows (Mendoza Beltran et al. 2020; Sacchi et al. 2022). TRAILS can linearly interpolate matrix values to annual resolution so that routing and solving can proceed on a yearly calendar.
 
 ### 3.3 Temporal exchange distributions
 
 Each technosphere or biosphere exchange can optionally carry a temporal distribution, following the process-relative temporal descriptions used in dynamic LCA (Beloin-Saint-Pierre et al. 2014; Cardellini et al. 2018). A temporal distribution defines a set of integer year offsets and weights relative to the year of the consuming or emitting process. If a process occurs in year \(y\), and an exchange has offset \(o\) with weight \(w_o\), then the corresponding exchange pulse is assigned to year \(y + o\).
 
 TRAILS supports several distribution families, including discrete, lognormal, normal, uniform, triangular, and empirical distributions with explicit offsets and weights. Weights are normalized over the integer offset support. The annual time step is a deliberate scope choice: TRAILS does not represent events within a year.
+
+For example, if an activity in 2030 has a 10 kg exchange with a discrete temporal distribution defined by offsets 0, 1, and 3 and weights 0.5, 0.3, and 0.2, the exchange is represented as three annual pulses: 5 kg in 2030, 3 kg in 2031, and 2 kg in 2033. The offsets determine the target years, while the weights determine the fraction of the exchange amount assigned to each target year.
 
 ### 3.4 Interpreting Temporally Distributed Exchange Amounts
 
@@ -131,6 +135,8 @@ In the first interpretation, the exchange coefficient is read from the anchor-ye
 In the second interpretation, the temporal distribution determines the target years, but the exchange coefficient is read from the matrix corresponding to each target year. This is appropriate when the occurrence of the exchange is temporally distributed and the amount should reflect the technology or supply-chain conditions of the year in which the exchange occurs.
 
 This distinction is important in prospective databases because matrix values can change over time. A delayed exchange routed to 2050 may represent a different technology mix or process efficiency than the same exchange in 2020. The target-year interpretation allows this information to affect the routed amount directly from the connected scenario-year matrices, while the anchor-year interpretation preserves the coefficient from the process year.
+
+Using the same example, the anchor-year interpretation distributes the 10 kg coefficient from the 2030 matrix into 5 kg in 2030, 3 kg in 2031, and 2 kg in 2033. In the target-year matrix interpretation, the offsets and weights still identify the target years and shares, but the coefficient is read from each target-year matrix. If the corresponding exchange coefficients are 10 kg in 2030, 8 kg in 2031, and 6 kg in 2033, the routed pulses become 0.5 × 10 = 5 kg in 2030, 0.3 × 8 = 2.4 kg in 2031, and 0.2 × 6 = 1.2 kg in 2033. The temporal distribution is therefore the same, but the amount attached to each pulse reflects the matrix slice for the year in which the pulse occurs.
 
 ### 3.5 Temporal routing graph
 
@@ -145,6 +151,10 @@ where \(i\) is an activity and \(y\) is a calendar year. Edges represent technos
 Routing is controlled by a maximum depth and a minimum amount threshold. The maximum depth limits how far explicit temporal traversal proceeds into the supply chain. The minimum amount threshold avoids excessive graph expansion from negligible flows. Nodes at the boundary of explicit traversal form the frontier. Frontier demands are then solved using conventional year-wise matrix systems.
 
 Algorithm 1 summarizes the routing and solving logic.
+
+![Flow diagram of the graph-matrix hybrid calculation in TRAILS.](algorithm_flow_diagram.png)
+
+*Figure 1. Flow diagram of the graph-matrix hybrid calculation in TRAILS.*
 
 ```text
 Algorithm 1: Graph-matrix hybrid calculation in TRAILS
@@ -191,7 +201,7 @@ Characterization can be applied during score accumulation or after storing the i
 
 ### 3.7 Optional dynamic impact assessment
 
-The time-resolved inventory produced by TRAILS can be passed to dynamic impact models. This connection is important because fixed GWP-style metrics can misrepresent emission timing, and dynamic LCA has proposed time-dependent characterization and response calculations for temporally differentiated inventories (Levasseur et al. 2010; Kendall 2012; Shimako et al. 2018). Recent work also extends dynamic climate impact modeling to short-lived climate forcers, aviation and shipping emissions, and carbon-cycle climate feedbacks (Tiruta-Barna 2026). In the current implementation, TRAILS includes an optional interface to the FaIR climate emulator. This interface maps greenhouse gas flows to FaIR species, applies inventory perturbations to a baseline emissions scenario, and calculates delta radiative forcing and delta temperature time series.
+The time-resolved inventory produced by TRAILS can be passed to dynamic impact models. This connection is important because fixed GWP-style metrics can misrepresent emission timing, and dynamic LCA has proposed time-dependent characterization and response calculations for temporally differentiated inventories (Levasseur et al. 2010; Kendall 2012; Shimako et al. 2018). Recent work also extends dynamic climate impact modeling to short-lived climate forcers, aviation and shipping emissions, and carbon-cycle climate feedbacks (Tiruta-Barna 2026). In the current implementation, TRAILS includes an optional interface to the FaIR climate emulator (Leach et al. 2021). This interface maps greenhouse gas flows to FaIR species, applies inventory perturbations to a baseline emissions scenario, and calculates delta radiative forcing and delta temperature time series.
 
 The FaIR coupling is used here as a demonstration of how time-resolved inventories can feed dynamic impact assessment. It is not the primary methodological contribution of TRAILS. The central contribution remains deep temporalization of the life cycle inventory calculation.
 
@@ -207,9 +217,13 @@ Reproducibility is a central design goal. The demonstration figures in this manu
 
 ## 5. Demonstration design
 
-The purpose of the case studies is not to produce definitive comparative conclusions about specific technologies. Their purpose is to demonstrate when deep temporalization matters and how TRAILS can be used to identify such cases. The final manuscript will include four to five case studies selected through a screening procedure. The case-study structure will use the temporal perspectives of Arblaster et al. (2026) to clarify what each comparison represents.
+The purpose of the case studies is not to produce definitive comparative conclusions about specific technologies. Their purpose is to demonstrate when deep temporalization matters and how TRAILS can be used to identify such cases. We therefore selected the case studies through a broad screening procedure before choosing the examples presented in Section 6. The case-study structure uses the temporal perspectives of Arblaster et al. (2026) to clarify what each comparison represents.
 
-Candidate systems should have one or more of the following characteristics, reflecting classes of temporal issues discussed in dynamic LCA and prospective background-scenario literature (Brandão et al. 2013; Beloin-Saint-Pierre et al. 2020; Lueddeckens et al. 2020; Mendoza Beltran et al. 2020; Sacchi et al. 2022):
+The screening used a *premise*-generated data package containing year-specific prospective LCA databases from 2005 to 2100 in five-year intervals. The scenario was based on REMIND's NPi pathway. REMIND is a multi-regional integrated assessment model that represents long-term interactions between macroeconomic development, energy-system transformation, greenhouse gas emissions, and climate policy (Baumstark et al. 2021). The NPi scenario represents a national-policies-implemented pathway, i.e. a pathway constrained by implemented policies rather than by an additional global climate target. Through *premise*, this scenario is translated into prospective LCA database slices with time-dependent technology efficiencies, fuel mixes, electricity mixes, and supply-chain compositions.
+
+For every dataset in the data package, we calculated three screening results. First, we performed a static LCA using the 2025 database slice, representing a near-current steady-state assessment. Second, we performed a temporal LCA with a routing depth of one exchange layer, used as an approximation of foreground-only or shallow mosaic time-explicit LCA. Third, we performed a temporal LCA with a routing depth of five exchange layers, representing deeply temporalized LCA in which temporal distributions can propagate further into the background system. Section 6 presents cases for which the depth-five calculation showed the greatest sensitivity relative to the depth-one calculation.
+
+This screening procedure was motivated by the expectation that sensitivity to deep temporalization is most likely for systems with one or more of the following characteristics, reflecting classes of temporal issues discussed in dynamic LCA and prospective background-scenario literature (Brandão et al. 2013; Beloin-Saint-Pierre et al. 2020; Lueddeckens et al. 2020; Mendoza Beltran et al. 2020; Sacchi et al. 2022):
 
 - long service lives;
 - infrastructure-heavy supply chains;
@@ -220,17 +234,15 @@ Candidate systems should have one or more of the following characteristics, refl
 - delayed end-of-life treatment or replacement cycles;
 - large differences between foreground-only and upstream temporalization.
 
-For each selected case, the manuscript will compare temporal perspectives selected from the following set:
+For each selected case, the manuscript compares temporal perspectives selected from the following set:
 
 1. imminent-future static LCA, where the system is assessed as a near-current steady state;
-2. advanced-future static LCA, where the system is assessed as a future steady state;
-3. foreground-only or shallow mosaic time-explicit LCA, where the functional unit follows a single object or cohort through time but upstream temporalization remains limited;
-4. deep mosaic time-explicit LCA with TRAILS, where the same object or cohort is followed through time and temporal distributions can propagate into background processes;
-5. metabolic time-explicit LCA with TRAILS, where relevant, for cases where the functional unit represents many objects or cohorts produced, used, or retired over a time span.
+2. foreground-only or shallow mosaic time-explicit LCA, where the functional unit follows a single object or cohort through time but upstream temporalization remains limited;
+3. deep mosaic time-explicit LCA with TRAILS, where the same object or cohort is followed through time and temporal distributions can propagate into background processes.
 
-Not every case study needs all five perspectives. For most TRAILS demonstrations, the central comparison is expected to be between foreground-only mosaic time-explicit LCA and deep mosaic time-explicit LCA. Metabolic time-explicit LCA should be used only where the decision concerns deployment, market introduction, fleet turnover, circularity transitions, or other dynamics that cannot be represented by a single object or cohort.
+The central comparison is therefore between foreground-only mosaic time-explicit LCA and deep mosaic time-explicit LCA. Additional perspectives, such as advanced-future static LCA or metabolic time-explicit LCA, may be added where the decision context requires them, for example for deployment, market introduction, fleet turnover, circularity transitions, or other dynamics that cannot be represented by a single object or cohort.
 
-Routing depth will be varied to show how results evolve as temporalization reaches further into the supply chain. This sensitivity directly tests the central claim of the paper: that foreground temporalization can be insufficient for some systems, and that upstream temporalized exchanges can change time-resolved scores within a mosaic or metabolic time-explicit perspective.
+Routing depth is varied to show how results evolve as temporalization reaches further into the supply chain. This sensitivity directly tests the central claim of the paper: that foreground temporalization can be insufficient for some systems, and that upstream temporalized exchanges can change time-resolved scores within a mosaic or metabolic time-explicit perspective.
 
 At least one case should also compare the two temporal amount interpretations. This comparison is needed because the distinction is methodological, not merely computational. If the coefficient attached to a delayed exchange is re-evaluated in the target year, prospective changes in technology can affect the routed exchange in a way that differs from simply distributing the anchor-year coefficient.
 
@@ -321,6 +333,8 @@ Arblaster T, Guinée J, Blanco Rocha CF, Burzic I, Pretschuh C, Pérez Sánchez 
 
 Arvidsson R, Svanström M, Sandén BA, Thonemann N, Steubing B, Cucurachi S (2024) Terminology for future-oriented life cycle assessment: Review and recommendations. Int J Life Cycle Assess 29:607-613. https://doi.org/10.1007/s11367-023-02265-8
 
+Baumstark L, Bauer N, Benke F, Bertram C, Bi S, Gong CC, Dietrich JP, Dirnaichner A, Giannousakis A, Hilaire J, Klein D, Koch J, Leimbach M, Levesque A, Madeddu S, Malik A, Merfort A, Merfort L, Odenweller A, Pehl M, Pietzcker RC, Piontek F, Rauner S, Rodrigues R, Rottoli M, Schreyer F, Schultes A, Soergel B, Soergel D, Strefler J, Ueckerdt F, Kriegler E, Luderer G (2021) REMIND2.1: Transformation and innovation dynamics of the energy-economic system within climate and sustainability limits. Geosci Model Dev 14:6571-6603. https://doi.org/10.5194/gmd-14-6571-2021
+
 Beloin-Saint-Pierre D, Albers A, Hélias A, Tiruta-Barna L, Fantke P, Levasseur A, Benetto E, Benoist A, Collet P (2020) Addressing temporal considerations in life cycle assessment. Sci Total Environ 743:140700. https://doi.org/10.1016/j.scitotenv.2020.140700
 
 Beloin-Saint-Pierre D, Heijungs R, Blanc I (2014) The ESPA (Enhanced Structural Path Analysis) method: A solution to an implementation challenge for dynamic life cycle assessment studies. Int J Life Cycle Assess 19:861-871. https://doi.org/10.1007/s11367-014-0710-9
@@ -336,6 +350,8 @@ Heijungs R, Suh S (2002) The Computational Structure of Life Cycle Assessment. K
 Kendall A (2012) Time-adjusted global warming potentials for LCA and carbon footprints. Int J Life Cycle Assess 17:1042-1049. https://doi.org/10.1007/s11367-012-0436-5
 
 Lang-Quantzendorff L, Beermann M (2025) Prosperdyn - a tool to describe dynamic transitions in prospective life cycle assessment. Int J Life Cycle Assess 30:3214-3229. https://doi.org/10.1007/s11367-025-02515-x
+
+Leach NJ, Jenkins S, Nicholls Z, Smith CJ, Lynch J, Cain M, Walsh T, Wu B, Tsutsui J, Allen MR (2021) FaIRv2.0.0: a generalized impulse response model for climate uncertainty and future scenario exploration. Geosci Model Dev 14:3007-3036. https://doi.org/10.5194/gmd-14-3007-2021
 
 Lebailly F, Levasseur A, Samson R, Deschênes L (2014) Development of a dynamic LCA approach for the freshwater ecotoxicity impact of metals and application to a case study regarding zinc fertilization. Int J Life Cycle Assess 19:1745-1754. https://doi.org/10.1007/s11367-014-0779-1
 
@@ -381,4 +397,4 @@ The electronic supplementary information will include Jupyter notebooks to repro
 
 ## Contributions
 
-Author contributions will be completed after finalizing the case studies and writing responsibilities.
+Author contributions are reported using the CRediT taxonomy. Conceptualization: Romain Sacchi. Methodology: Romain Sacchi, Tom M. Terlouw, Arthus Jakobs. Software: Romain Sacchi, Tom M. Terlouw. Validation: Tom M. Terlouw, Arthus Jakobs, Karin Treyer, Alvaro Hahn-Menacho, Christian Bauer. Funding acquisition: Christian Bauer. Writing – original draft: Romain Sacchi, Tom M. Terlouw. Writing – review & editing: Romain Sacchi, Tom M. Terlouw, Arthus Jakobs, Karin Treyer, Alvaro Hahn-Menacho, Christian Bauer.
