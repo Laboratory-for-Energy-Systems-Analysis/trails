@@ -29,6 +29,8 @@ At a high level, `TRAILS`:
 * Runs a **temporal traversal** of the supply chain from a functional unit to build
   time-indexed demands.
 * Solves year-specific systems and **routes impacts** through temporal distributions.
+* Can score temporal inventories with optional **EDGES regionalized
+  characterization factors**.
 * Aggregates impacts by year, activity, and optional root attribution for analysis and plotting.
 
 TRAILS is initially designed to consume ``premise``-generated data packages, which provide
@@ -178,6 +180,35 @@ lca(
 fig = plot_temporal_scores(trails, method_label=method)
 fig.show()
 ```
+
+---
+
+### Optional EDGES regionalized LCIA
+
+TRAILS can score the finalized temporal inventory with
+[EDGES](https://github.com/Laboratory-for-Energy-Systems-Analysis/edges)
+edge-level characterization factors. This is optional; normal LCIA methods do
+not require the ``edges`` package.
+
+```python
+from trails import get_edges_lcia_method_names
+
+edges_method = get_edges_lcia_method_names()[0]
+
+lca(
+    trails=trails,
+    edges_methods=[edges_method],
+    edges_reuse_cached_cfs=True,
+)
+```
+
+``edges_methods`` is mutually exclusive with regular ``methods``. With the
+default ``edges_reuse_cached_cfs=True``, TRAILS reuses EDGES matched CF
+templates across scenario years when supplier and consumer metadata signatures
+are identical, while still evaluating numeric CF values for each year. Set
+``edges_reuse_cached_cfs=False`` to force EDGES matching independently for every
+year, for example if an EDGES method has year-specific matching rules or
+year-specific CF definitions.
 
 ---
 
