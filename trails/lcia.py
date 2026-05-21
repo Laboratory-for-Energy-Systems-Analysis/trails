@@ -36,8 +36,7 @@ def _get_lcia_methods_filepath(ei_version: str = "3.11") -> Path:
             if path.exists():
                 return path
             raise FileNotFoundError(
-                "TRAILS_LCIA_EI312_JSON points to a missing file: "
-                f"{path}"
+                "TRAILS_LCIA_EI312_JSON points to a missing file: " f"{path}"
             )
         if LCIA_METHODS_EI312.exists():
             return LCIA_METHODS_EI312
