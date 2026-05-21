@@ -477,7 +477,10 @@ def lca_static(
     trails.demand = lca_obj.demand
 
     characterized_inventory = build_characterized_inventory(
-        trails=trails, methods=methods, char_cache=_CHAR_CACHE
+        trails=trails,
+        methods=methods,
+        char_cache=_CHAR_CACHE,
+        ei_version=ei_version,
     )
 
     if "method" in characterized_inventory.dims:

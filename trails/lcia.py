@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+from pathlib import Path
 
 import numpy as np
 from scipy import sparse
@@ -14,9 +16,45 @@ logger = logging.getLogger(__name__)
 
 LCIA_METHODS_EI310 = DATA_DIR / "lcia_ei310.json"
 LCIA_METHODS_EI311 = DATA_DIR / "lcia_ei311.json"
+LCIA_METHODS_EI312 = DATA_DIR / "lcia_ei312.json"
 
 
 _LCIA_METHODS_CACHE = {}
+
+
+def _get_lcia_methods_filepath(ei_version: str = "3.11") -> Path:
+    """Return the LCIA method JSON file for an ecoinvent version."""
+    version = str(ei_version)
+    if version == "3.10":
+        return LCIA_METHODS_EI310
+    if version == "3.11":
+        return LCIA_METHODS_EI311
+    if version == "3.12":
+        env_path = os.environ.get("TRAILS_LCIA_EI312_JSON")
+        if env_path:
+            path = Path(env_path).expanduser()
+            if path.exists():
+                return path
+            raise FileNotFoundError(
+                "TRAILS_LCIA_EI312_JSON points to a missing file: "
+                f"{path}"
+            )
+        if LCIA_METHODS_EI312.exists():
+            return LCIA_METHODS_EI312
+        raise FileNotFoundError(
+            "No ecoinvent 3.12 LCIA method JSON found. Set "
+            "TRAILS_LCIA_EI312_JSON to a compatible lcia_ei312.json file."
+        )
+
+    candidate = Path(version).expanduser()
+    if candidate.exists():
+        return candidate
+
+    raise ValueError(
+        f"Unsupported ecoinvent LCIA version: {ei_version!r}. "
+        "Supported versions are '3.10', '3.11', and '3.12' "
+        "(with TRAILS_LCIA_EI312_JSON set)."
+    )
 
 
 def get_lcia_method_names(ei_version: str = "3.11") -> list[str]:
@@ -27,10 +65,7 @@ def get_lcia_method_names(ei_version: str = "3.11") -> list[str]:
     :returns: Return value.
     :rtype: list[str]"""
 
-    if ei_version == "3.11":
-        filepath = LCIA_METHODS_EI311
-    else:
-        filepath = LCIA_METHODS_EI310
+    filepath = _get_lcia_methods_filepath(ei_version)
 
     with open(filepath, "r") as f:
         data = json.load(f)
@@ -69,11 +104,10 @@ def get_lcia_methods(
     :type ei_version: str
     :returns: Return value.
     :rtype: dict[str, dict[tuple[str, str, str], float]]"""
-    key = (ei_version, tuple(methods) if methods else None)
+    filepath = _get_lcia_methods_filepath(ei_version)
+    key = (str(filepath), tuple(methods) if methods else None)
     if key in _LCIA_METHODS_CACHE:
         return _LCIA_METHODS_CACHE[key]
-
-    filepath = LCIA_METHODS_EI311 if ei_version == "3.11" else LCIA_METHODS_EI310
 
     with open(filepath, "r") as f:
         data = json.load(f)
@@ -91,6 +125,7 @@ def fill_characterization_factors_matrices(
     biosphere_matrix_dict: dict[int, int],
     biosphere_dict: dict[tuple[str, str, str], int],
     debug: bool = False,
+    ei_version: str = "3.11",
 ) -> csr_matrix:
     """Fill characterization factors matrices.
 
@@ -112,7 +147,7 @@ def fill_characterization_factors_matrices(
             len(biosphere_matrix_dict),
         )
 
-    lcia_data = get_lcia_methods(methods=methods)
+    lcia_data = get_lcia_methods(methods=methods, ei_version=ei_version)
 
     # Prepare data for efficient creation of the sparse matrix
     data = []
