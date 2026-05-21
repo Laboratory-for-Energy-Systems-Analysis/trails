@@ -1,9 +1,9 @@
 # ESI: Solver stress test for deeply temporalized technosphere systems
 
 This supplementary experiment documents the computational reason for the
-graph-matrix hybrid strategy used in TRAILS. The input was a Frictionless data
+graph-matrix hybrid strategy used in `TRAILS`. The input was a Frictionless data
 package generated with `premise`, extended with temporal technosphere exchanges,
-and intended to be loaded by TRAILS. TRAILS interpolated the package to an
+and intended to be loaded by `TRAILS`. `TRAILS` interpolated the package to an
 annual grid from 2004 to 2101, giving 98 year-specific technosphere systems of
 size 41,792 x 41,792. The loaded three-dimensional technosphere array contained
 48.7 million non-zero entries and occupied 1.27 GiB in sparse coordinate form.
@@ -12,11 +12,11 @@ We compared two mathematically comparable solution pathways. In the monolithic
 pathway, annual technosphere matrices were stitched along a block diagonal and
 temporal technosphere exchanges were inserted as off-diagonal links, following
 the time-expanded matrix logic used by tools such as `bw_timex` (Diepers et al.,
-2026). The resulting sparse matrix was solved with UMFPACK. In the TRAILS
+2026). The resulting sparse matrix was solved with UMFPACK. In the `TRAILS`
 pathway, the same temporal system was handled by routing temporal exchanges
 through the graph and solving ordinary year-specific technosphere systems
 sequentially. For the reduced
-one-, two-, and three-year comparisons, TRAILS first performed the same
+one-, two-, and three-year comparisons, `TRAILS` first performed the same
 depth-four routing from the functional unit and then solved the routed frontier
 demands that fell within the selected horizon. The benchmark used activity
 index 31,387, demand 1, and start year 2025. Benchmarks were run on a MacBook Pro with an Apple M1 Pro chip, 8 CPU cores, 16 GB unified memory,
@@ -25,7 +25,7 @@ cross-year entries inserted in the equivalent time-expanded matrix. It excludes
 same-year remnants of temporal distributions and offsets outside the selected
 horizon, so the one-year case has no temporal links in this table. In the
 memory column, paired rows report LU numeric object size / peak factorization
-memory; the full TRAILS row reports process RSS peak increase. For the 98-year
+memory; the full `TRAILS` row reports process RSS peak increase. For the 98-year
 monolithic system, memory is a conservative extrapolated lower bound.
 
 <table>
@@ -39,13 +39,13 @@ monolithic system, memory is a conservative extrapolated lower bound.
     </tr>
     <tr>
       <th>Monolithic LU</th>
-      <th>TRAILS</th>
+      <th>`TRAILS`</th>
       <th>Monolithic LU</th>
-      <th>TRAILS</th>
+      <th>`TRAILS`</th>
       <th>Monolithic LU</th>
-      <th>TRAILS</th>
+      <th>`TRAILS`</th>
       <th>Monolithic LU</th>
-      <th>TRAILS</th>
+      <th>`TRAILS`</th>
     </tr>
   </thead>
   <tbody>
@@ -69,7 +69,7 @@ monolithic system, memory is a conservative extrapolated lower bound.
       <td>125,376 x 125,376; 1,507,926 nnz</td>
       <td>41,792 x 41,792</td>
       <td>4,095,616 x 4,095,616; 57,300,688 nnz</td>
-      <td>98 systems; 48,712,196 nnz in trails.A</td>
+      <td>98 systems; 48,712,196 nnz in `TRAILS`.A</td>
     </tr>
     <tr>
       <td>Cross-year temporal entries</td>
@@ -144,7 +144,7 @@ The important observation is that sparse storage of the time-expanded matrix is
 not the limiting factor. Even the three-year monolithic matrix occupied only
 18 MiB as a CSC matrix, yet its LU factorization required enough fill-in for
 UMFPACK to estimate a 10 GiB numeric object and a 13 GiB peak memory
-requirement, after which factorization failed. TRAILS avoids this fill-in by
+requirement, after which factorization failed. `TRAILS` avoids this fill-in by
 never factorizing the global time-expanded system. Its memory footprint is
 therefore governed by the largest ordinary annual technosphere solve and by the
 temporal routing data structures, while the full 98-year deeply temporalized
@@ -163,7 +163,7 @@ temporalization, where temporal exchanges can occur throughout the background
 supply chain, the global matrix becomes impractical before the full system is
 represented. In this benchmark, the limiting factor is not the number of sparse
 entries in the time-expanded matrix, but the fill-in and memory required by
-direct factorization. TRAILS therefore treats the temporal graph and the annual
+direct factorization. `TRAILS` therefore treats the temporal graph and the annual
 matrix solves as separate but coupled operations: temporal routing carries the
 time dimension, while bounded year-specific solves retain the numerical
 advantages of conventional matrix LCA.
