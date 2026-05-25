@@ -70,6 +70,246 @@ def _safe_nanpercentile(values: np.ndarray, quantiles: list[float]) -> np.ndarra
     return np.nan_to_num(out, nan=0.0)
 
 
+def _array_to_builtin(value: Any) -> float | list[Any]:
+    """Convert numpy scalars/arrays to JSON-friendly values."""
+    arr = np.asarray(value, dtype=float)
+    if arr.ndim == 0:
+        return float(arr)
+    return arr.tolist()
+
+
+def _trapezoid(values: np.ndarray, years: np.ndarray, *, axis: int) -> np.ndarray:
+    """Compatibility wrapper for NumPy trapezoidal integration."""
+    if hasattr(np, "trapezoid"):
+        return np.trapezoid(values, x=years, axis=axis)
+    return np.trapz(values, x=years, axis=axis)
+
+
+def integrate_window(
+    values: Any,
+    years: Any,
+    start_year: int = 2050,
+    end_year: int = 2100,
+    *,
+    time_axis: int = -1,
+) -> float | np.ndarray:
+    """Integrate a time series over a closed year window.
+
+    :param values: Time series values. Multidimensional arrays are supported.
+    :type values: Any
+    :param years: Year coordinates corresponding to the time axis.
+    :type years: Any
+    :param start_year: First year included in the assessment window.
+    :type start_year: int
+    :param end_year: Last year included in the assessment window.
+    :type end_year: int
+    :param time_axis: Axis in ``values`` corresponding to ``years``.
+    :type time_axis: int
+    :returns: Trapezoidal integral in value unit times year.
+    :rtype: float | np.ndarray
+    :raises ValueError: If fewer than two points are available in the window.
+    """
+    years_arr = np.asarray(years, dtype=float)
+    values_arr = np.asarray(values, dtype=float)
+    if values_arr.ndim == 0:
+        raise ValueError("values must include a time axis.")
+    axis = int(time_axis)
+    if axis < 0:
+        axis += values_arr.ndim
+    if axis < 0 or axis >= values_arr.ndim:
+        raise ValueError("time_axis is out of range for values.")
+    if values_arr.shape[axis] != years_arr.shape[0]:
+        raise ValueError("years length must match values along time_axis.")
+
+    mask = (years_arr >= float(start_year)) & (years_arr <= float(end_year))
+    if int(mask.sum()) < 2:
+        raise ValueError(
+            "At least two time points are required for trapezoidal integration."
+        )
+
+    indices = np.flatnonzero(mask)
+    window_values = np.take(values_arr, indices, axis=axis)
+    window_years = years_arr[indices]
+    result = _trapezoid(window_values, window_years, axis=axis)
+    if np.asarray(result).ndim == 0:
+        return float(result)
+    return result
+
+
+def calculate_co2_pulse_equivalents(
+    dRF_lca: Any,
+    dT_lca: Any,
+    dRF_ref: Any,
+    dT_ref: Any,
+    years: Any,
+    reference_pulse_mass: float,
+    start_year: int = 2050,
+    end_year: int = 2100,
+    *,
+    time_axis: int = -1,
+) -> dict[str, Any]:
+    """Calculate fixed-window CO2 pulse-equivalent indicators.
+
+    The ratios are computed before any uncertainty summary, so callers can pass
+    arrays shaped like ``config, time`` and then summarize the returned values.
+
+    :param dRF_lca: Incremental RF response of the LCA perturbation.
+    :type dRF_lca: Any
+    :param dT_lca: Incremental temperature response of the LCA perturbation.
+    :type dT_lca: Any
+    :param dRF_ref: Incremental RF response of the reference CO2 pulse.
+    :type dRF_ref: Any
+    :param dT_ref: Incremental temperature response of the reference CO2 pulse.
+    :type dT_ref: Any
+    :param years: Time coordinate in years.
+    :type years: Any
+    :param reference_pulse_mass: Size of the reference CO2 pulse.
+    :type reference_pulse_mass: float
+    :param start_year: First year included in the assessment window.
+    :type start_year: int
+    :param end_year: Last year included in the assessment window.
+    :type end_year: int
+    :param time_axis: Axis corresponding to ``years`` in each response array.
+    :type time_axis: int
+    :returns: Integrated responses and pulse-equivalent values.
+    :rtype: dict[str, Any]
+    :raises ZeroDivisionError: If a reference response has a zero integral.
+    """
+    int_rf_lca = integrate_window(
+        dRF_lca, years, start_year, end_year, time_axis=time_axis
+    )
+    int_t_lca = integrate_window(
+        dT_lca, years, start_year, end_year, time_axis=time_axis
+    )
+    int_rf_ref = integrate_window(
+        dRF_ref, years, start_year, end_year, time_axis=time_axis
+    )
+    int_t_ref = integrate_window(
+        dT_ref, years, start_year, end_year, time_axis=time_axis
+    )
+
+    rf_ref_arr = np.asarray(int_rf_ref, dtype=float)
+    t_ref_arr = np.asarray(int_t_ref, dtype=float)
+    if np.any(~np.isfinite(rf_ref_arr)) or np.any(rf_ref_arr == 0.0):
+        raise ZeroDivisionError(
+            "Integrated RF response of reference CO2 pulse is zero or non-finite."
+        )
+    if np.any(~np.isfinite(t_ref_arr)) or np.any(t_ref_arr == 0.0):
+        raise ZeroDivisionError(
+            "Integrated temperature response of reference CO2 pulse is zero "
+            "or non-finite."
+        )
+
+    rf_equivalent = (
+        float(reference_pulse_mass)
+        * np.asarray(int_rf_lca, dtype=float)
+        / rf_ref_arr
+    )
+    temperature_equivalent = (
+        float(reference_pulse_mass) * np.asarray(int_t_lca, dtype=float) / t_ref_arr
+    )
+
+    return {
+        "window": (int(start_year), int(end_year)),
+        "reference_pulse_mass": float(reference_pulse_mass),
+        "integrated_rf_lca": int_rf_lca,
+        "integrated_rf_ref": int_rf_ref,
+        "integrated_temperature_lca": int_t_lca,
+        "integrated_temperature_ref": int_t_ref,
+        "co2_pulse_equivalent_integrated_rf": rf_equivalent,
+        "co2_pulse_equivalent_integrated_temperature": temperature_equivalent,
+    }
+
+
+def _summarize_indicator_values(values: Any) -> dict[str, float]:
+    """Summarize scalar or per-configuration indicator values."""
+    arr = np.asarray(values, dtype=float).reshape(-1)
+    finite = arr[np.isfinite(arr)]
+    if finite.size == 0:
+        return {"value": np.nan, "median": np.nan, "p025": np.nan, "p975": np.nan}
+    median = float(np.nanmedian(finite))
+    return {
+        "value": median,
+        "median": median,
+        "p025": float(np.nanquantile(finite, 0.025)),
+        "p975": float(np.nanquantile(finite, 0.975)),
+    }
+
+
+def make_reference_co2_pulse_emissions(
+    emissions_df: pd.DataFrame,
+    *,
+    scenario: str,
+    pulse_year: int = 2050,
+    pulse_mass_kg: float = 1.0e9,
+    co2_species_name: str = "CO2 FFI",
+) -> pd.DataFrame:
+    """Return baseline emissions with a one-year reference CO2 pulse added.
+
+    The existing Trails-FaIR interface uses IAMC-style annual emission-rate
+    tables. For a one-year FaIR time step, adding the pulse mass to the selected
+    year column in the row's native unit represents a pulse over that interval.
+
+    :param emissions_df: Baseline emissions table.
+    :type emissions_df: pd.DataFrame
+    :param scenario: Baseline scenario to perturb.
+    :type scenario: str
+    :param pulse_year: Calendar year receiving the reference pulse.
+    :type pulse_year: int
+    :param pulse_mass_kg: Pulse mass in kg CO2.
+    :type pulse_mass_kg: float
+    :param co2_species_name: Preferred CO2 emissions row to perturb.
+    :type co2_species_name: str
+    :returns: Perturbed emissions table.
+    :rtype: pd.DataFrame
+    :raises ValueError: If scenario, year, species, or units cannot be resolved.
+    """
+    out = _normalize_emissions_columns(emissions_df)
+    scenario_mask = (out["scenario"] == scenario) & (
+        out["region"].str.lower() == "world"
+    )
+    if not bool(np.any(scenario_mask)):
+        raise ValueError(f"Scenario '{scenario}' not found in emissions data.")
+
+    year_cols, year_vals = _extract_year_columns(out)
+    if not year_cols:
+        raise ValueError("No year columns found in emissions data.")
+    has_half_years = any(abs(v - round(v)) > 1e-9 for v in year_vals)
+    pulse_coord = float(pulse_year) + (0.5 if has_half_years else 0.0)
+    year_lookup = {float(v): col for col, v in zip(year_cols, year_vals)}
+    ycol = year_lookup.get(pulse_coord)
+    if ycol is None:
+        raise ValueError(
+            f"Reference pulse year {pulse_year} is not available in emissions data."
+        )
+
+    candidates: list[str] = []
+    for candidate in [co2_species_name, "CO2 FFI", "CO2", "CO2 AFOLU"]:
+        candidate_str = str(candidate)
+        if candidate_str not in candidates:
+            candidates.append(candidate_str)
+
+    row_idx: Any | None = None
+    for candidate in candidates:
+        matches = out.index[scenario_mask & (out["variable"] == candidate)].tolist()
+        if matches:
+            row_idx = matches[0]
+            break
+    if row_idx is None:
+        raise ValueError(
+            "No CO2 emissions row found for reference pulse. Tried: "
+            + ", ".join(candidates)
+        )
+
+    unit = str(out.loc[row_idx, "unit"])
+    add_value = _convert_kg_to_unit(np.array([pulse_mass_kg], dtype=float), unit)[0]
+    current = pd.to_numeric(out.loc[row_idx, ycol], errors="coerce")
+    if pd.isna(current):
+        current = 0.0
+    out.loc[row_idx, ycol] = float(current) + float(add_value)
+    return out
+
+
 # Emissions precursor species whose forcing mostly appears in derived FaIR species.
 _PRECURSOR_RESPONSE_SPECIES: dict[str, tuple[str, ...]] = {
     "CO": ("Ozone",),
@@ -642,6 +882,466 @@ def _extract_fair_timeseries_by_config(da: xr.DataArray) -> np.ndarray:
     return np.asarray(da.values, dtype=float)
 
 
+def _total_response_by_config(
+    da: xr.DataArray,
+    *,
+    scenario: str,
+    sum_species: bool,
+) -> xr.DataArray:
+    """Return a FaIR response as config x time DataArray."""
+    if "scenario" in da.dims:
+        da = da.sel(scenario=scenario)
+
+    if "timebounds" in da.dims:
+        time_dim = "timebounds"
+    elif "time" in da.dims:
+        time_dim = "time"
+    else:
+        time_dim = da.dims[0]
+
+    if "layer" in da.dims and da.dims != (time_dim,):
+        layer_vals = da.coords.get("layer", None)
+        if layer_vals is not None:
+            layers = [str(x) for x in layer_vals.values.tolist()]
+            if "surface" in layers:
+                da = da.sel(layer="surface")
+            else:
+                da = da.isel(layer=0)
+        else:
+            da = da.isel(layer=0)
+
+    if sum_species and "specie" in da.dims:
+        da = da.fillna(0.0).sum(dim="specie")
+
+    for dim in list(da.dims):
+        if dim in ("config", time_dim):
+            continue
+        da = da.isel({dim: 0})
+
+    if "config" not in da.dims:
+        da = da.expand_dims({"config": [0]})
+
+    if da.dims != ("config", time_dim):
+        da = da.transpose("config", time_dim)
+    return da
+
+
+def _all_config_names_from_csv(
+    config_csv: str | Path | None,
+    config_name: str | None,
+    config_names: list[str] | None,
+) -> list[str] | None:
+    """Resolve default FaIR ensemble configs when no specific config is requested."""
+    if config_names is not None or config_name is not None:
+        return config_names
+
+    cfg_path = Path(config_csv) if config_csv is not None else None
+    if cfg_path is None:
+        cfg_path = _find_any_fair_repo_file(
+            [
+                "calibrated_constrained_parameters_calibration1.4.1.csv",
+                "calibrated_constrained_parameters.csv",
+            ]
+        )
+    if cfg_path is None:
+        return None
+    cfg = pd.read_csv(cfg_path, index_col=0)
+    return [str(x) for x in cfg.index.tolist()]
+
+
+def _inventory_delta_by_fair_species_for_trails(
+    trails: Any,
+    species_map: dict[object, str],
+    signs: dict[object, float],
+) -> tuple[pd.DataFrame, list[int]]:
+    """Map a Trails inventory to annual kg perturbations by FaIR species."""
+    inv = trails.inventory
+    if inv is None:
+        raise ValueError("Trails.inventory is empty; run LCA first.")
+
+    if "root activity" not in inv.dims:
+        raise ValueError(
+            "Trails.inventory must include 'root activity' for CO2 pulse equivalents."
+        )
+
+    dims = list(inv.dims)
+    if "activity" not in dims or "flow" not in dims or "year" not in dims:
+        raise ValueError("Trails.inventory must include activity/flow/year dimensions.")
+    activity_axis = dims.index("activity")
+    flow_axis = dims.index("flow")
+    year_axis = dims.index("year")
+    root_axis = dims.index("root activity")
+
+    inv_raw = inv.data
+    if isinstance(inv_raw, sparse.COO):
+        coo_full = inv_raw
+    else:
+        coo_full = sparse.COO.from_numpy(np.asarray(inv_raw, dtype=float))
+
+    inv_data = coo_full.sum(axis=activity_axis)
+    remaining_axes = [i for i in range(coo_full.ndim) if i != activity_axis]
+    flow_new_axis = remaining_axes.index(flow_axis)
+    year_new_axis = remaining_axes.index(year_axis)
+    root_new_axis = remaining_axes.index(root_axis)
+    if inv_data.ndim != 3:
+        raise ValueError(
+            "Unexpected inventory shape after aggregation to flow/year/root."
+        )
+    if (flow_new_axis, year_new_axis, root_new_axis) != (0, 1, 2):
+        inv_data = inv_data.transpose((flow_new_axis, year_new_axis, root_new_axis))
+
+    flow_coord = inv.coords["flow"].values
+    coord_value_to_pos = {int(v): i for i, v in enumerate(flow_coord)}
+
+    def _is_flow_category_mappable(compartment: str, subcompartment: str) -> bool:
+        comp = str(compartment).strip().lower()
+        sub = str(subcompartment).strip().lower()
+        if comp == "air":
+            return True
+        if comp == "natural resource" and sub in {"air", "in air"}:
+            return True
+        return False
+
+    flow_pos_to_key: dict[int, tuple[str, str, str] | str] = {}
+    for _label, meta in getattr(trails, "biosphere_indices", {}).items():
+        for fid, md in meta.items():
+            if not isinstance(md, dict):
+                continue
+            name = md.get("name")
+            if not name:
+                continue
+            compartment = (md.get("compartment") or "").strip()
+            subcompartment = (md.get("subcompartment") or "").strip()
+            if not _is_flow_category_mappable(compartment, subcompartment):
+                continue
+            flow_key = (str(name), compartment, subcompartment)
+            key = int(fid)
+            if key in coord_value_to_pos:
+                pos = coord_value_to_pos[key]
+            elif 0 <= key < len(flow_coord):
+                pos = key
+            else:
+                continue
+            flow_pos_to_key.setdefault(pos, flow_key)
+
+    inv_years = [int(y) for y in inv.coords["year"].values.tolist()]
+    delta_by_species = _inventory_emissions_by_fair_species(
+        inv_data,
+        inv_years,
+        int(inv.sizes["flow"]),
+        flow_pos_to_key,
+        species_map,
+        signs,
+    )
+    return delta_by_species, inv_years
+
+
+def run_fair_co2_pulse_equivalents(
+    trails: Any,
+    *,
+    scenario: str,
+    emissions_csv: str | Path = DEFAULT_EMISSIONS_CSV,
+    mapping_yaml: str | Path = DEFAULT_MAPPING_YAML,
+    config_csv: str | Path | None = DEFAULT_CONFIGS_CSV,
+    properties_csv: str | Path | None = DEFAULT_PROPERTIES_CSV,
+    config_name: str | None = None,
+    config_names: list[str] | None = None,
+    ghg_method: str | None = "myhre1998",
+    temperature_prescribed: bool | None = False,
+    scale_factor: float | None = None,
+    scale_target_fraction: float = 0.01,
+    reference_pulse_year: int = 2050,
+    window_start: int = 2050,
+    window_end: int = 2100,
+    reference_pulse_mass_kg: float = 1.0e9,
+    co2_species_name: str = "CO2 FFI",
+) -> dict[str, Any]:
+    """Run FaIR and calculate fixed-window CO2 pulse-equivalent indicators.
+
+    This performs three scenario-consistent FaIR runs: baseline, baseline plus
+    the Trails inventory perturbation, and baseline plus a reference CO2 pulse.
+    Equivalents are calculated per FaIR configuration first, then summarized.
+
+    :param trails: Trails object with a stored inventory.
+    :type trails: Any
+    :param scenario: FaIR background scenario.
+    :type scenario: str
+    :param emissions_csv: Baseline emissions CSV.
+    :type emissions_csv: str | Path
+    :param mapping_yaml: Trails-flow to FaIR-species mapping.
+    :type mapping_yaml: str | Path
+    :param config_csv: FaIR calibration config CSV.
+    :type config_csv: str | Path | None
+    :param properties_csv: FaIR species properties CSV.
+    :type properties_csv: str | Path | None
+    :param config_name: Optional single FaIR config name.
+    :type config_name: str | None
+    :param config_names: Optional FaIR config names.
+    :type config_names: list[str] | None
+    :param ghg_method: FaIR greenhouse-gas forcing method.
+    :type ghg_method: str | None
+    :param temperature_prescribed: Passed to ``fair.FAIR``.
+    :type temperature_prescribed: bool | None
+    :param scale_factor: Optional perturbation scaling factor.
+    :type scale_factor: float | None
+    :param scale_target_fraction: Baseline-relative automatic scaling target.
+    :type scale_target_fraction: float
+    :param reference_pulse_year: Calendar year of the reference CO2 pulse.
+    :type reference_pulse_year: int
+    :param window_start: First year included in the assessment window.
+    :type window_start: int
+    :param window_end: Last year included in the assessment window.
+    :type window_end: int
+    :param reference_pulse_mass_kg: Size of reference pulse in kg CO2.
+    :type reference_pulse_mass_kg: float
+    :param co2_species_name: Preferred CO2 emissions row for the reference pulse.
+    :type co2_species_name: str
+    :returns: Structured CO2 pulse-equivalent result.
+    :rtype: dict[str, Any]
+    """
+    debug = bool(getattr(trails, "debug", False))
+    if scale_factor is None:
+        if scale_target_fraction <= 0:
+            raise ValueError("scale_target_fraction must be > 0.")
+    elif scale_factor <= 0:
+        raise ValueError("scale_factor must be > 0.")
+
+    df = load_emissions_csv(emissions_csv)
+    species_map, signs = load_species_mapping(mapping_yaml)
+    config_names = _all_config_names_from_csv(config_csv, config_name, config_names)
+
+    delta_by_species, inv_years = _inventory_delta_by_fair_species_for_trails(
+        trails,
+        species_map,
+        signs,
+    )
+    no_perturbation = delta_by_species.empty
+    if no_perturbation and scale_factor is None:
+        scale_factor = 1.0
+
+    if not no_perturbation:
+        df = _ensure_response_species_rows(
+            df,
+            scenario=scenario,
+            drivers=[str(s) for s in delta_by_species.columns.tolist()],
+            debug=debug,
+        )
+
+    f_base = _run_fair_emissions(
+        df,
+        scenario,
+        config_csv=config_csv,
+        properties_csv=properties_csv,
+        config_name=config_name,
+        config_names=config_names,
+        ghg_method=ghg_method,
+        temperature_prescribed=temperature_prescribed,
+        debug=debug,
+        progress=False,
+    )
+
+    base_year_cols, base_year_vals = _extract_year_columns(df)
+    has_half_years = any(abs(v - round(v)) > 1e-9 for v in base_year_vals)
+
+    def _year_col_name(year: int) -> str:
+        if has_half_years:
+            return f"{year + 0.5:.1f}"
+        return str(int(year))
+
+    if scale_factor is None and not delta_by_species.empty:
+        df_base = df[
+            (df["scenario"] == scenario) & (df["region"].str.lower() == "world")
+        ].copy()
+        df_base = _normalize_emissions_columns(df_base)
+        candidates = []
+        for specie in delta_by_species.columns:
+            rows = df_base[df_base["variable"] == specie]
+            if rows.empty:
+                continue
+            unit = rows["unit"].iloc[0]
+            base_row = rows.iloc[0]
+            for year, val in delta_by_species[specie].items():
+                ycol = _year_col_name(int(year))
+                if ycol not in df_base.columns:
+                    continue
+                base_val = base_row[ycol]
+                if base_val == 0 or pd.isna(base_val):
+                    continue
+                delta_unit = _convert_kg_to_unit(np.array([val]), unit)[0]
+                if delta_unit == 0:
+                    continue
+                candidates.append(
+                    scale_target_fraction * abs(base_val) / abs(delta_unit)
+                )
+        if candidates:
+            scale_factor = float(min(candidates))
+        else:
+            scale_factor = 1.0
+
+    if scale_factor != 1.0 and not delta_by_species.empty:
+        delta_by_species = delta_by_species * float(scale_factor)
+
+    def _build_lca_perturbed_df(base_df: pd.DataFrame) -> pd.DataFrame:
+        df_pert_local = _normalize_emissions_columns(base_df)
+        df_pert_local = df_pert_local[
+            (df_pert_local["scenario"] == scenario)
+            & (df_pert_local["region"].str.lower() == "world")
+        ].copy()
+        if no_perturbation:
+            return df_pert_local
+        for specie_name in delta_by_species.columns:
+            rows = df_pert_local[df_pert_local["variable"] == specie_name]
+            if rows.empty:
+                continue
+            unit = rows["unit"].iloc[0]
+            idx = rows.index[0]
+            for year, val in delta_by_species[specie_name].items():
+                ycol = _year_col_name(int(year))
+                if ycol not in df_pert_local.columns:
+                    continue
+                add = _convert_kg_to_unit(np.array([val]), unit)[0]
+                df_pert_local.loc[idx, ycol] = df_pert_local.loc[idx, ycol] + add
+        return df_pert_local
+
+    f_lca = _run_fair_emissions(
+        _build_lca_perturbed_df(df),
+        scenario,
+        config_csv=config_csv,
+        properties_csv=properties_csv,
+        config_name=config_name,
+        config_names=config_names,
+        ghg_method=ghg_method,
+        temperature_prescribed=temperature_prescribed,
+        debug=debug,
+        progress=False,
+    )
+    f_ref = _run_fair_emissions(
+        make_reference_co2_pulse_emissions(
+            df,
+            scenario=scenario,
+            pulse_year=reference_pulse_year,
+            pulse_mass_kg=reference_pulse_mass_kg,
+            co2_species_name=co2_species_name,
+        ),
+        scenario,
+        config_csv=config_csv,
+        properties_csv=properties_csv,
+        config_name=config_name,
+        config_names=config_names,
+        ghg_method=ghg_method,
+        temperature_prescribed=temperature_prescribed,
+        debug=debug,
+        progress=False,
+    )
+
+    rf_base = _total_response_by_config(
+        f_base.forcing,
+        scenario=scenario,
+        sum_species=True,
+    )
+    rf_lca = _total_response_by_config(
+        f_lca.forcing,
+        scenario=scenario,
+        sum_species=True,
+    )
+    rf_ref = _total_response_by_config(
+        f_ref.forcing,
+        scenario=scenario,
+        sum_species=True,
+    )
+    temp_base = _total_response_by_config(
+        f_base.temperature,
+        scenario=scenario,
+        sum_species=False,
+    )
+    temp_lca = _total_response_by_config(
+        f_lca.temperature,
+        scenario=scenario,
+        sum_species=False,
+    )
+    temp_ref = _total_response_by_config(
+        f_ref.temperature,
+        scenario=scenario,
+        sum_species=False,
+    )
+
+    time_dim = "timebounds" if "timebounds" in rf_base.dims else "time"
+    years = np.asarray(rf_base.coords[time_dim].values, dtype=float)
+    dRF_lca = np.asarray((rf_lca - rf_base).values, dtype=float)
+    dT_lca = np.asarray((temp_lca - temp_base).values, dtype=float)
+    dRF_ref = np.asarray((rf_ref - rf_base).values, dtype=float)
+    dT_ref = np.asarray((temp_ref - temp_base).values, dtype=float)
+
+    effective_scale = 1.0 if scale_factor is None else float(scale_factor)
+    if effective_scale != 1.0:
+        dRF_lca = dRF_lca / effective_scale
+        dT_lca = dT_lca / effective_scale
+
+    calculated = calculate_co2_pulse_equivalents(
+        dRF_lca,
+        dT_lca,
+        dRF_ref,
+        dT_ref,
+        years,
+        reference_pulse_mass_kg,
+        start_year=window_start,
+        end_year=window_end,
+        time_axis=-1,
+    )
+    rf_values = calculated["co2_pulse_equivalent_integrated_rf"]
+    temp_values = calculated["co2_pulse_equivalent_integrated_temperature"]
+    config_labels = [str(x) for x in rf_base.coords["config"].values.tolist()]
+    indicator_unit = "kg CO2 pulse-equivalent"
+
+    indicator = {
+        "reference_year": int(reference_pulse_year),
+        "window_start": int(window_start),
+        "window_end": int(window_end),
+        "reference_pulse_mass": float(reference_pulse_mass_kg),
+        "mass_unit": "kg CO2",
+        "integrated_rf": {
+            **_summarize_indicator_values(rf_values),
+            "label": (
+                "Integrated RF CO2 pulse equivalent, "
+                f"{int(window_start)}-{int(window_end)}"
+            ),
+            "unit": indicator_unit,
+            "by_config": _array_to_builtin(rf_values),
+        },
+        "integrated_temperature": {
+            **_summarize_indicator_values(temp_values),
+            "label": (
+                "Integrated temperature CO2 pulse equivalent, "
+                f"{int(window_start)}-{int(window_end)}"
+            ),
+            "unit": indicator_unit,
+            "by_config": _array_to_builtin(temp_values),
+        },
+        "diagnostics": {
+            "config": config_labels,
+            "reference_pulse_mass_kg": float(reference_pulse_mass_kg),
+            "scaling_factor": effective_scale,
+            "integrated_rf_lca": _array_to_builtin(
+                calculated["integrated_rf_lca"]
+            ),
+            "integrated_rf_ref": _array_to_builtin(
+                calculated["integrated_rf_ref"]
+            ),
+            "integrated_temperature_lca": _array_to_builtin(
+                calculated["integrated_temperature_lca"]
+            ),
+            "integrated_temperature_ref": _array_to_builtin(
+                calculated["integrated_temperature_ref"]
+            ),
+            "rf_unit": "W m-2 yr",
+            "temperature_unit": "K yr",
+        },
+    }
+    result = {"co2_pulse_equivalent": indicator}
+    setattr(trails, "co2_pulse_equivalent", indicator)
+    return result
+
+
 def run_fair_delta_rf(
     trails: Any,
     *,
@@ -816,7 +1516,8 @@ def run_fair_delta_rf(
 
     inv_years = [int(y) for y in inv.coords["year"].values.tolist()]
 
-    # Build perturbations from activity-reduced inventory (single sparse reduction path).
+    # Build perturbations from activity-reduced inventory (single sparse
+    # reduction path).
     delta_by_species = _inventory_emissions_by_fair_species(
         inv_data,
         inv_years,
