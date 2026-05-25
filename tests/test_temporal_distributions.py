@@ -2,7 +2,11 @@ import math
 import numpy as np
 import pytest
 
-from trails.temporal_distributions import TemporalDistribution, TemporalExchange
+from trails.temporal_distributions import (
+    TemporalDistribution,
+    TemporalExchange,
+    resolve_temporal_offset_bounds,
+)
 
 
 def test_default_sigma() -> None:
@@ -69,6 +73,26 @@ def test_discrete_weights_default_zero() -> None:
     offsets = np.array([-1, 0, 1])
     weights = TemporalDistribution._discrete_weights(offsets, loc=None)
     assert weights.tolist() == [0.0, 1.0, 0.0]
+
+
+def test_discrete_bounds_default_to_loc_when_support_missing() -> None:
+    """Verify discrete pulses use loc when min/max are omitted."""
+    off_min, off_max = resolve_temporal_offset_bounds(
+        distribution=1,
+        loc=16.0,
+        offset_min=None,
+        offset_max=None,
+    )
+    tex = TemporalExchange(
+        distribution=1,
+        loc=16.0,
+        scale=None,
+        offset_min=off_min,
+        offset_max=off_max,
+    )
+    assert list(TemporalDistribution(tex).iter_offsets_and_weights()) == [
+        (16, pytest.approx(1.0))
+    ]
 
 
 def test_iter_offsets_and_weights_with_scaling() -> None:

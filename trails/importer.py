@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 import sparse
 
-from .temporal_distributions import TemporalExchange
+from .temporal_distributions import TemporalExchange, resolve_temporal_offset_bounds
 from .utils import _parse_float_or_none, _parse_intish_or_none
 from .cache_interpolation import save_cached_interpolation
 
@@ -79,6 +79,74 @@ def import_excel_inventory(
         else:
             importer.apply_strategies()
         datasets.extend(getattr(importer, "data", []) or [])
+
+    def _year_key(value: object) -> int | None:
+        if isinstance(value, (int, np.integer)):
+            return int(value)
+        if isinstance(value, (float, np.floating)) and float(value).is_integer():
+            return int(round(float(value)))
+        if isinstance(value, str):
+            text = value.strip()
+            if text.isdigit():
+                return int(text)
+            try:
+                parsed = float(text)
+            except (TypeError, ValueError):
+                return None
+            if float(parsed).is_integer():
+                return int(round(float(parsed)))
+        return None
+
+    def _lifetime_output_scale(dataset: dict) -> tuple[float, str] | None:
+        for key in (
+            "production volume over lifetime [kg]",
+            "CO2 capture amount [kg]",
+            "lifetime [km]",
+        ):
+            scale = _parse_float_or_none(dataset.get(key))
+            if scale is not None and scale not in (0.0, 1.0):
+                return float(scale), key
+        return None
+
+    def _normalize_lifetime_output_datasets(datasets: list[dict]) -> None:
+        for dataset in datasets:
+            scale_info = _lifetime_output_scale(dataset)
+            if scale_info is None:
+                continue
+            scale, scale_key = scale_info
+            exchanges = dataset.get("exchanges", []) or []
+            production_amounts: list[float] = []
+            for exchange in exchanges:
+                if exchange.get("type") != "production":
+                    continue
+                amount = _parse_float_or_none(exchange.get("amount"))
+                if amount is not None:
+                    production_amounts.append(float(amount))
+            if not any(abs(abs(amount) - 1.0) < 1e-12 for amount in production_amounts):
+                continue
+
+            normalized = 0
+            for exchange in exchanges:
+                if exchange.get("type") == "production":
+                    continue
+                for key in list(exchange):
+                    if key != "amount":
+                        year = _year_key(key)
+                        if year is None or year < 1900 or year > 2200:
+                            continue
+                    value = _parse_float_or_none(exchange.get(key))
+                    if value is None:
+                        continue
+                    exchange[key] = float(value) / scale
+                    normalized += 1
+            if normalized:
+                print(
+                    "Normalized lifetime-output foreground dataset "
+                    f"{dataset.get('name')!r} by {scale_key}={scale:g} "
+                    f"({normalized} exchange amount field(s))."
+                )
+
+    _normalize_lifetime_output_datasets(datasets)
 
     apply_to_all_template_years = scenario_label is None and year is None
 
@@ -173,8 +241,12 @@ def import_excel_inventory(
 
         loc = _parse_float_or_none(exchange.get("temporal_loc"))
         scale = _parse_float_or_none(exchange.get("temporal_scale"))
-        off_min = _parse_intish_or_none(exchange.get("temporal_min")) or 0
-        off_max = _parse_intish_or_none(exchange.get("temporal_max")) or 0
+        off_min, off_max = resolve_temporal_offset_bounds(
+            distribution=int(dist_code),
+            loc=loc,
+            offset_min=_parse_intish_or_none(exchange.get("temporal_min")),
+            offset_max=_parse_intish_or_none(exchange.get("temporal_max")),
+        )
         amount_source = _parse_amount_source(exchange.get("temporal_amount_source"))
         offsets = _parse_json_number_list(
             exchange.get("temporal_offsets"), integer=True
@@ -634,23 +706,28 @@ def import_excel_inventory(
                 continue
 
             if ex_type == "production":
+                prod_name = exchange.get("name") or dataset.get("name")
+                prod_ref_product = (
+                    exchange.get("reference product")
+                    or exchange.get("product")
+                    or dataset.get("reference product")
+                    or dataset.get("product")
+                )
+                prod_location = exchange.get("location") or dataset.get("location")
                 key = _activity_key(
-                    exchange.get("name"),
-                    exchange.get("reference product") or exchange.get("product"),
-                    exchange.get("location"),
+                    prod_name,
+                    prod_ref_product,
+                    prod_location,
                 )
                 prod_idx = activity_lookup.get(key) or dataset_act_indices.get(key)
                 if prod_idx is None:
                     unlinked_rows.append(
                         {
                             "type": ex_type,
-                            "name": _norm(exchange.get("name")),
-                            "reference product": _norm(
-                                exchange.get("reference product")
-                                or exchange.get("product")
-                            ),
+                            "name": _norm(prod_name),
+                            "reference product": _norm(prod_ref_product),
                             "categories": "",
-                            "location": _norm(exchange.get("location")),
+                            "location": _norm(prod_location),
                         }
                     )
                     unlinked_count += 1
@@ -705,24 +782,31 @@ def import_excel_inventory(
                         ] = float(val)
 
             if ex_type in {"production", "technosphere"}:
-                if (
-                    _norm(exchange.get("name")) == ""
-                    or _norm(
-                        exchange.get("reference product") or exchange.get("product")
+                check_name = exchange.get("name")
+                check_ref_product = (
+                    exchange.get("reference product") or exchange.get("product")
+                )
+                check_location = exchange.get("location")
+                if ex_type == "production":
+                    check_name = check_name or dataset.get("name")
+                    check_ref_product = (
+                        check_ref_product
+                        or dataset.get("reference product")
+                        or dataset.get("product")
                     )
-                    == ""
-                    or _norm(exchange.get("location")) == ""
+                    check_location = check_location or dataset.get("location")
+                if (
+                    _norm(check_name) == ""
+                    or _norm(check_ref_product) == ""
+                    or _norm(check_location) == ""
                 ):
                     unlinked_rows.append(
                         {
                             "type": ex_type,
-                            "name": _norm(exchange.get("name")),
-                            "reference product": _norm(
-                                exchange.get("reference product")
-                                or exchange.get("product")
-                            ),
+                            "name": _norm(check_name),
+                            "reference product": _norm(check_ref_product),
                             "categories": "",
-                            "location": _norm(exchange.get("location")),
+                            "location": _norm(check_location),
                         }
                     )
                     unlinked_count += 1

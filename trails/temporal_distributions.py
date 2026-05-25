@@ -337,3 +337,26 @@ class TemporalDistribution:
             w = float(w)
             if w != 0.0:
                 yield int(k), w
+
+
+def resolve_temporal_offset_bounds(
+    *,
+    distribution: int,
+    loc: Optional[float],
+    offset_min: Optional[int],
+    offset_max: Optional[int],
+) -> tuple[int, int]:
+    """Resolve optional temporal offset bounds to integer support.
+
+    Discrete pulse distributions use ``loc`` as the pulse offset. If no explicit
+    ``temporal_min``/``temporal_max`` support is provided, the support must
+    therefore be the pulse offset itself, not the generic 0-year fallback.
+    """
+    if int(distribution) == 1 and offset_min is None and offset_max is None:
+        if loc is not None and np.isfinite(float(loc)):
+            target = int(round(float(loc)))
+            return target, target
+
+    off_min = 0 if offset_min is None else int(offset_min)
+    off_max = 0 if offset_max is None else int(offset_max)
+    return off_min, off_max

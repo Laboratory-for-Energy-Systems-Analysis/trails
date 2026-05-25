@@ -12,7 +12,7 @@ from .utils import (
     _parse_float_or_none,
     _parse_intish_or_none as _parse_intish_or_none_utils,
 )
-from .temporal_distributions import TemporalExchange
+from .temporal_distributions import TemporalExchange, resolve_temporal_offset_bounds
 
 import logging
 
@@ -315,8 +315,12 @@ def _parse_temporal_exchange_row(
 
     loc = _parse_float_or_none(row.get("temporal_loc"))
     scale = _parse_float_or_none(row.get("temporal_scale"))
-    off_min = _parse_intish_or_none(row.get("temporal_min")) or 0
-    off_max = _parse_intish_or_none(row.get("temporal_max")) or 0
+    off_min, off_max = resolve_temporal_offset_bounds(
+        distribution=int(dist_code),
+        loc=loc,
+        offset_min=_parse_intish_or_none(row.get("temporal_min")),
+        offset_max=_parse_intish_or_none(row.get("temporal_max")),
+    )
     offsets = _parse_json_number_list(row.get("temporal_offsets"), integer=True)
     weights = _parse_json_number_list(row.get("temporal_weights"), integer=False)
 
@@ -720,12 +724,20 @@ def load_matrices_from_package(
             except Exception:
                 return None
 
+        loc_value = _to_float_or_none(loc)
+        off_min_value, off_max_value = resolve_temporal_offset_bounds(
+            distribution=int(dist_code),
+            loc=loc_value,
+            offset_min=_to_int(off_min, None),
+            offset_max=_to_int(off_max, None),
+        )
+
         return TemporalExchange(
             distribution=dist_code,
-            loc=_to_float_or_none(loc),
+            loc=loc_value,
             scale=_to_float_or_none(scale),
-            offset_min=_to_int(off_min, 0),
-            offset_max=_to_int(off_max, 0),
+            offset_min=off_min_value,
+            offset_max=off_max_value,
             amount_source=src,
             offsets=_parse_json_number_list(offsets, integer=True),
             weights=_parse_json_number_list(weights, integer=False),
