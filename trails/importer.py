@@ -783,8 +783,8 @@ def import_excel_inventory(
 
             if ex_type in {"production", "technosphere"}:
                 check_name = exchange.get("name")
-                check_ref_product = (
-                    exchange.get("reference product") or exchange.get("product")
+                check_ref_product = exchange.get("reference product") or exchange.get(
+                    "product"
                 )
                 check_location = exchange.get("location")
                 if ex_type == "production":
