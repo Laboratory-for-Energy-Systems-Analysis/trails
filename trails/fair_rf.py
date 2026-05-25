@@ -201,9 +201,7 @@ def calculate_co2_pulse_equivalents(
         )
 
     rf_equivalent = (
-        float(reference_pulse_mass)
-        * np.asarray(int_rf_lca, dtype=float)
-        / rf_ref_arr
+        float(reference_pulse_mass) * np.asarray(int_rf_lca, dtype=float) / rf_ref_arr
     )
     temperature_equivalent = (
         float(reference_pulse_mass) * np.asarray(int_t_lca, dtype=float) / t_ref_arr
@@ -1321,12 +1319,8 @@ def run_fair_co2_pulse_equivalents(
             "config": config_labels,
             "reference_pulse_mass_kg": float(reference_pulse_mass_kg),
             "scaling_factor": effective_scale,
-            "integrated_rf_lca": _array_to_builtin(
-                calculated["integrated_rf_lca"]
-            ),
-            "integrated_rf_ref": _array_to_builtin(
-                calculated["integrated_rf_ref"]
-            ),
+            "integrated_rf_lca": _array_to_builtin(calculated["integrated_rf_lca"]),
+            "integrated_rf_ref": _array_to_builtin(calculated["integrated_rf_ref"]),
             "integrated_temperature_lca": _array_to_builtin(
                 calculated["integrated_temperature_lca"]
             ),

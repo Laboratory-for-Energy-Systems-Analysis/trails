@@ -34,9 +34,7 @@ def test_co2_pulse_equivalents_equal_reference_response() -> None:
     )
 
     assert out["co2_pulse_equivalent_integrated_rf"] == pytest.approx(1.0e9)
-    assert out["co2_pulse_equivalent_integrated_temperature"] == pytest.approx(
-        1.0e9
-    )
+    assert out["co2_pulse_equivalent_integrated_temperature"] == pytest.approx(1.0e9)
 
 
 def test_co2_pulse_equivalents_scale_linearly() -> None:
@@ -56,9 +54,7 @@ def test_co2_pulse_equivalents_scale_linearly() -> None:
     )
 
     assert out["co2_pulse_equivalent_integrated_rf"] == pytest.approx(2.0e9)
-    assert out["co2_pulse_equivalent_integrated_temperature"] == pytest.approx(
-        2.0e9
-    )
+    assert out["co2_pulse_equivalent_integrated_temperature"] == pytest.approx(2.0e9)
 
 
 def test_co2_pulse_equivalents_rf_and_temperature_can_differ() -> None:
@@ -274,9 +270,7 @@ def test_run_fair_co2_pulse_equivalents_summarizes_by_config(
     )
 
     indicator = result["co2_pulse_equivalent"]
-    assert indicator["integrated_rf"]["by_config"] == pytest.approx(
-        [1.0e9, 1.0e9]
-    )
+    assert indicator["integrated_rf"]["by_config"] == pytest.approx([1.0e9, 1.0e9])
     assert indicator["integrated_temperature"]["by_config"] == pytest.approx(
         [1.0e9, 1.0e9]
     )
