@@ -512,9 +512,7 @@ def test_lca_fu_direct_biosphere_uses_activity_amount(
         "min_amount": 0.0,
     }
 
-    def fake_activity_amount(
-        t: int, act_idx: int, product_amount: float
-    ) -> float:
+    def fake_activity_amount(t: int, act_idx: int, product_amount: float) -> float:
         assert int(act_idx) == start_act_idx
         assert float(product_amount) == pytest.approx(10.0)
         return 2.0
