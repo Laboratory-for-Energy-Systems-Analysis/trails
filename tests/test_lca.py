@@ -482,6 +482,80 @@ def test_lca_injects_fu_direct_biosphere_despite_deep_self_loop(
     assert captured == [(2005, [({start_act_idx: 1.0}, start_act_idx)])]
 
 
+def test_lca_fu_direct_biosphere_uses_activity_amount(
+    monkeypatch: pytest.MonkeyPatch, example_trails: Trails
+) -> None:
+    """Functional-unit direct biosphere injection should respect production scale."""
+    import networkx as nx
+
+    activity_indices = next(iter(example_trails.activity_indices.values()))
+    start_act_idx = int(next(iter(activity_indices.keys())))
+
+    graph = nx.DiGraph()
+    graph.add_node(
+        "root",
+        year=2005,
+        depth=0,
+        act_idx=start_act_idx,
+        amount=2.0,
+        frontier_amount=0.0,
+        direct_bio_amount=0.0,
+        frontier_roots={},
+        direct_bio_roots={},
+    )
+    example_trails.graph = graph
+    example_trails._routing_attribute_to_roots = True
+    example_trails._routing_params = {
+        "start_year": 2005,
+        "start_act_idx": start_act_idx,
+        "amount": 10.0,
+        "min_amount": 0.0,
+    }
+
+    def fake_activity_amount(
+        t: int, act_idx: int, product_amount: float
+    ) -> float:
+        assert int(act_idx) == start_act_idx
+        assert float(product_amount) == pytest.approx(10.0)
+        return 2.0
+
+    monkeypatch.setattr(
+        example_trails,
+        "_activity_amount_from_product_demand",
+        fake_activity_amount,
+    )
+    monkeypatch.setattr(
+        example_trails, "frontier_to_demand_vectors", lambda frontier: {}
+    )
+
+    captured: list[tuple[int, list[tuple[dict[int, float], int | None]]]] = []
+
+    def fake_accumulate(
+        *,
+        base_year: int,
+        supplies: list[tuple[dict[int, float], int | None]],
+        **kwargs: object,
+    ) -> None:
+        captured.append((int(base_year), supplies))
+
+    monkeypatch.setattr(
+        example_trails,
+        "accumulate_temporalized_biosphere_inventory_batch",
+        fake_accumulate,
+    )
+    monkeypatch.setattr(example_trails, "finalize_inventory", lambda: None)
+
+    lca_module.lca(
+        trails=example_trails,
+        show_progress=False,
+        compute_score=False,
+        store_inventory=True,
+        attribute_to_roots=True,
+    )
+
+    assert captured == [(2005, [({start_act_idx: 2.0}, start_act_idx)])]
+
+
 def test_lca_skips_fu_injection_when_depth_zero_node_is_frontier(
     monkeypatch: pytest.MonkeyPatch, example_trails: Trails
 ) -> None:

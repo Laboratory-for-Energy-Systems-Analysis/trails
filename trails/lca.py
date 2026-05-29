@@ -691,6 +691,17 @@ def lca(
     start_activity = int(routing_params["start_act_idx"])
     start_amount = float(routing_params["amount"])
     min_amount = float(routing_params.get("min_amount", 1e-18))
+    start_context = trails._get_scenario_context(start_year_int)
+    if start_context is None:
+        raise RuntimeError(
+            f"No scenario context available for start year={start_year_int}."
+        )
+    _, _, start_t = start_context
+    start_activity_amount = trails._activity_amount_from_product_demand(
+        int(start_t),
+        start_activity,
+        start_amount,
+    )
 
     frontier: dict[tuple[int, int], float] = {}
     provenance: dict[tuple[int, int], dict[int, float]] = {}
@@ -735,14 +746,18 @@ def lca(
                         bucket.get(int(root_act), 0.0)
                     ) + float(amt)
 
-    # Inject FU directly only when the depth-0 FU node is frontier
+    # Inject FU directly unless the depth-0 FU node is already frontier
     # (for example when max_depth=0).
+    # Routing stores `amount` as the requested product amount, while direct
+    # biosphere accumulation expects activity scaling. Use the same conversion
+    # as temporal_routing() so non-unit production exchanges are not applied
+    # twice.
     if not functional_unit_is_frontier:
         injected_supply_by_year_act[(start_year_int, start_activity)] = (
             float(
                 injected_supply_by_year_act.get((start_year_int, start_activity), 0.0)
             )
-            + start_amount
+            + start_activity_amount
         )
         injected_supply_prov_by_year_act.setdefault(
             (start_year_int, start_activity), {}
@@ -755,7 +770,7 @@ def lca(
                     start_activity, 0.0
                 )
             )
-            + start_amount
+            + start_activity_amount
         )
 
     # Frontier -> demand vectors (calendar years preserved)
