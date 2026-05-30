@@ -1961,12 +1961,21 @@ class Trails:
                     else:
                         G.add_edge(node_key, child_node, amount=child_amt)
 
-                    if abs(child_amt) < float(min_amount):
+                    if depth == 0:
+                        child_root = child_act
+                        child_path = ((child_year, child_act),)
+                    else:
+                        child_root = root_act
+                        child_path = path + ((child_year, child_act),)
+
+                    if child_depth >= max_depth:
+                        G.nodes[child_node]["amount"] = float(
+                            G.nodes[child_node]["amount"]
+                        ) + float(child_amt)
                         G.nodes[child_node]["frontier_amount"] = float(
                             G.nodes[child_node]["frontier_amount"]
                         ) + float(child_amt)
                         if attribute_to_roots:
-                            child_root = child_act if depth == 0 else root_act
                             _add_root_amount(
                                 G.nodes[child_node]["frontier_roots"],
                                 child_root,
@@ -1975,12 +1984,18 @@ class Trails:
                             )
                         continue
 
-                    if depth == 0:
-                        child_root = child_act
-                        child_path = ((child_year, child_act),)
-                    else:
-                        child_root = root_act
-                        child_path = path + ((child_year, child_act),)
+                    if abs(child_amt) < float(min_amount):
+                        G.nodes[child_node]["frontier_amount"] = float(
+                            G.nodes[child_node]["frontier_amount"]
+                        ) + float(child_amt)
+                        if attribute_to_roots:
+                            _add_root_amount(
+                                G.nodes[child_node]["frontier_roots"],
+                                child_root,
+                                child_amt,
+                                child_act,
+                            )
+                        continue
 
                     queue.append(
                         (
