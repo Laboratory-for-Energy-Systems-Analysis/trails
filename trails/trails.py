@@ -294,6 +294,7 @@ class Trails:
         self._td_offsets_cache: dict[tuple, list[tuple[int, float]]] = {}
         self._tech_td_cache: dict[tuple[int, int, int], Optional[TemporalExchange]] = {}
         self._A_row_cache: dict[tuple[int, int], tuple[np.ndarray, np.ndarray]] = {}
+        self._production_amount_cache: dict[tuple[int, int], float] = {}
         self._direct_bio_cache_by_year: dict[int, np.ndarray] = {}
         self._tech_td_expanded_cache: dict[
             tuple[int, int, int],
@@ -1447,6 +1448,55 @@ class Trails:
             return parent_amount * (-exchange_value)
         return parent_amount * exchange_value
 
+    def _production_amount(self, t: int, act_idx: int) -> float:
+        """Return the absolute production amount for an activity in a scenario."""
+        if self.A is None:
+            return 1.0
+        key = (int(t), int(act_idx))
+        cache = getattr(self, "_production_amount_cache", None)
+        if cache is None:
+            cache = self._production_amount_cache = {}
+        if key in cache:
+            return cache[key]
+        try:
+            value = self.A[key[0], key[1], key[1]]
+            amount = float(value)
+        except Exception:
+            try:
+                dense = value.todense() if hasattr(value, "todense") else value
+                amount = float(np.asarray(dense).item())
+            except Exception:
+                cache[key] = 1.0
+                return 1.0
+        if not np.isfinite(amount) or abs(amount) < 1e-30:
+            cache[key] = 1.0
+            return 1.0
+        cache[key] = abs(float(amount))
+        return cache[key]
+
+    def _activity_amount_from_product_demand(
+        self,
+        t: int,
+        act_idx: int,
+        product_amount: float,
+    ) -> float:
+        """Convert product demand into an activity scaling amount."""
+        return float(product_amount) / self._production_amount(t, act_idx)
+
+    def _child_activity_amount(
+        self,
+        *,
+        t: int,
+        product_index: int,
+        parent_amount: float,
+        exchange_value: float,
+    ) -> float:
+        """Convert a technosphere product exchange into child activity scaling."""
+        product_amount = self._child_amount(parent_amount, exchange_value)
+        if product_amount == 0.0:
+            return 0.0
+        return float(product_amount) / self._production_amount(t, product_index)
+
     def _apply_temporal_distribution_to_demand(
         self,
         *,
@@ -1800,7 +1850,18 @@ class Trails:
 
         queue = deque()
         start_year_int = int(self._map_year_to_scenario_year(start_year_int))
-        queue.append((start_year_int, start_activity, start_amount, 0, (), None))
+        start_context = self._get_scenario_context(start_year_int)
+        if start_context is None:
+            return
+        _, _, start_t = start_context
+        start_activity_amount = self._activity_amount_from_product_demand(
+            int(start_t),
+            start_activity,
+            start_amount,
+        )
+        queue.append(
+            (start_year_int, start_activity, start_activity_amount, 0, (), None)
+        )
 
         if show_progress:
             pbar = tqdm(
@@ -2071,7 +2132,12 @@ class Trails:
             # ------------------------------------------------------------------
             if (tex is None) or (not use_temporal_distributions):
                 n_no_td += 1
-                child_amount = self._child_amount(amount, exchange_value)
+                child_amount = self._child_activity_amount(
+                    t=int(t),
+                    product_index=product_index,
+                    parent_amount=amount,
+                    exchange_value=exchange_value,
+                )
                 if child_amount != 0.0:
                     self._add_demand_entry(
                         demand, int(year), product_index, float(child_amount)
@@ -2100,7 +2166,12 @@ class Trails:
             # TD + ported magnitude (default): distribute anchor-year child amount
             # ------------------------------------------------------------------
             n_td_ported += 1
-            child_amount = self._child_amount(amount, exchange_value)
+            child_amount = self._child_activity_amount(
+                t=int(t),
+                product_index=product_index,
+                parent_amount=amount,
+                exchange_value=exchange_value,
+            )
             if child_amount == 0.0:
                 continue
 
@@ -5335,7 +5406,12 @@ class Trails:
                 continue
 
             # requirement magnitude at that pulse-year
-            child_amount = self._child_amount(float(parent_amount), exchange_value)
+            child_amount = self._child_activity_amount(
+                t=int(t_eff),
+                product_index=int(product_index),
+                parent_amount=float(parent_amount),
+                exchange_value=exchange_value,
+            )
             if child_amount == 0.0:
                 continue
 
@@ -5402,7 +5478,12 @@ class Trails:
             if exchange_value == 0.0:
                 continue
 
-            child_amount = self._child_amount(float(parent_amount), exchange_value)
+            child_amount = self._child_activity_amount(
+                t=int(t_eff),
+                product_index=int(product_index),
+                parent_amount=float(parent_amount),
+                exchange_value=exchange_value,
+            )
             if child_amount == 0.0:
                 continue
 

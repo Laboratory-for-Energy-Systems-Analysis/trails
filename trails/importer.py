@@ -1014,6 +1014,8 @@ def import_excel_inventory(
     trails.B = _append_sparse_entries(trails.B, b_coords, b_data)
 
     trails._A_row_cache.clear()
+    if hasattr(trails, "_production_amount_cache"):
+        trails._production_amount_cache.clear()
     trails._direct_bio_cache_by_year.clear()
     trails._tech_td_cache.clear()
     trails._tech_td_expanded_cache.clear()

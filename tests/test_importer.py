@@ -38,6 +38,7 @@ class DummyTrails:
         )
 
         self._A_row_cache: dict = {}
+        self._production_amount_cache: dict = {(0, 0): 99.0}
         self._direct_bio_cache_by_year: dict = {}
         self._tech_td_cache: dict = {}
         self._tech_td_expanded_cache: dict = {}
@@ -181,6 +182,7 @@ def test_import_excel_inventory_all_template_years(tmp_path: Path) -> None:
     # Indices are consistent across template labels
     assert trails.activity_indices["2000"] == trails.activity_indices["2010"]
     assert trails.biosphere_indices["2000"] == trails.biosphere_indices["2010"]
+    assert trails._production_amount_cache == {}
 
 
 def test_import_excel_inventory_single_year(tmp_path: Path) -> None:
