@@ -273,3 +273,34 @@ def get_cf_vector(
         debug=debug,
     )
     return cf.sum(axis=0)
+
+
+def get_cf_matrix(
+    trails: Trails,
+    methods: List[str],
+    char_cache: dict[tuple, np.ndarray],
+    *,
+    debug: bool = False,
+    ei_version: str = "3.11",
+) -> np.ndarray:
+    """Get characterization factor matrix aligned to Trails biosphere flows.
+
+    :param trails: Value for `trails`.
+    :type trails: Trails
+    :param methods: Value for `methods`.
+    :type methods: List[str]
+    :param char_cache: Value for `char_cache`.
+    :type char_cache: dict[tuple, np.ndarray]
+    :param debug: Value for `debug`.
+    :type debug: bool
+    :param ei_version: Value for `ei_version`.
+    :type ei_version: str
+    :returns: Characterization factors with shape ``(methods, flows)``.
+    :rtype: np.ndarray"""
+    return _build_cf_matrix_flowid_space(
+        trails=trails,
+        methods=methods,
+        ei_version=ei_version,
+        char_cache=char_cache,
+        debug=debug,
+    )

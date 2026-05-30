@@ -3348,6 +3348,351 @@ class Trails:
                 method_idx=method_idx,
             )
 
+    def accumulate_temporalized_biosphere_score_matrix_multi(
+        self,
+        base_year: int,
+        supply_matrix: np.ndarray,
+        root_activities: np.ndarray,
+        cf_matrix: np.ndarray,
+        *,
+        method_indices: np.ndarray | None = None,
+        min_amount: float = 0.0,
+        use_temporal_distributions: bool = True,
+        debug: bool = False,
+    ) -> None:
+        """Accumulate temporalized scores for several LCIA methods in one pass."""
+        if self.B is None:
+            return
+        if supply_matrix.size == 0:
+            return
+
+        base_year = int(base_year)
+
+        if not hasattr(self, "_score_year_index") or not hasattr(
+            self, "_score_bulk_value"
+        ):
+            self.reset_scores(
+                attribute_to_roots=True,
+                methods=getattr(self, "_score_methods", None),
+            )
+
+        biosphere_slice = self._get_biosphere_slice(base_year, debug)
+        if biosphere_slice is None:
+            return
+        _scenario_year, t, _B_t, _ = biosphere_slice
+
+        year_to_idx = self._score_year_index
+        base_year_idx = year_to_idx.get(base_year)
+        if base_year_idx is None:
+            return
+
+        C = np.asarray(cf_matrix, dtype=np.float64)
+        if C.ndim == 1:
+            C = C[None, :]
+        if C.ndim != 2 or C.shape[1] != int(self.B.shape[2]):
+            raise ValueError("cf_matrix must have shape (methods, B flows)")
+
+        n_methods = int(C.shape[0])
+        if method_indices is None:
+            method_idx_values = np.arange(n_methods, dtype=np.int64)
+        else:
+            method_idx_values = np.asarray(method_indices, dtype=np.int64)
+            if method_idx_values.shape != (n_methods,):
+                raise ValueError("method_indices must match cf_matrix method axis")
+
+        X = np.asarray(supply_matrix, dtype=np.float64)
+        if X.ndim != 2:
+            raise ValueError("supply_matrix must be 2D (n_acts, n_roots)")
+        roots = np.asarray(root_activities, dtype=np.int64)
+        if roots.ndim != 1 or roots.size != X.shape[1]:
+            raise ValueError("root_activities must be 1D length n_roots")
+
+        n_acts = int(self.B.shape[1])
+        if X.shape[0] != n_acts:
+            raise ValueError(f"supply_matrix has {X.shape[0]} acts; expected {n_acts}")
+
+        out_act: list[np.ndarray] = []
+        out_year: list[np.ndarray] = []
+        out_root: list[np.ndarray] = []
+        out_method: list[np.ndarray] = []
+        out_val: list[np.ndarray] = []
+
+        def append_coefficients(
+            *,
+            act: int,
+            year_idx: int,
+            coeffs: np.ndarray,
+            x_row: np.ndarray,
+        ) -> None:
+            coeff_arr = np.asarray(coeffs, dtype=np.float64)
+            if coeff_arr.shape != (n_methods,):
+                raise ValueError("coefficient vector must match cf_matrix methods")
+            if not np.any(coeff_arr) or not np.any(x_row):
+                return
+            values = coeff_arr[:, None] * x_row[None, :]
+            method_pos, root_pos = np.nonzero(values != 0.0)
+            if method_pos.size == 0:
+                return
+            out_act.append(np.full(method_pos.size, int(act), dtype=np.int64))
+            out_year.append(np.full(method_pos.size, int(year_idx), dtype=np.int64))
+            out_root.append(roots[root_pos].astype(np.int64, copy=False))
+            out_method.append(method_idx_values[method_pos])
+            out_val.append(values[method_pos, root_pos].astype(np.float64, copy=False))
+
+        row_ptr, flow_sorted, data_sorted = self._get_B_row_cache_for_t(int(t))
+
+        if not use_temporal_distributions or not self.temporal_biosphere_exchanges:
+            active_acts = np.where(np.any(X != 0.0, axis=1))[0]
+            for a in active_acts:
+                start = int(row_ptr[a])
+                end = int(row_ptr[a + 1])
+                if start == end:
+                    continue
+                flows = flow_sorted[start:end].astype(np.intp, copy=False)
+                vals = data_sorted[start:end].astype(np.float64, copy=False)
+                coeffs = C[:, flows] @ vals
+                append_coefficients(
+                    act=int(a),
+                    year_idx=int(base_year_idx),
+                    coeffs=coeffs,
+                    x_row=X[a, :],
+                )
+
+            if out_val:
+                self._append_scores_bulk(
+                    np.concatenate(out_act),
+                    np.concatenate(out_year),
+                    np.concatenate(out_val).astype(np.float64, copy=False),
+                    root_activity=np.concatenate(out_root),
+                    method_idx=np.concatenate(out_method),
+                )
+            return
+
+        tpl_label = str(self._map_year_to_template_year(base_year))
+        bio_td_get = self.temporal_biosphere_exchanges.get
+
+        if not hasattr(self, "_td_pulse_cache"):
+            self._td_pulse_cache = {}
+        pulse_cache = self._td_pulse_cache
+
+        if not hasattr(self, "_bio_score_row_char_matrix_cache"):
+            self._bio_score_row_char_matrix_cache = {}
+        row_char_cache = self._bio_score_row_char_matrix_cache
+
+        def td_key(tex: TemporalExchange) -> tuple:
+            return (
+                tex.distribution,
+                tex.loc,
+                tex.scale,
+                tex.offset_min,
+                tex.offset_max,
+                getattr(tex, "amount_source", "port"),
+                tuple(getattr(tex, "offsets", ()) or ()),
+                tuple(getattr(tex, "weights", ()) or ()),
+            )
+
+        def pulses_from_key(k: tuple) -> list[tuple[int, float]]:
+            dist, loc, scale, off_min, off_max, amt_src, offsets, weights = k
+            tex = TemporalExchange(
+                distribution=dist,
+                loc=loc,
+                scale=scale,
+                offset_min=off_min,
+                offset_max=off_max,
+                amount_source=amt_src,
+                offsets=offsets,
+                weights=weights,
+            )
+            return [
+                (int(o), float(w))
+                for o, w in TemporalDistribution(tex).iter_offsets_and_weights(
+                    debug=False
+                )
+            ]
+
+        year_map_cache: dict[int, int] = {}
+        t_eff_cache: dict[int, int | None] = {}
+        B_row_cache_local: dict[int, tuple[np.ndarray, np.ndarray, np.ndarray]] = {}
+        scenario_index_get = self.scenario_index.get
+
+        def map_year_cached(raw_year: int) -> int:
+            y = year_map_cache.get(raw_year)
+            if y is None:
+                y = int(self._map_year_to_scenario_year(raw_year))
+                year_map_cache[raw_year] = y
+            return y
+
+        active_acts = np.where(np.any(X != 0.0, axis=1))[0]
+        cf_key = int(id(C))
+        for a in active_acts:
+            start = int(row_ptr[a])
+            end = int(row_ptr[a + 1])
+            if start == end:
+                continue
+
+            flows_full = flow_sorted[start:end].astype(np.intp, copy=False)
+            vals_full = data_sorted[start:end].astype(np.float64, copy=False)
+
+            cache_key = (tpl_label, int(t), int(a), cf_key)
+            cached = row_char_cache.get(cache_key)
+
+            if cached is None:
+                no_td_pos = []
+                port_groups_pos: dict[tuple, list[int]] = {}
+                matrix_entries_pos: list[tuple[int, TemporalExchange]] = []
+
+                for p, f in enumerate(flows_full):
+                    tex = bio_td_get((tpl_label, int(a), int(f)))
+                    if tex is None:
+                        no_td_pos.append(p)
+                        continue
+                    if getattr(tex, "amount_source", "port") == "matrix":
+                        matrix_entries_pos.append((p, tex))
+                    else:
+                        port_groups_pos.setdefault(td_key(tex), []).append(p)
+
+                if no_td_pos:
+                    pos = np.asarray(no_td_pos, dtype=np.intp)
+                    no_td_coeff = C[:, flows_full[pos]] @ vals_full[pos]
+                else:
+                    no_td_coeff = np.zeros(n_methods, dtype=np.float64)
+
+                ported_coeffs = {}
+                for k, plist in port_groups_pos.items():
+                    pos = np.asarray(plist, dtype=np.intp)
+                    ported_coeffs[k] = (
+                        C[:, flows_full[pos]] @ vals_full[pos]
+                        if pos.size
+                        else np.zeros(n_methods, dtype=np.float64)
+                    )
+
+                grouped: dict[tuple, list[int]] = {}
+                for p, tex in matrix_entries_pos:
+                    grouped.setdefault(td_key(tex), []).append(int(p))
+                matrix_groups = {
+                    k: np.asarray(v, dtype=np.intp) for k, v in grouped.items()
+                }
+
+                cached = (no_td_coeff, ported_coeffs, matrix_groups)
+                row_char_cache[cache_key] = cached
+
+            no_td_coeff, ported_coeffs, matrix_groups = cached
+            x_row = X[a, :]
+
+            append_coefficients(
+                act=int(a),
+                year_idx=int(base_year_idx),
+                coeffs=no_td_coeff,
+                x_row=x_row,
+            )
+
+            for k, coeff_k in ported_coeffs.items():
+                if not np.any(coeff_k):
+                    continue
+                pulses = pulse_cache.get(k)
+                if pulses is None:
+                    pulses = pulses_from_key(k)
+                    pulse_cache[k] = pulses
+                for offset, weight in pulses:
+                    if weight == 0.0:
+                        continue
+                    raw = int(base_year + offset)
+                    y_clamped = self._clamp_year_to_scores(raw)
+                    yidx = year_to_idx[int(y_clamped)]
+                    append_coefficients(
+                        act=int(a),
+                        year_idx=int(yidx),
+                        coeffs=coeff_k * float(weight),
+                        x_row=x_row,
+                    )
+
+            if not matrix_groups:
+                continue
+
+            for k, idx_full in matrix_groups.items():
+                if idx_full.size == 0:
+                    continue
+                f_arr = flows_full[idx_full]
+                if f_arr.size == 0:
+                    continue
+                ord_f = np.argsort(f_arr, kind="mergesort")
+                f_sorted = f_arr[ord_f].astype(np.intp, copy=False)
+
+                pulses = pulse_cache.get(k)
+                if pulses is None:
+                    pulses = pulses_from_key(k)
+                    pulse_cache[k] = pulses
+                if not pulses:
+                    continue
+
+                for offset, weight in pulses:
+                    if weight == 0.0:
+                        continue
+                    raw = int(base_year + offset)
+                    y_clamped = self._clamp_year_to_scores(raw)
+                    yidx = year_to_idx[int(y_clamped)]
+
+                    y_eff = map_year_cached(raw)
+                    t_eff = t_eff_cache.get(y_eff)
+                    if t_eff is None and y_eff not in t_eff_cache:
+                        t_eff = scenario_index_get(str(y_eff))
+                        t_eff_cache[y_eff] = t_eff
+                    if t_eff is None:
+                        continue
+
+                    t_eff_i = int(t_eff)
+                    cached_eff = B_row_cache_local.get(t_eff_i)
+                    if cached_eff is None:
+                        cached_eff = self._get_B_row_cache_for_t(t_eff_i)
+                        B_row_cache_local[t_eff_i] = cached_eff
+                    row_ptr_eff, flow_sorted_eff, data_sorted_eff = cached_eff
+
+                    start_eff = int(row_ptr_eff[a])
+                    end_eff = int(row_ptr_eff[a + 1])
+                    if start_eff == end_eff:
+                        continue
+
+                    row_vals_eff = data_sorted_eff[start_eff:end_eff].astype(
+                        np.float64, copy=False
+                    )
+
+                    row_index_map = self._get_B_row_index_map_for_t_act(t_eff_i, a)
+                    matrix_kernel = self._get_numba_matrix_kernel()
+                    if matrix_kernel is not None:
+                        vals_eff, valid = matrix_kernel(
+                            f_sorted.astype(np.int64, copy=False),
+                            row_index_map,
+                            row_vals_eff,
+                        )
+                        if not np.any(valid):
+                            continue
+                        vals_eff = vals_eff[valid]
+                        f_use = f_sorted[valid]
+                    else:
+                        pos = row_index_map[f_sorted]
+                        valid = pos >= 0
+                        if not np.any(valid):
+                            continue
+                        vals_eff = row_vals_eff[pos[valid]]
+                        f_use = f_sorted[valid]
+
+                    score_per_supply = (C[:, f_use] @ vals_eff) * float(weight)
+                    append_coefficients(
+                        act=int(a),
+                        year_idx=int(yidx),
+                        coeffs=score_per_supply,
+                        x_row=x_row,
+                    )
+
+        if out_val:
+            self._append_scores_bulk(
+                np.concatenate(out_act),
+                np.concatenate(out_year),
+                np.concatenate(out_val).astype(np.float64, copy=False),
+                root_activity=np.concatenate(out_root),
+                method_idx=np.concatenate(out_method),
+            )
+
     def accumulate_temporalized_biosphere_score(
         self,
         base_year: int,

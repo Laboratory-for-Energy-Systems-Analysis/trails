@@ -20,6 +20,7 @@ from .bw_interface import (
 )
 from .iterative_solver import solve_many_rhs_jacobi_gmres
 from .characterization import build_characterized_inventory
+from .characterization import get_cf_matrix
 from .characterization import get_cf_vector
 from .edges_matrix import score_inventory_with_edges
 
@@ -643,20 +644,19 @@ def lca(
         {} if (attribute_to_roots and SOLVER == "umfpack") else None
     )
 
+    cf_matrix: np.ndarray | None = None
     cf_vectors: list[np.ndarray] | None = None
     if compute_score and not edge_mode:
         if not methods:
             raise ValueError("methods must be provided when compute_score=True.")
-        cf_vectors = [
-            get_cf_vector(
-                trails=trails,
-                methods=[method_name],
-                char_cache=_CHAR_CACHE,
-                debug=debug,
-                ei_version=ei_version,
-            )
-            for method_name in methods
-        ]
+        cf_matrix = get_cf_matrix(
+            trails=trails,
+            methods=methods,
+            char_cache=_CHAR_CACHE,
+            debug=debug,
+            ei_version=ei_version,
+        )
+        cf_vectors = [cf_matrix[i, :] for i in range(cf_matrix.shape[0])]
 
     # Ensure inventory builders are ready when we intend to store inventory data.
     if store_inventory_effective:
@@ -1079,17 +1079,18 @@ def lca(
                 # Only call the matrix scorer when we solved a multi-RHS system
                 # and the root ordering matches the solution columns.
                 if root_ids is not None and root_supply_matrix is not None:
-                    for method_idx, cf_vec in enumerate(cf_vectors):
-                        trails.accumulate_temporalized_biosphere_score_matrix(
-                            base_year=solve_year,
-                            supply_matrix=root_supply_matrix,
-                            root_activities=root_ids,
-                            cf=cf_vec,
-                            min_amount=float(min_amount),
-                            use_temporal_distributions=True,
-                            debug=debug,
-                            method_idx=method_idx,
-                        )
+                    if cf_matrix is None:
+                        raise RuntimeError("CF matrix missing while scoring methods.")
+                    trails.accumulate_temporalized_biosphere_score_matrix_multi(
+                        base_year=solve_year,
+                        supply_matrix=root_supply_matrix,
+                        root_activities=root_ids,
+                        cf_matrix=cf_matrix,
+                        method_indices=np.arange(cf_matrix.shape[0], dtype=np.int64),
+                        min_amount=float(min_amount),
+                        use_temporal_distributions=True,
+                        debug=debug,
+                    )
 
             else:
                 # Non-root mode: score all supply blocks for the year

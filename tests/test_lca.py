@@ -409,6 +409,50 @@ def test_lca_total_invariant_to_root_attribution(example_package: Package) -> No
     assert total_false == pytest.approx(total_true, rel=1e-10, abs=1e-12)
 
 
+def test_lca_root_multi_method_matches_single_method_runs(
+    example_package: Package,
+) -> None:
+    """Root-attributed multi-method scoring should match separate method runs."""
+    methods = get_lcia_method_names(ei_version="3.11")[:2]
+    assert len(methods) == 2
+
+    def run_case(selected_methods: list[str]) -> sparse.COO:
+        trails = Trails(example_package, interpolate_annual=False)
+        activity_indices = next(iter(trails.activity_indices.values()))
+        start_act_idx = next(iter(activity_indices.keys()))
+
+        trails.temporal_routing(
+            start_year=2005,
+            start_act_idx=start_act_idx,
+            max_depth=1,
+            min_amount=0.0,
+            show_progress=False,
+            attribute_to_roots=True,
+            debug=False,
+        )
+
+        lca_module.lca(
+            trails=trails,
+            methods=selected_methods,
+            show_progress=False,
+            compute_score=True,
+            store_inventory=False,
+            attribute_to_roots=True,
+            solver_mode="direct",
+        )
+        assert trails.scores is not None
+        return trails.scores.data
+
+    multi = run_case(methods)
+    for method_idx, method in enumerate(methods):
+        single = run_case([method])
+        assert float(multi[method_idx, :, :, :].sum()) == pytest.approx(
+            float(single.sum()),
+            rel=1e-10,
+            abs=1e-12,
+        )
+
+
 def test_lca_injects_fu_direct_biosphere_despite_deep_self_loop(
     monkeypatch: pytest.MonkeyPatch, example_trails: Trails
 ) -> None:

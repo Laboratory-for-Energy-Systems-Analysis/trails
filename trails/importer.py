@@ -1020,6 +1020,17 @@ def import_excel_inventory(
     trails._tech_td_cache.clear()
     trails._tech_td_expanded_cache.clear()
     trails._td_offsets_cache.clear()
+    for cache_name in (
+        "_B_csr_cache",
+        "_B_row_cache",
+        "_B_row_index_map",
+        "_B_cf_actvec_cache",
+        "_bio_score_row_char_cache",
+        "_bio_score_row_char_matrix_cache",
+    ):
+        cache = getattr(trails, cache_name, None)
+        if hasattr(cache, "clear"):
+            cache.clear()
     if hasattr(trails, "_debug_flow_filters"):
         delattr(trails, "_debug_flow_filters")
 
