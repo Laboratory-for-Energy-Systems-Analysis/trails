@@ -626,13 +626,7 @@ def lca(
 
     score_methods = (
         methods
-        if (
-            compute_score
-            and not edge_mode
-            and methods
-            and len(methods) > 1
-            and not store_inventory_effective
-        )
+        if (compute_score and not edge_mode and methods and len(methods) > 1)
         else None
     )
     trails.reset_inventory(

@@ -453,6 +453,47 @@ def test_lca_root_multi_method_matches_single_method_runs(
         )
 
 
+def test_lca_root_multi_method_with_inventory_keeps_method_dimension(
+    example_package: Package,
+) -> None:
+    """Stored-inventory LCA must still keep separate multi-method scores."""
+    methods = get_lcia_method_names(ei_version="3.11")[:2]
+    assert len(methods) == 2
+
+    trails = Trails(example_package, interpolate_annual=False)
+    activity_indices = next(iter(trails.activity_indices.values()))
+    start_act_idx = next(iter(activity_indices.keys()))
+
+    trails.temporal_routing(
+        start_year=2005,
+        start_act_idx=start_act_idx,
+        max_depth=1,
+        min_amount=0.0,
+        show_progress=False,
+        attribute_to_roots=True,
+        debug=False,
+    )
+
+    lca_module.lca(
+        trails=trails,
+        methods=methods,
+        show_progress=False,
+        compute_score=True,
+        store_inventory=True,
+        attribute_to_roots=True,
+        solver_mode="direct",
+    )
+
+    assert trails.scores is not None
+    assert "method" in trails.scores.dims
+    assert trails.scores.coords["method"].values.tolist() == methods
+    totals = [
+        float(trails.scores.isel(method=method_idx).data.sum())
+        for method_idx in range(len(methods))
+    ]
+    assert totals[0] != pytest.approx(totals[1])
+
+
 def test_lca_injects_fu_direct_biosphere_despite_deep_self_loop(
     monkeypatch: pytest.MonkeyPatch, example_trails: Trails
 ) -> None:
