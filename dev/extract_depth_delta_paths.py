@@ -10,7 +10,6 @@ from typing import Any
 
 import pandas as pd
 
-
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) in sys.path:
     sys.path.remove(str(REPO_ROOT))
@@ -82,7 +81,9 @@ def _demand_amount(activity: Any, case_defs: dict[str, Any]) -> float:
     return float(CASE_DEMAND_AMOUNTS_BY_KEY[key])
 
 
-def _find_one_path_from_root(graph: Any, root_idx: int, target: Any) -> list[Any] | None:
+def _find_one_path_from_root(
+    graph: Any, root_idx: int, target: Any
+) -> list[Any] | None:
     target_depth = int(graph.nodes[target].get("depth", -1))
     stack: list[tuple[Any, list[Any]]] = [(target, [target])]
     visited: set[Any] = set()
@@ -102,12 +103,16 @@ def _find_one_path_from_root(graph: Any, root_idx: int, target: Any) -> list[Any
             pred_depth = int(graph.nodes[pred].get("depth", -1))
             if pred_depth < depth and pred_depth >= 1:
                 stack.append((pred, suffix + [pred]))
-    if target_depth == 1 and int(graph.nodes[target].get("act_idx", -1)) == int(root_idx):
+    if target_depth == 1 and int(graph.nodes[target].get("act_idx", -1)) == int(
+        root_idx
+    ):
         return [target]
     return None
 
 
-def _path_signature(graph: Any, path: list[Any]) -> tuple[tuple[int, ...], tuple[int, ...]]:
+def _path_signature(
+    graph: Any, path: list[Any]
+) -> tuple[tuple[int, ...], tuple[int, ...]]:
     return (
         tuple(int(graph.nodes[node].get("act_idx")) for node in path),
         tuple(int(graph.nodes[node].get("year")) for node in path),
@@ -116,7 +121,9 @@ def _path_signature(graph: Any, path: list[Any]) -> tuple[tuple[int, ...], tuple
 
 def _format_path(trails: Any, graph: Any, path: list[Any]) -> tuple[str, str]:
     years = [int(graph.nodes[node].get("year")) for node in path]
-    labels = [_short_label(trails, int(graph.nodes[node].get("act_idx"))) for node in path]
+    labels = [
+        _short_label(trails, int(graph.nodes[node].get("act_idx"))) for node in path
+    ]
     return " -> ".join(labels), " -> ".join(str(year) for year in years)
 
 
@@ -177,7 +184,9 @@ def _dominant_frontier_paths(
     candidates: list[tuple[float, Any, float]] = []
     for node, data in graph.nodes(data=True):
         roots = data.get("frontier_roots") or {}
-        amount = float(roots.get(int(root_idx), 0.0) or roots.get(str(root_idx), 0.0) or 0.0)
+        amount = float(
+            roots.get(int(root_idx), 0.0) or roots.get(str(root_idx), 0.0) or 0.0
+        )
         if amount:
             candidates.append((abs(amount), node, amount))
 
@@ -232,7 +241,10 @@ def main() -> None:
     trails = runner._load_trails(
         datapackage=DATAPACKAGE.expanduser().resolve(),
         interpolation_cache_dir=None,
-        inventory_paths=[path.expanduser().resolve() for path in runner.DEFAULT_ONEDRIVE_INVENTORY_PATHS],
+        inventory_paths=[
+            path.expanduser().resolve()
+            for path in runner.DEFAULT_ONEDRIVE_INVENTORY_PATHS
+        ],
         import_before_interpolation=False,
         remove_base_temporal_distributions=False,
         no_cache_interpolation=False,
@@ -297,9 +309,7 @@ def main() -> None:
                         "root_activity": item["root_activity"],
                         "emitting_activity_index": emitting_idx,
                         "emitting_activity": item["emitting_activity"],
-                        "delta_pre_reference_score": item[
-                            "delta_pre_reference_score"
-                        ],
+                        "delta_pre_reference_score": item["delta_pre_reference_score"],
                         "share_abs_delta_pre_reference": item[
                             "share_abs_delta_pre_reference"
                         ],

@@ -11,7 +11,6 @@ import numpy as np
 import pandas as pd
 import sparse
 
-
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) in sys.path:
     sys.path.remove(str(REPO_ROOT))
@@ -422,8 +421,8 @@ def main() -> None:
                 flush=True,
             )
         print(f"Year {year}, top positives:", flush=True)
-        for row in subset.sort_values("score", ascending=False).head(8).itertuples(
-            index=False
+        for row in (
+            subset.sort_values("score", ascending=False).head(8).itertuples(index=False)
         ):
             print(
                 f"  {row.score: .6g}  {diag._activity_label(by_idx, int(row.activity))}",
@@ -432,13 +431,13 @@ def main() -> None:
 
     if not supplies.empty:
         supply_summary = (
-            supplies.groupby(["base_year", "activity"], as_index=False)[
-                "supply_amount"
-            ]
+            supplies.groupby(["base_year", "activity"], as_index=False)["supply_amount"]
             .sum()
             .sort_values(["activity", "base_year"])
         )
-        supply_summary.to_csv(OUTPUT_DIR / "supply_summary_by_base_year.csv", index=False)
+        supply_summary.to_csv(
+            OUTPUT_DIR / "supply_summary_by_base_year.csv", index=False
+        )
         print("\nTarget activity supply amounts under propylene root:", flush=True)
         for activity in TARGET_ACTIVITIES:
             subset = supply_summary[supply_summary["activity"] == activity]
@@ -505,9 +504,11 @@ def main() -> None:
                 flush=True,
             )
         print(f"Year {year}, top positive flows:", flush=True)
-        subset = flow_summary[flow_summary["emission_year"] == year].sort_values(
-            "score", ascending=False
-        ).head(8)
+        subset = (
+            flow_summary[flow_summary["emission_year"] == year]
+            .sort_values("score", ascending=False)
+            .head(8)
+        )
         for row in subset.itertuples(index=False):
             print(
                 f"  {row.score: .6g}  act={row.activity} "

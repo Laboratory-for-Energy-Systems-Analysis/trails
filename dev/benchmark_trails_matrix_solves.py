@@ -370,9 +370,9 @@ def _activity_demand_to_product_rhs(
             preferred_row=preferred_product,
         )
         sign = -1.0 if product_value < 0.0 else 1.0
-        rhs[int(product)] = rhs.get(int(product), 0.0) + float(
-            activity_demand[int(activity)]
-        ) * sign
+        rhs[int(product)] = (
+            rhs.get(int(product), 0.0) + float(activity_demand[int(activity)]) * sign
+        )
     return rhs
 
 
@@ -489,12 +489,10 @@ def _build_block_csc(trails: Trails, cases: list[YearCase]) -> sp.csc_matrix:
         for local_pos, time_index in enumerate(time_indices):
             mask = all_t == int(time_index)
             row_parts.append(
-                local_pos * n_products
-                + np.asarray(A.coords[2, mask], dtype=np.int64)
+                local_pos * n_products + np.asarray(A.coords[2, mask], dtype=np.int64)
             )
             col_parts.append(
-                local_pos * n_activities
-                + np.asarray(A.coords[1, mask], dtype=np.int64)
+                local_pos * n_activities + np.asarray(A.coords[1, mask], dtype=np.int64)
             )
             data_parts.append(np.asarray(A.data[mask], dtype=np.float64))
 
@@ -708,9 +706,7 @@ def _solve_umfpack(
             try:
                 ctx.numeric(matrix)
             except RuntimeError as exc:
-                peak_estimate = _umfpack_info_bytes(
-                    ctx, "UMFPACK_PEAK_MEMORY_ESTIMATE"
-                )
+                peak_estimate = _umfpack_info_bytes(ctx, "UMFPACK_PEAK_MEMORY_ESTIMATE")
                 numeric_estimate = _umfpack_info_bytes(
                     ctx, "UMFPACK_NUMERIC_SIZE_ESTIMATE"
                 )
@@ -822,20 +818,14 @@ def _solve_sequential_umfpack(
             fact_peak = _umfpack_info_bytes(ctx, "UMFPACK_PEAK_MEMORY")
             variable_peak = _umfpack_info_bytes(ctx, "UMFPACK_VARIABLE_PEAK")
 
-            max_symbolic_size = max(
-                max_symbolic_size or 0, sym_size or 0
-            ) or None
-            max_symbolic_peak = max(
-                max_symbolic_peak or 0, sym_peak or 0
-            ) or None
+            max_symbolic_size = max(max_symbolic_size or 0, sym_size or 0) or None
+            max_symbolic_peak = max(max_symbolic_peak or 0, sym_peak or 0) or None
             max_numeric_size = max(max_numeric_size or 0, num_size or 0) or None
             sum_numeric_size += int(num_size or 0)
-            max_factorization_peak = max(
-                max_factorization_peak or 0, fact_peak or 0
-            ) or None
-            max_variable_peak = max(
-                max_variable_peak or 0, variable_peak or 0
-            ) or None
+            max_factorization_peak = (
+                max(max_factorization_peak or 0, fact_peak or 0) or None
+            )
+            max_variable_peak = max(max_variable_peak or 0, variable_peak or 0) or None
 
             try:
                 ctx.free_numeric()

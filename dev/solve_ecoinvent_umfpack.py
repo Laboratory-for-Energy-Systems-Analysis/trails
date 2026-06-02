@@ -277,9 +277,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--demand-row",
         type=int,
-        help=(
-            "Matrix product row to demand. Ignored when --demand-code is given."
-        ),
+        help=("Matrix product row to demand. Ignored when --demand-code is given."),
     )
     parser.add_argument("--amount", type=float, default=1.0)
     parser.add_argument(
@@ -376,10 +374,7 @@ def main() -> None:
         f"{symbolic_seconds + numeric_seconds + solve_seconds[0]:.6f} s"
     )
     if len(solve_seconds) > 1:
-        print(
-            "UMFPACK mean backsolve time: "
-            f"{float(np.mean(solve_seconds)):.6f} s"
-        )
+        print("UMFPACK mean backsolve time: " f"{float(np.mean(solve_seconds)):.6f} s")
     print(
         "UMFPACK symbolic object size: "
         f"{_format_bytes(memory['umfpack_symbolic_size'])}"
@@ -407,10 +402,7 @@ def main() -> None:
         symbolic_rss_delta = (
             memory["rss_after_symbolic"] - memory["rss_before_symbolic"]
         )
-        print(
-            "Process RSS symbolic delta: "
-            f"{_format_bytes(symbolic_rss_delta)}"
-        )
+        print("Process RSS symbolic delta: " f"{_format_bytes(symbolic_rss_delta)}")
     if (
         memory["rss_after_symbolic"] is not None
         and memory["rss_after_numeric"] is not None
@@ -425,10 +417,7 @@ def main() -> None:
         and memory["rss_after_solve"] is not None
     ):
         solve_rss_delta = memory["rss_after_solve"] - memory["rss_after_numeric"]
-        print(
-            "Process RSS solve delta: "
-            f"{_format_bytes(solve_rss_delta)}"
-        )
+        print("Process RSS solve delta: " f"{_format_bytes(solve_rss_delta)}")
     print(f"Solution nonzero entries: {int(np.count_nonzero(solution)):,}")
     print(f"Solution L1 norm: {float(np.linalg.norm(solution, ord=1)):.12g}")
 

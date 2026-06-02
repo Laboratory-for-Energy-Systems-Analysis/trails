@@ -26,7 +26,6 @@ sys.path.insert(0, str(REPO_ROOT))
 
 from trails import Trails, get_lcia_method_names, plot_temporal_scores
 
-
 DEFAULT_DATAPACKAGE = REPO_ROOT / "dev" / "trails_2026-05-18.zip"
 DEFAULT_OUTPUT_DIR = REPO_ROOT / "dev" / "temporal_lca_depth_plots_2026_05_18"
 DEFAULT_METHOD = (
@@ -91,8 +90,7 @@ def _ef_v31_methods(methods: list[str]) -> list[str]:
     return [
         method
         for method in methods
-        if method.startswith("EF v3.1 -")
-        and not method.startswith("EF v3.1 no LT")
+        if method.startswith("EF v3.1 -") and not method.startswith("EF v3.1 no LT")
     ]
 
 
@@ -135,11 +133,7 @@ def _read_activity_and_exchanges(ws) -> tuple[ActivityDef | None, list[dict[str,
             if not any(row_values):
                 continue
             exchanges.append(
-                {
-                    headers[i]: row_values[i]
-                    for i in range(len(headers))
-                    if headers[i]
-                }
+                {headers[i]: row_values[i] for i in range(len(headers)) if headers[i]}
             )
 
     return ActivityDef(activity_name, reference_product, location), exchanges
@@ -166,7 +160,9 @@ def _collect_terminal_activities(inventory_paths: list[Path]) -> list[ActivityDe
                     technosphere_supplier_names.append(supplier_name)
 
     suppliers_used_by_imported = {
-        supplier for supplier in technosphere_supplier_names if supplier in activity_names
+        supplier
+        for supplier in technosphere_supplier_names
+        if supplier in activity_names
     }
     terminal = [
         activity
@@ -189,7 +185,9 @@ def _metadata_by_idx(trails: Trails) -> dict[int, dict]:
     if not trails.activity_indices:
         return {}
     first_label = next(iter(trails.activity_indices))
-    return {int(key): value for key, value in trails.activity_indices[first_label].items()}
+    return {
+        int(key): value for key, value in trails.activity_indices[first_label].items()
+    }
 
 
 def _match_activity_indices(
@@ -218,7 +216,8 @@ def _match_activity_indices(
         by_name = [
             index
             for index, metadata in by_idx.items()
-            if isinstance(metadata, dict) and _clean(metadata.get("name")) == target.name
+            if isinstance(metadata, dict)
+            and _clean(metadata.get("name")) == target.name
         ]
         if len(by_name) == 1:
             out[target] = by_name[0]
@@ -227,7 +226,9 @@ def _match_activity_indices(
 
 
 def _wrap_title(value: str, width: int) -> str:
-    lines = wrap(str(value), width=width, break_long_words=False, break_on_hyphens=False)
+    lines = wrap(
+        str(value), width=width, break_long_words=False, break_on_hyphens=False
+    )
     return "<br>".join(lines) if lines else str(value)
 
 
@@ -277,7 +278,9 @@ def _style_trace_consistently(trace: go.BaseTraceType) -> None:
         trace.fillcolor = _hex_to_rgba(color, 0.34)
 
 
-def _activity_metadata(trails: Trails, activity_index: int, reference_year: int) -> dict:
+def _activity_metadata(
+    trails: Trails, activity_index: int, reference_year: int
+) -> dict:
     labels: list[str] = []
     try:
         labels.append(str(trails._map_year_to_scenario_year(int(reference_year))))
@@ -362,9 +365,7 @@ def _scores_reduced_to_method_root_year(trails: Trails):
         raise RuntimeError("trails.scores is None after temporal LCA.")
 
     data = trails.scores
-    keep_dims = [
-        dim for dim in ("method", "root activity", "year") if dim in data.dims
-    ]
+    keep_dims = [dim for dim in ("method", "root activity", "year") if dim in data.dims]
     reduce_dims = [dim for dim in data.dims if dim not in keep_dims]
     if reduce_dims:
         data = data.sum(dim=reduce_dims)
@@ -407,7 +408,9 @@ def _temporal_score_by_year_from_scores(
     return years, values
 
 
-def _temporal_score_by_year(trails: Trails, method: str) -> tuple[np.ndarray, np.ndarray]:
+def _temporal_score_by_year(
+    trails: Trails, method: str
+) -> tuple[np.ndarray, np.ndarray]:
     return _temporal_score_by_year_from_scores(
         _scores_reduced_to_method_root_year(trails),
         method,
@@ -420,9 +423,7 @@ def _pruned_scores_for_method(scores, method: str):
     if "root activity" not in scores.dims:
         return scores
 
-    extra_dims = [
-        dim for dim in scores.dims if dim not in ("root activity", "year")
-    ]
+    extra_dims = [dim for dim in scores.dims if dim not in ("root activity", "year")]
     if extra_dims:
         scores = scores.sum(dim=extra_dims)
 
@@ -504,7 +505,9 @@ def _apply_axis_ranges_from_source(
     primary_range = source.layout.yaxis.range
     secondary_range = source.layout.yaxis2.range
     if primary_range is not None:
-        target.update_yaxes(range=list(primary_range), row=row, col=1, secondary_y=False)
+        target.update_yaxes(
+            range=list(primary_range), row=row, col=1, secondary_y=False
+        )
     if secondary_range is not None:
         target.update_yaxes(
             range=list(secondary_range),
@@ -631,14 +634,15 @@ def _fallback_depth_figure(
             line=dict(color="#dc2626", width=2, dash="dash"),
             yaxis="y2",
             hovertemplate=(
-                "<b>Static score</b><br>"
-                "Static score: %{y:.6g}<extra></extra>"
+                "<b>Static score</b><br>" "Static score: %{y:.6g}<extra></extra>"
             ),
         )
     )
     fig.update_layout(
         yaxis=dict(range=[-1.0, 1.0]),
-        yaxis2=dict(range=[min(0.0, float(static_score)), max(1.0, float(static_score))]),
+        yaxis2=dict(
+            range=[min(0.0, float(static_score)), max(1.0, float(static_score))]
+        ),
     )
     return fig
 
@@ -747,8 +751,7 @@ def _run_temporal_lca_for_depth(
             ei_version=ei_version,
         )
         print(
-            "    fallback lca done in "
-            f"{time.perf_counter() - fallback_t0:.1f}s",
+            "    fallback lca done in " f"{time.perf_counter() - fallback_t0:.1f}s",
             flush=True,
         )
 
@@ -808,7 +811,9 @@ def _plot_activity_depths(
             secondary_y = getattr(trace, "yaxis", None) == "y2"
             legend_key = str(trace.legendgroup or trace.name or trace.uid)
             source_showlegend = getattr(source_trace, "showlegend", None)
-            wants_legend = True if source_showlegend is None else bool(source_showlegend)
+            wants_legend = (
+                True if source_showlegend is None else bool(source_showlegend)
+            )
             trace.showlegend = wants_legend and legend_key not in seen_legend_entries
             if trace.showlegend:
                 seen_legend_entries.add(legend_key)
@@ -907,9 +912,7 @@ def run(args: argparse.Namespace) -> int:
 
     available_methods = get_lcia_method_names(ei_version=str(args.ei_version))
     requested_methods = (
-        [str(method) for method in args.methods]
-        if args.methods
-        else [str(args.method)]
+        [str(method) for method in args.methods] if args.methods else [str(args.method)]
     )
     if bool(args.include_ef_v31):
         requested_methods.extend(_ef_v31_methods(available_methods))
@@ -922,9 +925,7 @@ def run(args: argparse.Namespace) -> int:
         matches = [name for name in available_methods if "IPCC 2021" in name][:12]
         raise ValueError(
             "LCIA method(s) not found for ecoinvent "
-            f"{args.ei_version}:\n- "
-            + "\n- ".join(missing_methods)
-            + "\n"
+            f"{args.ei_version}:\n- " + "\n- ".join(missing_methods) + "\n"
             f"Nearby IPCC 2021 methods:\n- " + "\n- ".join(matches)
         )
     if not requested_methods:
@@ -983,7 +984,9 @@ def run(args: argparse.Namespace) -> int:
                     f"{activity.location}"
                 )
         print("Terminal imported activities:")
-        for activity, index in sorted(terminal_index_map.items(), key=lambda item: item[1]):
+        for activity, index in sorted(
+            terminal_index_map.items(), key=lambda item: item[1]
+        ):
             print(
                 f"  {index}: {activity.name} | "
                 f"{activity.reference_product} | {activity.location}"
@@ -1062,7 +1065,9 @@ def run(args: argparse.Namespace) -> int:
                 iterative_restart=args.iterative_restart,
                 ei_version=str(args.ei_version),
                 fallback_solver_mode=(
-                    None if str(args.fallback_solver_mode) == "none" else str(args.fallback_solver_mode)
+                    None
+                    if str(args.fallback_solver_mode) == "none"
+                    else str(args.fallback_solver_mode)
                 ),
                 routing_min_amount=float(args.routing_min_amount),
             )
@@ -1132,9 +1137,9 @@ def run(args: argparse.Namespace) -> int:
                     year_start=plot_year_start,
                     year_end=plot_year_end,
                 )
-                observed_bounds_by_method_depth[method][
-                    int(depth)
-                ] = _observed_year_bounds(plot_years, plot_annual)
+                observed_bounds_by_method_depth[method][int(depth)] = (
+                    _observed_year_bounds(plot_years, plot_annual)
+                )
                 full_temporal_total = float(np.sum(annual))
                 window_temporal_total = float(np.sum(plot_annual))
                 temporal_totals[method][int(depth)] = full_temporal_total
@@ -1183,9 +1188,9 @@ def run(args: argparse.Namespace) -> int:
                 row[f"delta_depth_{depth}_vs_static"] = (
                     temporal_totals[method][int(depth)] - static_scores[method]
                 )
-                row[f"window_temporal_depth_{depth}"] = window_temporal_totals[
-                    method
-                ][int(depth)]
+                row[f"window_temporal_depth_{depth}"] = window_temporal_totals[method][
+                    int(depth)
+                ]
             rows.append(row)
         _write_summary_csv(rows, csv_path)
 
