@@ -154,7 +154,9 @@ def main() -> None:
         )
     )
     parser.add_argument("--datapackage", type=Path, default=DATAPACKAGE)
-    parser.add_argument("--output-dir", type=Path, default=REPO_ROOT / "dev" / "profiling")
+    parser.add_argument(
+        "--output-dir", type=Path, default=REPO_ROOT / "dev" / "profiling"
+    )
     parser.add_argument(
         "--depths",
         type=_parse_depths,

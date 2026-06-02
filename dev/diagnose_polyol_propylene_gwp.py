@@ -13,7 +13,6 @@ import numpy as np
 import pandas as pd
 import sparse
 
-
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) in sys.path:
     sys.path.remove(str(REPO_ROOT))
@@ -418,7 +417,9 @@ def main() -> None:
         runner._load_trails,
         datapackage=args.datapackage,
         interpolation_cache_dir=None,
-        inventory_paths=[path.resolve() for path in runner.DEFAULT_ONEDRIVE_INVENTORY_PATHS],
+        inventory_paths=[
+            path.resolve() for path in runner.DEFAULT_ONEDRIVE_INVENTORY_PATHS
+        ],
         import_before_interpolation=False,
         remove_base_temporal_distributions=False,
         no_cache_interpolation=False,
@@ -583,7 +584,9 @@ def main() -> None:
         & (selected_series["annual"] < 0.0)
     ]
     if pre_ref.empty:
-        print("\nNo negative pre-reference annual value found for this root.", flush=True)
+        print(
+            "\nNo negative pre-reference annual value found for this root.", flush=True
+        )
         return
 
     suspicious = pre_ref.sort_values("annual").iloc[0]
@@ -603,11 +606,14 @@ def main() -> None:
         by_idx=by_idx,
     )
     contributions.to_csv(
-        args.output_dir / f"root_{selected_root}_{suspicious_year}_activity_contribs.csv",
+        args.output_dir
+        / f"root_{selected_root}_{suspicious_year}_activity_contribs.csv",
         index=False,
     )
     if contributions.empty:
-        print("No activity-level contributors found for the suspicious year.", flush=True)
+        print(
+            "No activity-level contributors found for the suspicious year.", flush=True
+        )
         return
 
     print("\nTop negative activity contributors in the suspicious year:", flush=True)

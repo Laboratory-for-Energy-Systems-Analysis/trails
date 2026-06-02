@@ -14,10 +14,7 @@ sys.path.insert(0, str(REPO_ROOT))
 
 from trails import Trails, export_impact_dashboard, get_lcia_method_names
 
-
-DEFAULT_DATAPACKAGE = Path(
-    "/Users/romain/GitHub/premise/dev/trails_2026-05-18.zip"
-)
+DEFAULT_DATAPACKAGE = Path("/Users/romain/GitHub/premise/dev/trails_2026-05-18.zip")
 DEFAULT_METHOD = (
     "IPCC 2021 (incl. biogenic CO2) - climate change: total "
     "(incl. biogenic CO2) - global warming potential (GWP100)"

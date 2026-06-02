@@ -30,7 +30,6 @@ from trails import Trails, get_lcia_method_names, plot_temporal_scores
 from trails.datapackage import interpolate_to_annual
 from trails.plotting import plot_temporal_graph
 
-
 HELPER_PATH = REPO_ROOT / "dev" / "plot_temporal_lca_depths.py"
 DEFAULT_OUTPUT_DIR = REPO_ROOT / "dev" / "terminal_lci_td_comparison_ef31_depth5"
 DEFAULT_RESULTS_CSV = DEFAULT_OUTPUT_DIR / "terminal_lci_td_comparison_scores.csv"
@@ -64,7 +63,9 @@ EF_V31_HEADLINE_METHODS = [
 
 
 def _load_depth_helpers():
-    spec = importlib.util.spec_from_file_location("plot_temporal_lca_depths", HELPER_PATH)
+    spec = importlib.util.spec_from_file_location(
+        "plot_temporal_lca_depths", HELPER_PATH
+    )
     if spec is None or spec.loader is None:
         raise RuntimeError(f"Could not load helper script: {HELPER_PATH}")
     module = importlib.util.module_from_spec(spec)
@@ -313,7 +314,9 @@ def _interpolate_trails_after_import(
     interpolation_start_year_offset: int,
     interpolation_end_year_offset: int,
 ) -> None:
-    print("Interpolating foreground-augmented matrices to annual resolution", flush=True)
+    print(
+        "Interpolating foreground-augmented matrices to annual resolution", flush=True
+    )
     with _Heartbeat("  annual interpolation"):
         trails.A, trails.B, trails.scenario_labels, trails.scenario_index = (
             interpolate_to_annual(
@@ -425,7 +428,9 @@ def _method_label(method: str) -> str:
 
 
 def _wrapped(value: str, width: int) -> str:
-    lines = wrap(str(value), width=width, break_long_words=False, break_on_hyphens=False)
+    lines = wrap(
+        str(value), width=width, break_long_words=False, break_on_hyphens=False
+    )
     return "<br>".join(lines) if lines else str(value)
 
 
@@ -783,8 +788,7 @@ def _run_activity(
             ei_version=str(ei_version),
         )
         print(
-            "    fallback lca done in "
-            f"{time.perf_counter() - fallback_t0:.1f}s",
+            "    fallback lca done in " f"{time.perf_counter() - fallback_t0:.1f}s",
             flush=True,
         )
 
@@ -1111,8 +1115,7 @@ def run(args: argparse.Namespace) -> int:
     if missing_methods:
         raise ValueError(
             "LCIA method(s) not found for ecoinvent "
-            f"{args.ei_version}:\n- "
-            + "\n- ".join(missing_methods)
+            f"{args.ei_version}:\n- " + "\n- ".join(missing_methods)
         )
     if not methods:
         raise ValueError("No EF v3.1 methods were found.")
@@ -1293,14 +1296,12 @@ def run(args: argparse.Namespace) -> int:
             )
             activity_dir = output_dir / activity_slug
             for method_pos, method in enumerate(methods, start=1):
-                figure_path = (
-                    _expected_figure_path(
-                        output_dir=output_dir,
-                        activity_index=results["all_td"].activity_index,
-                        activity_label=activity_label,
-                        method=method,
-                        depth=int(args.depth),
-                    )
+                figure_path = _expected_figure_path(
+                    output_dir=output_dir,
+                    activity_index=results["all_td"].activity_index,
+                    activity_label=activity_label,
+                    method=method,
+                    depth=int(args.depth),
                 )
                 print(
                     f"  plotting method {method_pos}/{len(methods)}: "
@@ -1332,9 +1333,9 @@ def run(args: argparse.Namespace) -> int:
                         "static_foreground_td_only": results[
                             "foreground_td_only"
                         ].static_scores[method],
-                        "temporal_cumulative_all_td": results[
-                            "all_td"
-                        ].total_by_method[method],
+                        "temporal_cumulative_all_td": results["all_td"].total_by_method[
+                            method
+                        ],
                         "temporal_cumulative_foreground_td_only": results[
                             "foreground_td_only"
                         ].total_by_method[method],
@@ -1411,10 +1412,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--all-onedrive-lci-inventories",
         action=argparse.BooleanOptionalAction,
         default=False,
-        help=(
-            "Import the four LCI workbooks from the OneDrive trails/data "
-            "folder."
-        ),
+        help=("Import the four LCI workbooks from the OneDrive trails/data " "folder."),
     )
     parser.add_argument(
         "--case-study-activities",

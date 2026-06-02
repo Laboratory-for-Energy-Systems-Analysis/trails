@@ -23,7 +23,6 @@ from trails import Trails
 
 import benchmark_trails_matrix_solves as bench
 
-
 DEFAULT_PACKAGE = Path(
     "/Users/romain/GitHub/trails/dev/trails_2026-03-18/datapackage.json"
 )
@@ -308,15 +307,13 @@ def _run_paired_horizon(
         del monolithic_solution
     gc.collect()
 
-    cases, routing_seconds, graph_nodes, graph_edges = (
-        _cases_from_routing_with_stats(
-            trails=trails,
-            start_year=int(horizon_end),
-            activity_index=int(activity_index),
-            amount=float(amount),
-            max_depth=int(max_depth),
-            selected_years=set(years),
-        )
+    cases, routing_seconds, graph_nodes, graph_edges = _cases_from_routing_with_stats(
+        trails=trails,
+        start_year=int(horizon_end),
+        activity_index=int(activity_index),
+        amount=float(amount),
+        max_depth=int(max_depth),
+        selected_years=set(years),
     )
     print(
         "  TRAILS routing finished in "
@@ -443,9 +440,7 @@ def _run_full_trails(
             "matrix_shape_rows": int(trails.A.shape[2]),
             "matrix_shape_cols": int(trails.A.shape[1]),
             "matrix_nnz": int(trails.A.nnz),
-            "temporal_exchanges_selected": (
-                temporal_stats.td_exchanges_selected
-            ),
+            "temporal_exchanges_selected": (temporal_stats.td_exchanges_selected),
             "temporal_offdiag_entries_added": temporal_stats.td_offsets_added,
             "temporal_offsets_dropped": temporal_stats.td_offsets_dropped,
             "csc_storage_bytes": bench._storage_total(
@@ -463,8 +458,7 @@ def _run_full_trails(
     )
     if status == "ok":
         print(
-            f"  full TRAILS routing={routing_seconds:.3f}s, "
-            f"lca={lca_seconds:.3f}s",
+            f"  full TRAILS routing={routing_seconds:.3f}s, " f"lca={lca_seconds:.3f}s",
             flush=True,
         )
     else:
@@ -548,11 +542,11 @@ def main() -> None:
                 process=process,
                 horizon_start=horizon_start,
                 horizon_end=horizon_end,
-            activity_index=int(args.activity_index),
-            amount=float(args.amount),
-            max_depth=int(args.max_depth),
-            rows=rows,
-        )
+                activity_index=int(args.activity_index),
+                amount=float(args.amount),
+                max_depth=int(args.max_depth),
+                rows=rows,
+            )
             _write_rows(output_path, rows)
             if not ok:
                 first_failure_seen = True

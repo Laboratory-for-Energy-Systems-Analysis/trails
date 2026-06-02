@@ -8,7 +8,6 @@ from typing import Any
 
 from openpyxl import load_workbook
 
-
 CELL_REF = re.compile(r"(?<![A-Za-z0-9_])\$?([A-Z]{1,3})\$?([0-9]+)(?![A-Za-z0-9_])")
 
 

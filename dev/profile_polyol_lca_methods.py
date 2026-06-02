@@ -108,15 +108,15 @@ def _wrap_timed_function(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description=(
-            "Profile temporal LCA method scaling for the polyol depth-1 case."
-        )
+        description=("Profile temporal LCA method scaling for the polyol depth-1 case.")
     )
     parser.add_argument("--method-counts", type=_parse_counts, default=(1,))
     parser.add_argument("--depth", type=int, default=1)
     parser.add_argument("--amount", type=float, default=50_000_000_000.0)
     parser.add_argument("--min-amount", type=float, default=1e-3)
-    parser.add_argument("--solver-mode", choices=("direct", "iterative"), default="direct")
+    parser.add_argument(
+        "--solver-mode", choices=("direct", "iterative"), default="direct"
+    )
     args = parser.parse_args()
 
     if LCIA_JSON.exists():
@@ -135,7 +135,9 @@ def main() -> None:
         runner._load_trails,
         datapackage=DATAPACKAGE,
         interpolation_cache_dir=None,
-        inventory_paths=[path.resolve() for path in runner.DEFAULT_ONEDRIVE_INVENTORY_PATHS],
+        inventory_paths=[
+            path.resolve() for path in runner.DEFAULT_ONEDRIVE_INVENTORY_PATHS
+        ],
         import_before_interpolation=False,
         remove_base_temporal_distributions=False,
         no_cache_interpolation=False,

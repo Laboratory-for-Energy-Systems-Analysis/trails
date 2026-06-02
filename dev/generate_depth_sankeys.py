@@ -9,7 +9,6 @@ from typing import Any
 
 import pandas as pd
 
-
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) in sys.path:
     sys.path.remove(str(REPO_ROOT))
@@ -18,7 +17,9 @@ sys.path.insert(0, str(REPO_ROOT))
 RUNNER_PATH = REPO_ROOT / "dev" / "plot_terminal_lci_td_comparison.py"
 DATAPACKAGE = Path("/Users/romain/GitHub/premise/dev/trails_2026-05-31.zip")
 LCIA_JSON = Path("/Users/romain/GitHub/pathways/pathways/data/lcia_ei312.json")
-OUTPUT_DIR = REPO_ROOT / "dev" / "notebook_runs" / "temporal_lci_depth_sweep_runner" / "sankey"
+OUTPUT_DIR = (
+    REPO_ROOT / "dev" / "notebook_runs" / "temporal_lci_depth_sweep_runner" / "sankey"
+)
 
 REFERENCE_YEAR = 2025
 DEPTHS = [1, 5]
