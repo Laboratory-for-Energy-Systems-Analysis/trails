@@ -342,9 +342,7 @@ def _exclude_aerosol_ozone_precursor_mapping(
         if str(specie) not in _AEROSOL_OZONE_PRECURSOR_SPECIES
     }
     filtered_signs = {
-        flow_key: sign
-        for flow_key, sign in signs.items()
-        if flow_key in filtered_map
+        flow_key: sign for flow_key, sign in signs.items() if flow_key in filtered_map
     }
     return filtered_map, filtered_signs
 
