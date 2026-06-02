@@ -580,6 +580,32 @@ def import_excel_inventory(
             updated_biosphere_ids.add(int(idx))
         return idx
 
+    def _validate_production_exchange_metadata(
+        dataset: dict,
+        exchange: dict,
+    ) -> None:
+        """Ensure explicit production exchange metadata matches its dataset."""
+        checks = [
+            ("name", exchange.get("name"), dataset.get("name")),
+            (
+                "reference product",
+                exchange.get("reference product") or exchange.get("product"),
+                dataset.get("reference product") or dataset.get("product"),
+            ),
+            ("location", exchange.get("location"), dataset.get("location")),
+            ("unit", exchange.get("unit"), dataset.get("unit")),
+        ]
+        mismatches = [
+            f"{field}: exchange={_norm(exchange_value)!r} dataset={_norm(dataset_value)!r}"
+            for field, exchange_value, dataset_value in checks
+            if _norm(exchange_value) and _norm(exchange_value) != _norm(dataset_value)
+        ]
+        if mismatches:
+            raise ValueError(
+                "Production exchange metadata must match dataset header fields: "
+                + "; ".join(mismatches)
+            )
+
     a_coords: list[tuple[int, int, int]] = []
     a_data: list[float] = []
     b_coords: list[tuple[int, int, int]] = []
@@ -638,6 +664,7 @@ def import_excel_inventory(
                 continue
 
             if ex_type == "production":
+                _validate_production_exchange_metadata(dataset, exchange)
                 prod_name = exchange.get("name") or dataset.get("name")
                 prod_ref_product = (
                     exchange.get("reference product")

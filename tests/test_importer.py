@@ -5,6 +5,7 @@ import sys
 import types
 
 import numpy as np
+import pytest
 import sparse
 
 from trails.importer import import_excel_inventory
@@ -225,6 +226,39 @@ def test_import_excel_inventory_single_year(tmp_path: Path) -> None:
     assert np.all(dense_a[2] == 0)
     assert np.all(dense_b[0] == 0)
     assert np.all(dense_b[2] == 0)
+
+
+def test_import_excel_inventory_rejects_mismatched_production_metadata(
+    tmp_path: Path,
+) -> None:
+    trails = DummyTrails()
+    data = [
+        {
+            "name": "A",
+            "reference product": "A",
+            "location": "GLO",
+            "unit": "kg",
+            "database": "db",
+            "code": "A",
+            "exchanges": [
+                {
+                    "type": "production",
+                    "name": "A",
+                    "reference product": "wrong product",
+                    "location": "GLO",
+                    "unit": "kg",
+                    "amount": 1.0,
+                }
+            ],
+        }
+    ]
+    _install_fake_bw2io(data)
+
+    inv_path = tmp_path / "inv.xlsx"
+    inv_path.write_text("stub")
+
+    with pytest.raises(ValueError, match="Production exchange metadata"):
+        import_excel_inventory(trails, inv_path)
 
 
 def test_import_excel_inventory_year_specific_amounts(tmp_path: Path) -> None:
