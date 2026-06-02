@@ -328,6 +328,27 @@ _PRECURSOR_RESPONSE_SPECIES: dict[str, tuple[str, ...]] = {
 }
 
 
+_AEROSOL_OZONE_PRECURSOR_SPECIES = frozenset(_PRECURSOR_RESPONSE_SPECIES)
+
+
+def _exclude_aerosol_ozone_precursor_mapping(
+    species_map: dict[object, str],
+    signs: dict[object, float],
+) -> tuple[dict[object, str], dict[object, float]]:
+    """Remove aerosol/ozone precursor species from a FaIR flow mapping."""
+    filtered_map = {
+        flow_key: specie
+        for flow_key, specie in species_map.items()
+        if str(specie) not in _AEROSOL_OZONE_PRECURSOR_SPECIES
+    }
+    filtered_signs = {
+        flow_key: sign
+        for flow_key, sign in signs.items()
+        if flow_key in filtered_map
+    }
+    return filtered_map, filtered_signs
+
+
 def _ensure_response_species_rows(
     emissions_df: pd.DataFrame,
     *,
@@ -1040,6 +1061,7 @@ def run_fair_co2_pulse_equivalents(
     scenario: str,
     emissions_csv: str | Path = DEFAULT_EMISSIONS_CSV,
     mapping_yaml: str | Path = DEFAULT_MAPPING_YAML,
+    exclude_aerosol_ozone_precursors: bool = False,
     config_csv: str | Path | None = DEFAULT_CONFIGS_CSV,
     properties_csv: str | Path | None = DEFAULT_PROPERTIES_CSV,
     config_name: str | None = None,
@@ -1068,6 +1090,10 @@ def run_fair_co2_pulse_equivalents(
     :type emissions_csv: str | Path
     :param mapping_yaml: Trails-flow to FaIR-species mapping.
     :type mapping_yaml: str | Path
+    :param exclude_aerosol_ozone_precursors: Exclude mapped aerosol and ozone
+        precursor species, such as ``Sulfur``, ``NOx``, ``CO``, ``VOC``,
+        ``NH3``, ``BC``, and ``OC``, from the Trails perturbation.
+    :type exclude_aerosol_ozone_precursors: bool
     :param config_csv: FaIR calibration config CSV.
     :type config_csv: str | Path | None
     :param properties_csv: FaIR species properties CSV.
@@ -1106,6 +1132,11 @@ def run_fair_co2_pulse_equivalents(
 
     df = load_emissions_csv(emissions_csv)
     species_map, signs = load_species_mapping(mapping_yaml)
+    if exclude_aerosol_ozone_precursors:
+        species_map, signs = _exclude_aerosol_ozone_precursor_mapping(
+            species_map,
+            signs,
+        )
     config_names = _all_config_names_from_csv(config_csv, config_name, config_names)
 
     delta_by_species, inv_years = _inventory_delta_by_fair_species_for_trails(
@@ -1342,6 +1373,7 @@ def run_fair_delta_rf(
     scenario: str,
     emissions_csv: str | Path = DEFAULT_EMISSIONS_CSV,
     mapping_yaml: str | Path = DEFAULT_MAPPING_YAML,
+    exclude_aerosol_ozone_precursors: bool = False,
     config_csv: str | Path | None = DEFAULT_CONFIGS_CSV,
     properties_csv: str | Path | None = DEFAULT_PROPERTIES_CSV,
     config_name: str | None = None,
@@ -1369,6 +1401,10 @@ def run_fair_delta_rf(
     :type emissions_csv: str | Path
     :param mapping_yaml: Value for `mapping_yaml`.
     :type mapping_yaml: str | Path
+    :param exclude_aerosol_ozone_precursors: Exclude mapped aerosol and ozone
+        precursor species, such as ``Sulfur``, ``NOx``, ``CO``, ``VOC``,
+        ``NH3``, ``BC``, and ``OC``, from the Trails perturbation.
+    :type exclude_aerosol_ozone_precursors: bool
     :param config_csv: Value for `config_csv`.
     :type config_csv: str | Path | None
     :param properties_csv: Value for `properties_csv`.
@@ -1419,6 +1455,11 @@ def run_fair_delta_rf(
         per_species_workers = int(per_species_workers)
     df = load_emissions_csv(emissions_csv)
     species_map, signs = load_species_mapping(mapping_yaml)
+    if exclude_aerosol_ozone_precursors:
+        species_map, signs = _exclude_aerosol_ozone_precursor_mapping(
+            species_map,
+            signs,
+        )
     if quantiles is None:
         quantiles = [2.5, 25, 50, 75, 97.5]
     quantiles = [float(q) for q in quantiles]

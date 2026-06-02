@@ -1311,6 +1311,23 @@ def test_fair_precursor_response_species_are_captured(
     arr = np.asarray(rf.data.todense(), dtype=float)
     assert float(np.max(np.abs(arr))) > 0.0
 
+    rf_without_precursors = run_fair_delta_rf(
+        trails,
+        scenario="s",
+        config_names=["c1", "c2"],
+        exclude_aerosol_ozone_precursors=True,
+        per_species_runs=True,
+        validate_emissions_delta=False,
+        scale_factor=1.0,
+        quantiles=[50.0],
+    )
+
+    arr_without_precursors = np.asarray(
+        rf_without_precursors.data.todense(),
+        dtype=float,
+    )
+    assert np.allclose(arr_without_precursors, 0.0)
+
 
 def test_fair_all_mapped_species_return_non_null_rf(
     monkeypatch: pytest.MonkeyPatch,
