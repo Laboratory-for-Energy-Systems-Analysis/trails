@@ -28,6 +28,10 @@ from .datapackage import (
 
 from .temporal_distributions import TemporalDistribution, TemporalExchange
 from .lca import lca_static
+from .static_activity_scores import (
+    _activity_score_potential,
+    _ensure_static_activity_scores,
+)
 
 import logging
 
@@ -300,6 +304,8 @@ class Trails:
             tuple[int, int, int],
             tuple[Optional[TemporalExchange], list[tuple[int, float]]],
         ] = {}
+        self._static_activity_score_cache: dict[str, object] = {}
+        self._static_activity_score_fingerprint: tuple[tuple, str] | None = None
 
     def reset_scores(
         self,
@@ -1694,6 +1700,12 @@ class Trails:
         show_progress: bool = True,
         attribute_to_roots: bool = True,
         debug: bool = False,
+        adaptive_methods: str | list[str] | tuple[str, ...] | None = None,
+        adaptive_score_cutoff: float | None = None,
+        adaptive_relative_score_cutoff: float | None = None,
+        adaptive_ei_version: str = "3.11",
+        adaptive_min_depth: int = 1,
+        adaptive_use_cache: bool = True,
     ) -> None:
         """Temporal routing.
 
@@ -1713,6 +1725,24 @@ class Trails:
         :type attribute_to_roots: bool
         :param debug: Value for `debug`.
         :type debug: bool
+        :param adaptive_methods: Optional LCIA method or methods used to screen
+            branch impact potential. If omitted, routing uses fixed-depth mode.
+        :type adaptive_methods: str | list[str] | tuple[str, ...] | None
+        :param adaptive_score_cutoff: Absolute score-potential cutoff. Branches
+            with potential at or below this value are left as frontier nodes.
+        :type adaptive_score_cutoff: float | None
+        :param adaptive_relative_score_cutoff: Relative cutoff multiplied by the
+            root static score potential.
+        :type adaptive_relative_score_cutoff: float | None
+        :param adaptive_ei_version: Ecoinvent LCIA version used for adaptive
+            screening factors.
+        :type adaptive_ei_version: str
+        :param adaptive_min_depth: Minimum child depth before adaptive pruning can
+            stop a branch.
+        :type adaptive_min_depth: int
+        :param adaptive_use_cache: Reuse and write internal static activity score
+            cache files.
+        :type adaptive_use_cache: bool
         :raises RuntimeError: If an error occurs."""
         try:
             import networkx as nx
@@ -1826,6 +1856,12 @@ class Trails:
                 amount=0.0,
                 frontier_amount=0.0,
                 direct_bio_amount=0.0,
+                score_potential=0.0,
+                score_potential_by_method={},
+                adaptive_cutoff_reason=None,
+                adaptive_score_cutoff=None,
+                adaptive_cutoff_potential=0.0,
+                frontier_reasons={},
                 frontier_roots={},
                 direct_bio_roots={},
             )
@@ -1846,6 +1882,67 @@ class Trails:
             root = int(root_act) if root_act is not None else int(fallback)
             data[root] = float(data.get(root, 0.0)) + float(amt)
 
+        def _add_frontier_amount(
+            node_key: tuple,
+            *,
+            amt: float,
+            root_act: int | None,
+            fallback: int,
+            reason: str,
+            score_potential: float | None = None,
+        ) -> None:
+            node = G.nodes[node_key]
+            node["frontier_amount"] = float(node["frontier_amount"]) + float(amt)
+            reasons = node.setdefault("frontier_reasons", {})
+            reasons[reason] = float(reasons.get(reason, 0.0)) + float(amt)
+            if reason == "adaptive_score_cutoff":
+                node["adaptive_cutoff_reason"] = reason
+                node["adaptive_score_cutoff"] = float(adaptive_threshold)
+                if score_potential is not None:
+                    node["adaptive_cutoff_potential"] = max(
+                        float(node.get("adaptive_cutoff_potential", 0.0)),
+                        float(score_potential),
+                    )
+            if attribute_to_roots:
+                _add_root_amount(node["frontier_roots"], root_act, amt, fallback)
+
+        def _add_score_potential(
+            node_key: tuple,
+            *,
+            year: int,
+            act_idx: int,
+            amt: float,
+        ) -> float:
+            if adaptive_scores is None:
+                return 0.0
+            potential, by_method = _activity_score_potential(
+                adaptive_scores,
+                year=int(year),
+                activity=int(act_idx),
+                amount=float(amt),
+            )
+            node = G.nodes[node_key]
+            node["score_potential"] = float(node.get("score_potential", 0.0)) + float(
+                potential
+            )
+            method_potentials = node.setdefault("score_potential_by_method", {})
+            for method, value in by_method.items():
+                method_potentials[method] = float(
+                    method_potentials.get(method, 0.0)
+                ) + float(value)
+            return float(potential)
+
+        def _should_adaptively_stop(
+            *,
+            depth: int,
+            potential: float,
+        ) -> bool:
+            return bool(
+                adaptive_enabled
+                and int(depth) >= int(adaptive_min_depth)
+                and float(potential) <= float(adaptive_threshold)
+            )
+
         G = nx.DiGraph()
 
         queue = deque()
@@ -1859,6 +1956,60 @@ class Trails:
             start_activity,
             start_amount,
         )
+
+        adaptive_enabled = adaptive_methods is not None
+        if (
+            adaptive_methods is None
+            and (
+                adaptive_score_cutoff is not None
+                or adaptive_relative_score_cutoff is not None
+            )
+        ):
+            raise ValueError(
+                "adaptive_methods must be provided when adaptive score cutoffs "
+                "are set."
+            )
+        if adaptive_enabled and (
+            adaptive_score_cutoff is None and adaptive_relative_score_cutoff is None
+        ):
+            raise ValueError(
+                "Set adaptive_score_cutoff or adaptive_relative_score_cutoff "
+                "when adaptive_methods is provided."
+            )
+
+        adaptive_scores = None
+        adaptive_threshold = 0.0
+        adaptive_root_potential = 0.0
+        adaptive_method_names: list[str] = []
+        if adaptive_enabled:
+            if isinstance(adaptive_methods, str):
+                adaptive_method_names = [adaptive_methods]
+            else:
+                adaptive_method_names = [str(method) for method in adaptive_methods]
+            if not adaptive_method_names:
+                raise ValueError("adaptive_methods cannot be empty.")
+            adaptive_scores = _ensure_static_activity_scores(
+                self,
+                methods=adaptive_method_names,
+                ei_version=str(adaptive_ei_version),
+                use_cache=bool(adaptive_use_cache),
+            )
+            adaptive_root_potential, _ = _activity_score_potential(
+                adaptive_scores,
+                year=start_year_int,
+                activity=start_activity,
+                amount=start_activity_amount,
+            )
+            thresholds = []
+            if adaptive_score_cutoff is not None:
+                thresholds.append(float(adaptive_score_cutoff))
+            if adaptive_relative_score_cutoff is not None:
+                thresholds.append(
+                    abs(float(adaptive_relative_score_cutoff))
+                    * float(adaptive_root_potential)
+                )
+            adaptive_threshold = max(thresholds) if thresholds else 0.0
+
         queue.append(
             (start_year_int, start_activity, start_activity_amount, 0, (), None)
         )
@@ -1901,18 +2052,25 @@ class Trails:
             G.nodes[node_key]["amount"] = float(G.nodes[node_key]["amount"]) + float(
                 amt
             )
+            if depth == 0:
+                _add_score_potential(
+                    node_key,
+                    year=year,
+                    act_idx=act,
+                    amt=amt,
+                )
 
             scenario_year = year
             has_direct_bio = self._has_direct_biosphere(scenario_year, act, bio_cache)
 
             if depth >= max_depth:
-                G.nodes[node_key]["frontier_amount"] = float(
-                    G.nodes[node_key]["frontier_amount"]
-                ) + float(amt)
-                if attribute_to_roots:
-                    _add_root_amount(
-                        G.nodes[node_key]["frontier_roots"], root_act, amt, act
-                    )
+                _add_frontier_amount(
+                    node_key,
+                    amt=amt,
+                    root_act=root_act,
+                    fallback=act,
+                    reason="max_depth",
+                )
                 continue
 
             child_demands = self.expand_temporal_exchanges(
@@ -1924,13 +2082,13 @@ class Trails:
             )
 
             if not child_demands:
-                G.nodes[node_key]["frontier_amount"] = float(
-                    G.nodes[node_key]["frontier_amount"]
-                ) + float(amt)
-                if attribute_to_roots:
-                    _add_root_amount(
-                        G.nodes[node_key]["frontier_roots"], root_act, amt, act
-                    )
+                _add_frontier_amount(
+                    node_key,
+                    amt=amt,
+                    root_act=root_act,
+                    fallback=act,
+                    reason="leaf",
+                )
                 continue
 
             if has_direct_bio and depth > 0:
@@ -1968,33 +2126,51 @@ class Trails:
                         child_root = root_act
                         child_path = path + ((child_year, child_act),)
 
+                    potential = _add_score_potential(
+                        child_node,
+                        year=child_year,
+                        act_idx=child_act,
+                        amt=child_amt,
+                    )
+
                     if child_depth >= max_depth:
                         G.nodes[child_node]["amount"] = float(
                             G.nodes[child_node]["amount"]
                         ) + float(child_amt)
-                        G.nodes[child_node]["frontier_amount"] = float(
-                            G.nodes[child_node]["frontier_amount"]
-                        ) + float(child_amt)
-                        if attribute_to_roots:
-                            _add_root_amount(
-                                G.nodes[child_node]["frontier_roots"],
-                                child_root,
-                                child_amt,
-                                child_act,
-                            )
+                        _add_frontier_amount(
+                            child_node,
+                            amt=child_amt,
+                            root_act=child_root,
+                            fallback=child_act,
+                            reason="max_depth",
+                        )
                         continue
 
                     if abs(child_amt) < float(min_amount):
-                        G.nodes[child_node]["frontier_amount"] = float(
-                            G.nodes[child_node]["frontier_amount"]
+                        _add_frontier_amount(
+                            child_node,
+                            amt=child_amt,
+                            root_act=child_root,
+                            fallback=child_act,
+                            reason="min_amount",
+                        )
+                        continue
+
+                    if _should_adaptively_stop(
+                        depth=child_depth,
+                        potential=potential,
+                    ):
+                        G.nodes[child_node]["amount"] = float(
+                            G.nodes[child_node]["amount"]
                         ) + float(child_amt)
-                        if attribute_to_roots:
-                            _add_root_amount(
-                                G.nodes[child_node]["frontier_roots"],
-                                child_root,
-                                child_amt,
-                                child_act,
-                            )
+                        _add_frontier_amount(
+                            child_node,
+                            amt=child_amt,
+                            root_act=child_root,
+                            fallback=child_act,
+                            reason="adaptive_score_cutoff",
+                            score_potential=potential,
+                        )
                         continue
 
                     queue.append(
@@ -2019,6 +2195,22 @@ class Trails:
             "amount": start_amount,
             "max_depth": int(max_depth),
             "min_amount": float(min_amount),
+            "adaptive_enabled": bool(adaptive_enabled),
+            "adaptive_methods": list(adaptive_method_names),
+            "adaptive_score_cutoff": None
+            if adaptive_score_cutoff is None
+            else float(adaptive_score_cutoff),
+            "adaptive_relative_score_cutoff": None
+            if adaptive_relative_score_cutoff is None
+            else float(adaptive_relative_score_cutoff),
+            "adaptive_score_cutoff_effective": float(adaptive_threshold)
+            if adaptive_enabled
+            else None,
+            "adaptive_root_score_potential": float(adaptive_root_potential)
+            if adaptive_enabled
+            else None,
+            "adaptive_ei_version": str(adaptive_ei_version),
+            "adaptive_min_depth": int(adaptive_min_depth),
         }
 
         if debug:
