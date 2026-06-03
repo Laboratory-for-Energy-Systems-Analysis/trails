@@ -1958,12 +1958,9 @@ class Trails:
         )
 
         adaptive_enabled = adaptive_methods is not None
-        if (
-            adaptive_methods is None
-            and (
-                adaptive_score_cutoff is not None
-                or adaptive_relative_score_cutoff is not None
-            )
+        if adaptive_methods is None and (
+            adaptive_score_cutoff is not None
+            or adaptive_relative_score_cutoff is not None
         ):
             raise ValueError(
                 "adaptive_methods must be provided when adaptive score cutoffs "
@@ -2197,18 +2194,20 @@ class Trails:
             "min_amount": float(min_amount),
             "adaptive_enabled": bool(adaptive_enabled),
             "adaptive_methods": list(adaptive_method_names),
-            "adaptive_score_cutoff": None
-            if adaptive_score_cutoff is None
-            else float(adaptive_score_cutoff),
-            "adaptive_relative_score_cutoff": None
-            if adaptive_relative_score_cutoff is None
-            else float(adaptive_relative_score_cutoff),
-            "adaptive_score_cutoff_effective": float(adaptive_threshold)
-            if adaptive_enabled
-            else None,
-            "adaptive_root_score_potential": float(adaptive_root_potential)
-            if adaptive_enabled
-            else None,
+            "adaptive_score_cutoff": (
+                None if adaptive_score_cutoff is None else float(adaptive_score_cutoff)
+            ),
+            "adaptive_relative_score_cutoff": (
+                None
+                if adaptive_relative_score_cutoff is None
+                else float(adaptive_relative_score_cutoff)
+            ),
+            "adaptive_score_cutoff_effective": (
+                float(adaptive_threshold) if adaptive_enabled else None
+            ),
+            "adaptive_root_score_potential": (
+                float(adaptive_root_potential) if adaptive_enabled else None
+            ),
             "adaptive_ei_version": str(adaptive_ei_version),
             "adaptive_min_depth": int(adaptive_min_depth),
         }

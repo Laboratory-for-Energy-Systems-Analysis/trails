@@ -25,16 +25,15 @@ from trails.lca import (
     _reference_product_from_activity_direct,
 )
 
-
-DEFAULT_DATAPACKAGE = (
-    REPO_ROOT / "dev" / "trails_remind_SSP2-PkBudg1000.zip"
-)
+DEFAULT_DATAPACKAGE = REPO_ROOT / "dev" / "trails_remind_SSP2-PkBudg1000.zip"
 DEFAULT_LCIA_JSON = Path("/Users/romain/GitHub/pathways/pathways/data/lcia_ei312.json")
 DEFAULT_METHOD = "EF v3.1 - particulate matter formation - impact on human health"
 DEFAULT_OUTPUT_DIR = REPO_ROOT / "dev" / "notebook_runs" / "static_activity_intensities"
 
 
-def _activity_metadata(trails: Trails, activity_index: int, year: int) -> dict[str, Any]:
+def _activity_metadata(
+    trails: Trails, activity_index: int, year: int
+) -> dict[str, Any]:
     labels: list[str] = []
     try:
         labels.append(str(trails._map_year_to_scenario_year(int(year))))
@@ -211,10 +210,12 @@ def _write_scores(
         for activity_index in range(n_activities):
             meta = _activity_metadata(trails, activity_index, int(year))
             try:
-                product_index, production_value = _reference_product_from_activity_direct(
-                    A_csc=A_csc,
-                    activity_id=activity_index,
-                    cache=ref_cache,
+                product_index, production_value = (
+                    _reference_product_from_activity_direct(
+                        A_csc=A_csc,
+                        activity_id=activity_index,
+                        cache=ref_cache,
+                    )
                 )
                 sign = -1.0 if production_value < 0.0 else 1.0
                 product_score = float(intensities[int(product_index)])
@@ -238,11 +239,11 @@ def _write_scores(
                     "production_exchange_value": production_value,
                     "score_per_reference_product_demand": score,
                     "score_per_product_index_demand": product_score,
-                    "direct_biosphere_score_per_activity_supply": float(
-                        direct_scores[activity_index]
-                    )
-                    if activity_index < direct_scores.size
-                    else "",
+                    "direct_biosphere_score_per_activity_supply": (
+                        float(direct_scores[activity_index])
+                        if activity_index < direct_scores.size
+                        else ""
+                    ),
                 }
             )
     return time.perf_counter() - start
@@ -283,15 +284,21 @@ def _all_year_output_paths(args: argparse.Namespace) -> dict[str, Path]:
     return {
         "scores_csv": output_csv,
         "summary_json": output_json,
-        "matrix_npz": Path(args.output_npz).expanduser().resolve()
-        if args.output_npz is not None
-        else stem.with_suffix(".npz"),
-        "timings_csv": Path(args.timings_csv).expanduser().resolve()
-        if args.timings_csv is not None
-        else Path(str(stem) + "_timings.csv"),
-        "metadata_csv": Path(args.metadata_csv).expanduser().resolve()
-        if args.metadata_csv is not None
-        else Path(str(stem) + "_activity_metadata.csv"),
+        "matrix_npz": (
+            Path(args.output_npz).expanduser().resolve()
+            if args.output_npz is not None
+            else stem.with_suffix(".npz")
+        ),
+        "timings_csv": (
+            Path(args.timings_csv).expanduser().resolve()
+            if args.timings_csv is not None
+            else Path(str(stem) + "_timings.csv")
+        ),
+        "metadata_csv": (
+            Path(args.metadata_csv).expanduser().resolve()
+            if args.metadata_csv is not None
+            else Path(str(stem) + "_activity_metadata.csv")
+        ),
     }
 
 
@@ -423,9 +430,7 @@ def _run_all_years(args: argparse.Namespace) -> int:
                         characterize_direct_biosphere_seconds
                     ),
                     "adjoint_solve_seconds": adjoint_solve_seconds,
-                    "map_reference_products_seconds": (
-                        map_reference_products_seconds
-                    ),
+                    "map_reference_products_seconds": (map_reference_products_seconds),
                     "write_year_csv_seconds": write_year_seconds,
                     "year_total_seconds": year_total_seconds,
                 }

@@ -15,7 +15,6 @@ from trails.static_activity_scores import (
 import trails.static_activity_scores as static_activity_scores
 from trails.trails import Trails
 
-
 EXAMPLE_PACKAGE = Path("examples/example data package/datapackage.json")
 GWP_METHOD = (
     "CML v4.8 2016 no LT - climate change no LT - global warming potential "
@@ -197,8 +196,7 @@ def test_adaptive_routing_prunes_low_potential_branches() -> None:
     assert adaptive.graph.number_of_nodes() < fixed.graph.number_of_nodes()
     assert pruned_nodes
     assert all(
-        float(data["adaptive_cutoff_potential"]) <= 0.001
-        for data in pruned_nodes
+        float(data["adaptive_cutoff_potential"]) <= 0.001 for data in pruned_nodes
     )
     assert float(adaptive.scores.sum()) == pytest.approx(
         0.15497121214866638,

@@ -215,9 +215,7 @@ def _compute_static_activity_scores(
         B_t = trails.B[int(t), :, :]
         direct_scores = np.vstack(
             [
-                np.asarray(B_t @ cf_matrix[method_pos, :], dtype=np.float64).reshape(
-                    -1
-                )
+                np.asarray(B_t @ cf_matrix[method_pos, :], dtype=np.float64).reshape(-1)
                 for method_pos in range(n_methods)
             ]
         )

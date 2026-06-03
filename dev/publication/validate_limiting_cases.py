@@ -29,10 +29,7 @@ from trails.temporal_distributions import (  # noqa: E402
     TemporalExchange,
 )
 
-
-PACKAGE_PATH = (
-    REPO_ROOT / "examples" / "example data package" / "datapackage.json"
-)
+PACKAGE_PATH = REPO_ROOT / "examples" / "example data package" / "datapackage.json"
 ROOT_ACTIVITY = 13  # transport, passenger car, ICEV
 TOY_CHILD_ACTIVITY = 11  # gasoline production
 START_YEAR = 2050
