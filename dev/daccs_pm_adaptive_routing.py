@@ -89,7 +89,9 @@ DEFAULT_SCORE_PLOT_DIR = (
 
 
 def _load_depth_runner() -> Any:
-    spec = importlib.util.spec_from_file_location("daccs_pm_depth_sweep", DEPTH_SWEEP_PATH)
+    spec = importlib.util.spec_from_file_location(
+        "daccs_pm_depth_sweep", DEPTH_SWEEP_PATH
+    )
     if spec is None or spec.loader is None:
         raise RuntimeError(f"Could not load depth-sweep runner: {DEPTH_SWEEP_PATH}")
     module = importlib.util.module_from_spec(spec)
@@ -158,7 +160,9 @@ def _depth_rows(rows: list[dict[str, str]]) -> list[dict[str, Any]]:
         parsed["_temporal_lca_seconds"] = _float(row.get("temporal_lca_seconds"))
         parsed["_graph_nodes"] = _int(row.get("graph_nodes")) or 0
         parsed["_graph_edges"] = _int(row.get("graph_edges")) or 0
-        parsed["_relative_deviation"] = _float(row.get("relative_deviation_from_static"))
+        parsed["_relative_deviation"] = _float(
+            row.get("relative_deviation_from_static")
+        )
         out.append(parsed)
     return sorted(out, key=lambda row: row["_depth"])
 
@@ -178,10 +182,9 @@ def _method_unit(method: str, ei_version: str) -> str:
     path = _get_lcia_methods_filepath(str(ei_version))
     with path.open("r", encoding="utf-8") as handle:
         data = json.load(handle)
-    return {
-        " - ".join(item["name"]): str(item.get("unit") or "")
-        for item in data
-    }.get(method, "")
+    return {" - ".join(item["name"]): str(item.get("unit") or "") for item in data}.get(
+        method, ""
+    )
 
 
 def _graph_stats(trails: Any) -> dict[str, Any]:
@@ -228,9 +231,11 @@ def _graph_stats(trails: Any) -> dict[str, Any]:
         "adaptive_pruned_amount_abs": float(adaptive_pruned_amount_abs),
         "frontier_score_potential_sum": float(frontier_score_potential_sum),
         "adaptive_cutoff_potential_sum": float(sum(adaptive_cutoff_potentials)),
-        "adaptive_cutoff_potential_max": float(max(adaptive_cutoff_potentials))
-        if adaptive_cutoff_potentials
-        else 0.0,
+        "adaptive_cutoff_potential_max": (
+            float(max(adaptive_cutoff_potentials))
+            if adaptive_cutoff_potentials
+            else 0.0
+        ),
     }
     for depth, count in sorted(nodes_by_depth.items()):
         out[f"nodes_depth_{depth}"] = int(count)
@@ -390,9 +395,7 @@ def _write_routing_depth_sankey(
         for reason, amount in (data.get("frontier_reasons") or {}).items():
             key = (depth, str(reason))
             frontier_counts[key] = frontier_counts.get(key, 0) + 1
-            frontier_amounts[key] = frontier_amounts.get(key, 0.0) + abs(
-                float(amount)
-            )
+            frontier_amounts[key] = frontier_amounts.get(key, 0.0) + abs(float(amount))
             frontier_potentials[key] = frontier_potentials.get(key, 0.0) + float(
                 data.get("score_potential") or 0.0
             )
@@ -677,8 +680,7 @@ def _write_activity_year_score_sankey(
             predecessors = [
                 predecessor
                 for predecessor in graph.predecessors(node)
-                if node_depth.get(predecessor, -1) < depth
-                and predecessor in best_score
+                if node_depth.get(predecessor, -1) < depth and predecessor in best_score
             ]
             if predecessors:
                 predecessor = max(
@@ -756,9 +758,7 @@ def _write_activity_year_score_sankey(
                 )
                 display_meta[key] = {
                     "label": (
-                        f"{label}"
-                        f"<br>{year}, d{depth}"
-                        f"<br>{potential:.3g}"
+                        f"{label}" f"<br>{year}, d{depth}" f"<br>{potential:.3g}"
                     ),
                     "hover": (
                         f"<b>{_short_activity_label(data, max_chars=90)}</b>"
@@ -918,11 +918,13 @@ def _write_activity_year_score_sankey(
             key=lambda item: float(item[2]["value"]),
             reverse=True,
         )
-        filtered_links = spine_links + non_spine_links[
-            : max(0, int(max_links) - len(spine_links))
-        ]
+        filtered_links = (
+            spine_links + non_spine_links[: max(0, int(max_links) - len(spine_links))]
+        )
 
-    filtered_keys = {(source_key, target_key) for source_key, target_key, _row in filtered_links}
+    filtered_keys = {
+        (source_key, target_key) for source_key, target_key, _row in filtered_links
+    }
     for depth in range(int(max_depth_seen) + 1):
         if any(
             int(display_meta[source_key]["depth"]) == depth
@@ -985,7 +987,9 @@ def _write_activity_year_score_sankey(
     year_count = max(1, plot_max_year - plot_min_year + 1)
     year_band = min(0.06, 0.85 / float(year_count))
     for (_depth, year), keys in groups.items():
-        keys_sorted = sorted(keys, key=lambda key: node_values.get(key, 0.0), reverse=True)
+        keys_sorted = sorted(
+            keys, key=lambda key: node_values.get(key, 0.0), reverse=True
+        )
         n_keys = len(keys_sorted)
         for pos, key in enumerate(keys_sorted):
             base_y = _display_year_y(year, plot_min_year, plot_max_year)
@@ -1001,7 +1005,11 @@ def _write_activity_year_score_sankey(
     for key in ordered_keys:
         value = float(node_values.get(key, 0.0))
         meta = display_meta[key]
-        if value >= min_label_value or key[0] in {"stop", "other"} or key in depth_spine_keys:
+        if (
+            value >= min_label_value
+            or key[0] in {"stop", "other"}
+            or key in depth_spine_keys
+        ):
             labels.append(str(meta["label"]))
         elif key[0] == "activity":
             labels.append("")
@@ -1013,7 +1021,11 @@ def _write_activity_year_score_sankey(
     custom_nodes = [
         str(display_meta[key]["hover"])
         + f"<br>Displayed Sankey value: {node_values.get(key, 0.0):.6g}"
-        + ("<br>Retained as deepest-depth display path" if key in depth_spine_keys else "")
+        + (
+            "<br>Retained as deepest-depth display path"
+            if key in depth_spine_keys
+            else ""
+        )
         for key in ordered_keys
     ]
 
@@ -1113,7 +1125,9 @@ def _write_activity_year_score_sankey(
             png_fig.write_image(str(candidate), width=1900, height=1300, scale=2)
             png_path = str(candidate)
         except Exception as exc:
-            print(f"  could not write activity Sankey PNG for {case}: {exc}", flush=True)
+            print(
+                f"  could not write activity Sankey PNG for {case}: {exc}", flush=True
+            )
 
     return str(html_path), png_path
 
@@ -1272,19 +1286,18 @@ def _comparison_rows(
                 "nearest_depth_graph_nodes": nearest["_graph_nodes"],
                 "nearest_depth_routing_seconds": nearest["_routing_seconds"],
                 "score_minus_nearest_depth": score - float(nearest["_score"]),
-                "routing_speedup_vs_nearest_depth": float(
-                    nearest["_routing_seconds"]
-                )
-                / float(row["routing_seconds"])
-                if float(row["routing_seconds"]) > 0
-                else float("nan"),
+                "routing_speedup_vs_nearest_depth": (
+                    float(nearest["_routing_seconds"]) / float(row["routing_seconds"])
+                    if float(row["routing_seconds"]) > 0
+                    else float("nan")
+                ),
                 "score_minus_depth7": score - float(depth7["_score"]),
-                "routing_speedup_vs_depth7": float(depth7["_routing_seconds"])
-                / float(row["routing_seconds"])
-                if float(row["routing_seconds"]) > 0
-                else float("nan"),
-                "node_ratio_vs_depth7": adaptive_nodes
-                / float(depth7["_graph_nodes"]),
+                "routing_speedup_vs_depth7": (
+                    float(depth7["_routing_seconds"]) / float(row["routing_seconds"])
+                    if float(row["routing_seconds"]) > 0
+                    else float("nan")
+                ),
+                "node_ratio_vs_depth7": adaptive_nodes / float(depth7["_graph_nodes"]),
             }
         )
     return out
@@ -1343,9 +1356,13 @@ def run(args: argparse.Namespace) -> int:
     )
     load_seconds = time.perf_counter() - load_start
 
-    activity_maps = helpers._match_activity_indices(trails, [depth_runner.DEFAULT_ACTIVITY])
+    activity_maps = helpers._match_activity_indices(
+        trails, [depth_runner.DEFAULT_ACTIVITY]
+    )
     if depth_runner.DEFAULT_ACTIVITY not in activity_maps:
-        raise RuntimeError(f"Could not match DACCS activity: {depth_runner.DEFAULT_ACTIVITY}")
+        raise RuntimeError(
+            f"Could not match DACCS activity: {depth_runner.DEFAULT_ACTIVITY}"
+        )
     activity_index = int(activity_maps[depth_runner.DEFAULT_ACTIVITY])
     activity_label = helpers._activity_label(
         trails,
@@ -1358,7 +1375,11 @@ def run(args: argparse.Namespace) -> int:
     for relative_cutoff in args.relative_cutoffs:
         relative_cutoff = float(relative_cutoff)
         routing_max_depth = None if bool(args.no_max_depth) else int(args.max_depth)
-        depth_label = "nomaxdepth" if routing_max_depth is None else f"maxdepth_{routing_max_depth}"
+        depth_label = (
+            "nomaxdepth"
+            if routing_max_depth is None
+            else f"maxdepth_{routing_max_depth}"
+        )
         case = f"adaptive_rel_{relative_cutoff:g}_{depth_label}"
         if args.append and not args.force and case in existing_cases:
             print(f"Skipping existing case {case}", flush=True)
@@ -1368,9 +1389,7 @@ def run(args: argparse.Namespace) -> int:
                 row for row in adaptive_rows if str(row.get("case", "")) != case
             ]
             sankey_summary_rows = [
-                row
-                for row in sankey_summary_rows
-                if str(row.get("case", "")) != case
+                row for row in sankey_summary_rows if str(row.get("case", "")) != case
             ]
             existing_cases.discard(case)
 
@@ -1492,7 +1511,10 @@ def run(args: argparse.Namespace) -> int:
 
         if args.write_score_plots:
             if args.skip_lca:
-                print("  skipped temporal score plot because --skip-lca is set", flush=True)
+                print(
+                    "  skipped temporal score plot because --skip-lca is set",
+                    flush=True,
+                )
             else:
                 score_plot_html, score_plot_png = _write_temporal_score_plot(
                     trails,
@@ -1584,14 +1606,18 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Run adaptive routing for the DACCS particulate-matter case."
     )
-    parser.add_argument("--datapackage", type=Path, default=depth_runner.DEFAULT_DATAPACKAGE)
+    parser.add_argument(
+        "--datapackage", type=Path, default=depth_runner.DEFAULT_DATAPACKAGE
+    )
     parser.add_argument(
         "--inventories",
         type=Path,
         nargs="+",
         default=depth_runner.DEFAULT_INVENTORY_PATHS,
     )
-    parser.add_argument("--lcia-json", type=Path, default=depth_runner.DEFAULT_LCIA_JSON)
+    parser.add_argument(
+        "--lcia-json", type=Path, default=depth_runner.DEFAULT_LCIA_JSON
+    )
     parser.add_argument("--depth-sweep-csv", type=Path, default=DEFAULT_DEPTH_SWEEP_CSV)
     parser.add_argument("--output-csv", type=Path, default=DEFAULT_OUTPUT_CSV)
     parser.add_argument("--comparison-csv", type=Path, default=DEFAULT_COMPARISON_CSV)
@@ -1605,7 +1631,9 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--method", default=depth_runner.DEFAULT_METHOD)
     parser.add_argument("--ei-version", default="3.12")
-    parser.add_argument("--reference-year", type=int, default=depth_runner.DEFAULT_REFERENCE_YEAR)
+    parser.add_argument(
+        "--reference-year", type=int, default=depth_runner.DEFAULT_REFERENCE_YEAR
+    )
     parser.add_argument("--amount", type=float, default=depth_runner.DEFAULT_AMOUNT)
     parser.add_argument("--max-depth", type=int, default=7)
     parser.add_argument(
