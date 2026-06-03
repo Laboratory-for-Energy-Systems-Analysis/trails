@@ -88,10 +88,9 @@ def _method_unit(method: str, ei_version: str) -> str:
         import json
 
         data = json.load(handle)
-    return {
-        " - ".join(item["name"]): str(item.get("unit") or "")
-        for item in data
-    }.get(method, "")
+    return {" - ".join(item["name"]): str(item.get("unit") or "") for item in data}.get(
+        method, ""
+    )
 
 
 def _graph_stats(trails: Any) -> dict[str, int]:
@@ -401,8 +400,7 @@ def run(args: argparse.Namespace) -> int:
         )
         static_seconds = _float_or_nan(existing_static.get("static_lca_seconds"))
         print(
-            f"Reusing existing static score={static_score:.12g} "
-            f"from {output_csv}",
+            f"Reusing existing static score={static_score:.12g} " f"from {output_csv}",
             flush=True,
         )
     else:

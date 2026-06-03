@@ -9,7 +9,6 @@ from pathlib import Path
 from zipfile import ZIP_DEFLATED, ZipFile
 import xml.etree.ElementTree as ET
 
-
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DOCX_PATH = Path(
     "/Users/romain/Library/CloudStorage/OneDrive-PaulScherrerInstitut/"
@@ -171,18 +170,18 @@ def load_table_rows() -> tuple[list[list[str]], dict[str, float]]:
     return rows, {
         "static_score": static_score,
         "depth1_score": as_float(temporal[0], "score"),
-        "depth1_relative": 100.0 * as_float(
-            temporal[0], "relative_deviation_from_static"
+        "depth1_relative": 100.0
+        * as_float(temporal[0], "relative_deviation_from_static"),
+        "depth6_score": as_float(
+            next(r for r in temporal if r["depth"] == "6"), "score"
         ),
-        "depth6_score": as_float(next(r for r in temporal if r["depth"] == "6"), "score"),
         "depth6_relative": 100.0
         * as_float(
             next(r for r in temporal if r["depth"] == "6"),
             "relative_deviation_from_static",
         ),
         "depth7_score": as_float(depth7, "score"),
-        "depth7_relative": 100.0
-        * as_float(depth7, "relative_deviation_from_static"),
+        "depth7_relative": 100.0 * as_float(depth7, "relative_deviation_from_static"),
         "depth7_nodes": as_float(depth7, "graph_nodes"),
         "depth7_edges": as_float(depth7, "graph_edges"),
         "depth7_routing": as_float(depth7, "routing_seconds"),
@@ -203,8 +202,8 @@ def section_elements() -> list[ET.Element]:
             "We additionally tested the effect of temporalisation depth on both "
             "runtime and score for the direct-air-capture case study. The functional "
             "unit was 20 billion kg of captured CO2 in 2025 for the activity "
-            "\"carbon dioxide, captured, with a solvent-based direct air capture "
-            "system, 1MtCO2\". The calculation used the SSP2-PkBudg1000 Trails data "
+            '"carbon dioxide, captured, with a solvent-based direct air capture '
+            'system, 1MtCO2". The calculation used the SSP2-PkBudg1000 Trails data '
             "package, the same foreground inventories as the depth-sweep notebook, "
             "a routing cutoff of 1e-3, and the EF v3.1 particulate matter formation "
             "indicator. The static matrix LCA score was "
