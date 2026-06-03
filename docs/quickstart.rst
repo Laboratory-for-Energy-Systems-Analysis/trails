@@ -74,6 +74,22 @@ Run a temporal LCA
     fig = plot_temporal_scores(trails, method_label=method)
     fig.show()
 
+To let an impact-potential cutoff determine how deeply branches are routed,
+enable adaptive routing:
+
+.. code-block:: python
+
+    trails.temporal_routing(
+        start_year=2030,
+        start_act_idx=start_act_idx,
+        max_depth=None,
+        adaptive_methods=[method],
+        adaptive_relative_score_cutoff=1e-4,
+    )
+
+Branches below the cutoff remain in the matrix-solved frontier, so they are
+still included in the final LCA.
+
 What you get
 ------------
 

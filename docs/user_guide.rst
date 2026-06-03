@@ -105,6 +105,49 @@ for impact scores (when ``compute_score=True``). If you run
 with ``compute_score=True`` and ``store_inventory=True``, it also stores
 ``trails.characterized_inventory``.
 
+Adaptive score-potential routing
+--------------------------------
+
+For deep temporalized systems, a fixed ``max_depth`` can expand many branches
+whose eventual contribution is negligible. Adaptive routing lets TRAILS use
+static LCIA activity scores as a screening estimate before deciding whether a
+child branch should be routed explicitly.
+
+.. code-block:: python
+
+    method = get_lcia_method_names(ei_version="3.11")[0]
+
+    trails.temporal_routing(
+        start_year=2030,
+        start_act_idx=start_act_idx,
+        amount=1.0,
+        max_depth=None,
+        min_amount=1e-18,
+        adaptive_methods=[method],
+        adaptive_relative_score_cutoff=1e-4,
+        adaptive_min_depth=1,
+    )
+    lca(trails=trails, methods=[method])
+
+The relative cutoff is multiplied by the root activity's static score
+potential. In the example above, branches are stopped once their estimated
+static potential is at most ``1e-4`` of the root potential. Use
+``adaptive_score_cutoff`` instead when you want an absolute threshold in the
+LCIA method unit.
+
+Important behavior:
+
+* Adaptive pruning only changes graph expansion. Stopped branches are stored as
+  frontier demands and still enter the year-wise matrix solve in ``lca()``.
+* ``max_depth=None`` is valid only when adaptive routing is enabled. You can
+  also combine adaptive cutoffs with a finite ``max_depth`` to keep a hard cap.
+* Static activity scores are cached by default. Set
+  ``adaptive_use_cache=False`` for tests or diagnostics that should recompute
+  the screening intensities.
+* For multi-method screening, TRAILS uses the maximum absolute potential across
+  the selected methods, so a branch is retained if it is relevant for any
+  screening indicator.
+
 Importing Excel inventories
 ---------------------------
 

@@ -202,3 +202,40 @@ def test_adaptive_routing_prunes_low_potential_branches() -> None:
         0.15497121214866638,
         rel=1e-7,
     )
+
+
+def test_adaptive_routing_can_run_without_depth_cap() -> None:
+    """Adaptive routing can let score potential define the stopping depth."""
+    fixed_mode = _load_example_trails()
+    with pytest.raises(ValueError, match="max_depth=None"):
+        fixed_mode.temporal_routing(
+            start_year=2005,
+            start_act_idx=2,
+            amount=1.0,
+            max_depth=None,
+            min_amount=0.0,
+            show_progress=False,
+            attribute_to_roots=False,
+        )
+
+    adaptive = _load_example_trails()
+    adaptive.temporal_routing(
+        start_year=2005,
+        start_act_idx=2,
+        amount=1.0,
+        max_depth=None,
+        min_amount=0.0,
+        show_progress=False,
+        attribute_to_roots=False,
+        adaptive_methods=[GWP_METHOD],
+        adaptive_score_cutoff=0.1,
+        adaptive_use_cache=False,
+    )
+
+    assert adaptive._routing_params["max_depth"] is None
+    assert adaptive.graph.number_of_nodes() == 6
+    assert adaptive.graph.number_of_edges() == 5
+    assert {
+        data.get("adaptive_cutoff_reason")
+        for _node, data in adaptive.graph.nodes(data=True)
+    } == {None, "adaptive_score_cutoff"}

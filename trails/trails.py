@@ -1695,7 +1695,7 @@ class Trails:
         start_year: int,
         start_act_idx: int,
         amount: float = 1.0,
-        max_depth: int = 2,
+        max_depth: int | None = 2,
         min_amount: float = 1e-18,
         show_progress: bool = True,
         attribute_to_roots: bool = True,
@@ -1707,23 +1707,45 @@ class Trails:
         adaptive_min_depth: int = 1,
         adaptive_use_cache: bool = True,
     ) -> None:
-        """Temporal routing.
+        """Build the temporal routing graph for a functional unit.
 
-        :param start_year: Value for `start_year`.
+        Routing follows temporalized technosphere exchanges from the root
+        demand and stores an explicit graph of process-year nodes. Branches
+        stop at frontier nodes when they reach ``max_depth``, fall below
+        ``min_amount``, have no child demands, or meet the optional adaptive
+        score-potential cutoff. Frontier demands are still solved by ``lca()``
+        in the corresponding year-specific background matrices, so adaptive
+        pruning changes how much of the graph is routed explicitly, not whether
+        the remaining demand is included.
+
+        Adaptive routing precomputes static activity scores for the selected
+        ``adaptive_methods`` and estimates each child branch's impact potential
+        as ``abs(amount) * max(abs(static activity score))``. Use
+        ``adaptive_score_cutoff`` for an absolute threshold or
+        ``adaptive_relative_score_cutoff`` for a threshold relative to the root
+        branch potential. Setting ``max_depth=None`` is allowed only in adaptive
+        mode and lets the score cutoff determine the stopping depth.
+
+        :param start_year: Scenario/calendar year of the functional unit.
         :type start_year: int
-        :param start_act_idx: Value for `start_act_idx`.
+        :param start_act_idx: Activity index of the functional unit provider.
         :type start_act_idx: int
-        :param amount: Value for `amount`.
+        :param amount: Functional-unit amount, expressed in the reference
+            product of ``start_act_idx``.
         :type amount: float
-        :param max_depth: Value for `max_depth`.
-        :type max_depth: int
-        :param min_amount: Value for `min_amount`.
+        :param max_depth: Maximum explicit routing depth. Use ``None`` in
+            adaptive mode to let the adaptive score cutoff define the stopping
+            depth.
+        :type max_depth: int | None
+        :param min_amount: Absolute routed-demand cutoff. Branches with child
+            amounts below this value become frontier nodes.
         :type min_amount: float
-        :param show_progress: Value for `show_progress`.
+        :param show_progress: Show a progress bar while routing.
         :type show_progress: bool
-        :param attribute_to_roots: Value for `attribute_to_roots`.
+        :param attribute_to_roots: Track first-level supplier attribution for
+            frontier and direct biosphere amounts.
         :type attribute_to_roots: bool
-        :param debug: Value for `debug`.
+        :param debug: Enable detailed routing logging.
         :type debug: bool
         :param adaptive_methods: Optional LCIA method or methods used to screen
             branch impact potential. If omitted, routing uses fixed-depth mode.
@@ -1743,7 +1765,10 @@ class Trails:
         :param adaptive_use_cache: Reuse and write internal static activity score
             cache files.
         :type adaptive_use_cache: bool
-        :raises RuntimeError: If an error occurs."""
+        :raises ValueError: If adaptive cutoffs are provided without
+            ``adaptive_methods``, if adaptive methods are provided without any
+            cutoff, or if ``max_depth=None`` is used outside adaptive mode.
+        :raises RuntimeError: If required routing dependencies are missing."""
         try:
             import networkx as nx
         except Exception as exc:  # pragma: no cover - dependency guard
@@ -1913,6 +1938,7 @@ class Trails:
             act_idx: int,
             amt: float,
         ) -> float:
+            """Accumulate adaptive static score potential on a graph node."""
             if adaptive_scores is None:
                 return 0.0
             potential, by_method = _activity_score_potential(
@@ -1937,6 +1963,7 @@ class Trails:
             depth: int,
             potential: float,
         ) -> bool:
+            """Return True when adaptive routing should leave a child as frontier."""
             return bool(
                 adaptive_enabled
                 and int(depth) >= int(adaptive_min_depth)
@@ -1973,6 +2000,9 @@ class Trails:
                 "Set adaptive_score_cutoff or adaptive_relative_score_cutoff "
                 "when adaptive_methods is provided."
             )
+        if max_depth is None and not adaptive_enabled:
+            raise ValueError("max_depth=None is only supported in adaptive mode.")
+        max_depth_int = None if max_depth is None else int(max_depth)
 
         adaptive_scores = None
         adaptive_threshold = 0.0
@@ -2060,7 +2090,7 @@ class Trails:
             scenario_year = year
             has_direct_bio = self._has_direct_biosphere(scenario_year, act, bio_cache)
 
-            if depth >= max_depth:
+            if max_depth_int is not None and depth >= max_depth_int:
                 _add_frontier_amount(
                     node_key,
                     amt=amt,
@@ -2130,7 +2160,7 @@ class Trails:
                         amt=child_amt,
                     )
 
-                    if child_depth >= max_depth:
+                    if max_depth_int is not None and child_depth >= max_depth_int:
                         G.nodes[child_node]["amount"] = float(
                             G.nodes[child_node]["amount"]
                         ) + float(child_amt)
@@ -2190,7 +2220,7 @@ class Trails:
             "start_year": start_year_int,
             "start_act_idx": start_activity,
             "amount": start_amount,
-            "max_depth": int(max_depth),
+            "max_depth": None if max_depth_int is None else int(max_depth_int),
             "min_amount": float(min_amount),
             "adaptive_enabled": bool(adaptive_enabled),
             "adaptive_methods": list(adaptive_method_names),

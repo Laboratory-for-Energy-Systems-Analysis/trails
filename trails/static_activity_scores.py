@@ -1,3 +1,13 @@
+"""Static LCIA activity intensities used by adaptive temporal routing.
+
+Adaptive routing needs a cheap estimate of the impact that remains behind a
+candidate branch before deciding whether to route it explicitly. This module
+precomputes static LCIA scores for every activity and scenario year by solving
+the adjoint static LCA problem once per method/year. The resulting activity
+score intensities are cached and later multiplied by routed demand amounts to
+derive branch score potentials.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -20,7 +30,13 @@ if TYPE_CHECKING:
 
 @dataclass
 class StaticActivityScores:
-    """Cached static activity impact intensities for scenario years."""
+    """Static score intensities indexed by LCIA method, year, and activity.
+
+    ``scores[m, y, a]`` is the static characterized score for one unit of the
+    reference product of activity ``a`` in scenario year ``y`` using method
+    ``m``. Values are used only as routing-screening estimates; the final
+    temporal inventory and impact scores are still computed by ``lca()``.
+    """
 
     methods: tuple[str, ...]
     years: np.ndarray
@@ -130,6 +146,14 @@ def _score_cache_dir(trails: Trails) -> Path:
 
 
 def _reference_product_arrays(A_csc) -> tuple[np.ndarray, np.ndarray]:
+    """Return product row and production sign for each activity column.
+
+    TRAILS usually stores the reference production exchange on the diagonal.
+    Imported inventories can still contain non-diagonal or non-unit production
+    entries, so this helper falls back to the exchange whose absolute amount is
+    closest to one. The production sign is preserved so static activity scores
+    follow the same sign convention as the technosphere solve.
+    """
     n_activities = int(A_csc.shape[1])
     product_indices = np.full(n_activities, -1, dtype=np.int64)
     production_values = np.full(n_activities, np.nan, dtype=np.float64)
@@ -170,6 +194,12 @@ def _activity_scores_from_product_intensities(
     product_indices: np.ndarray,
     production_values: np.ndarray,
 ) -> np.ndarray:
+    """Map product intensities to activity reference-product scores.
+
+    The adjoint solve returns static intensities per product row. Routing works
+    with activity demands, so this function selects each activity's reference
+    product row and applies the production-exchange sign.
+    """
     scores = np.full(
         (int(intensities.shape[1]), int(product_indices.size)),
         np.nan,
@@ -188,6 +218,12 @@ def _compute_static_activity_scores(
     ei_version: str,
     years: np.ndarray,
 ) -> np.ndarray:
+    """Compute static LCIA score intensities for all activities.
+
+    For each requested scenario year, this builds the year-specific direct
+    technosphere matrix and solves ``A.T x = B.T c`` for the selected LCIA
+    methods. The returned array has shape ``(methods, years, activities)``.
+    """
     if trails.A is None or trails.B is None:
         raise RuntimeError("Cannot compute static activity scores without A and B.")
 
@@ -283,6 +319,13 @@ def _ensure_static_activity_scores(
     years: np.ndarray | list[int] | None = None,
     use_cache: bool = True,
 ) -> StaticActivityScores:
+    """Return static activity scores from memory, disk cache, or computation.
+
+    Cache keys include selected methods, years, matrix fingerprints, LCIA data
+    fingerprints, and matrix dtypes. This keeps adaptive-routing screening
+    deterministic while avoiding repeated upfront solves for the same
+    interpolated data package.
+    """
     method_tuple = _normalise_methods(methods)
     if years is None:
         years_array = np.asarray(
@@ -348,6 +391,12 @@ def _activity_score_potential(
     activity: int,
     amount: float,
 ) -> tuple[float, dict[str, float]]:
+    """Estimate the static impact potential of a routed activity demand.
+
+    The scalar potential is ``abs(amount)`` times the maximum absolute static
+    score across the configured adaptive methods. The per-method dictionary is
+    kept on routing graph nodes for diagnostics and plotting.
+    """
     year_pos = scores.year_index[int(year)]
     act = int(activity)
     amount_abs = abs(float(amount))

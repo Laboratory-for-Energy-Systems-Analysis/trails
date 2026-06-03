@@ -28,6 +28,9 @@ At a high level, `TRAILS`:
   technosphere solve.
 * Runs a **temporal traversal** of the supply chain from a functional unit to build
   time-indexed demands.
+* Supports **adaptive temporal routing** using static LCIA score-potential
+  cutoffs, so low-potential branches can remain matrix-solved frontier demands
+  instead of being expanded explicitly.
 * Solves year-specific systems and **routes impacts** through temporal distributions.
 * Can score temporal inventories with optional **EDGES regionalized
   characterization factors**.
