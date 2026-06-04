@@ -62,19 +62,20 @@ Two cutoff forms are supported:
   activity's static score potential. For example, ``1e-4`` stops branches whose
   estimated static potential is at most 0.01% of the root potential.
 
-``max_depth`` can still be used with adaptive routing as a hard cap. Setting
-``max_depth=None`` removes this cap and lets the adaptive cutoff, minimum
-amount, and graph leaves determine the explicit routing depth. The static
-activity scores are cached using matrix and LCIA-data fingerprints so repeated
-adaptive runs over the same interpolated data package avoid recomputing the
-upfront screening intensities.
+By default, ``temporal_routing()`` uses adaptive routing with ``max_depth=None``
+and ``adaptive_relative_score_cutoff=1e-4``. Passing an integer ``max_depth``
+without an adaptive cutoff selects fixed-depth routing. ``max_depth`` can also
+be combined with adaptive cutoffs as a hard cap. The static activity scores are
+cached using matrix and LCIA-data fingerprints so repeated adaptive runs over
+the same interpolated data package avoid recomputing the upfront screening
+intensities.
 
 In the recommended workflow, regular LCIA methods are configured once with
 ``Trails(..., methods=[...], ei_version="...")``. Adaptive routing uses those
-methods when a cutoff is provided and ``adaptive_methods`` is omitted, and
-``lca(trails)`` reuses the same methods for final scoring. Call-level methods
-can still be supplied to override this default. EDGES methods are currently
-limited to final scoring and cannot provide adaptive routing potentials.
+methods when ``adaptive_methods`` is omitted, and ``lca(trails)`` reuses the
+same methods for final scoring. Call-level methods can still be supplied to
+override this default. EDGES methods are currently limited to final scoring and
+cannot provide adaptive routing potentials.
 
 Temporal exchange distributions
 -------------------------------

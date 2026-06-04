@@ -170,11 +170,11 @@ trails = Trails(
 activity_indices = next(iter(trails.activity_indices.values()))
 start_act_idx = next(iter(activity_indices.keys()))
 
-# Run temporal routing (builds the traversal graph)
+# Run temporal routing (builds the traversal graph).
+# By default this uses adaptive routing with a relative cutoff of 1e-4.
 trails.temporal_routing(
     start_year=2030,
     start_act_idx=start_act_idx,
-    max_depth=2,
 )
 
 # Run temporal LCA (stores scores on trails.scores)
@@ -189,6 +189,48 @@ lca(
 fig = plot_temporal_scores(trails, method_label=method)
 fig.show()
 ```
+
+---
+
+### Temporal routing modes
+
+`temporal_routing()` is adaptive by default. The default cutoff is a relative
+score-potential cutoff of `1e-4`, meaning that a branch can stop being expanded
+explicitly once its estimated static score potential is at most 0.01% of the
+root activity's score potential. Stopped branches remain frontier demands and
+are still included in the year-wise matrix solve.
+
+```python
+# 1. Default adaptive routing
+trails.temporal_routing(start_year=2030, start_act_idx=start_act_idx)
+
+# 2. Adaptive routing with a different relative cutoff
+trails.temporal_routing(
+    start_year=2030,
+    start_act_idx=start_act_idx,
+    adaptive_relative_score_cutoff=1e-5,
+)
+
+# 3. Adaptive routing with a hard depth cap
+trails.temporal_routing(
+    start_year=2030,
+    start_act_idx=start_act_idx,
+    max_depth=5,
+    adaptive_relative_score_cutoff=1e-4,
+)
+
+# 4. Fixed-depth routing
+trails.temporal_routing(
+    start_year=2030,
+    start_act_idx=start_act_idx,
+    max_depth=3,
+)
+```
+
+Adaptive routing requires regular LCIA methods, usually provided once with
+`Trails(..., methods=[method], ei_version="...")`. EDGES methods are final-score
+methods only; EDGES-only workflows should use fixed-depth routing or also
+provide regular `methods` for adaptive routing before EDGES final scoring.
 
 ---
 

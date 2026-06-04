@@ -37,7 +37,6 @@ Use methods in temporal LCA
     trails.temporal_routing(
         start_year=2030,
         start_act_idx=start_act_idx,
-        max_depth=2,
     )
 
     lca(
@@ -71,6 +70,9 @@ package and currently supports EDGES methods whose supplier matrix is
     trails.temporal_routing(
         start_year=2030,
         start_act_idx=start_act_idx,
+        # EDGES methods are final-score methods only, so this example uses
+        # explicit fixed-depth routing. Use Trails(..., methods=...) as well
+        # if you want adaptive routing before EDGES final scoring.
         max_depth=2,
     )
 

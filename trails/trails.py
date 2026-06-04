@@ -38,6 +38,18 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+DEFAULT_ADAPTIVE_RELATIVE_SCORE_CUTOFF = 1e-4
+
+
+class _DefaultAdaptiveRelativeScoreCutoff:
+    def __repr__(self) -> str:
+        """Represent the adaptive routing default in public signatures."""
+        return repr(DEFAULT_ADAPTIVE_RELATIVE_SCORE_CUTOFF)
+
+
+_DEFAULT_ADAPTIVE_RELATIVE_SCORE_CUTOFF = _DefaultAdaptiveRelativeScoreCutoff()
+
+
 def _log_every(n: int, i: int) -> bool:
     """log every.
 
@@ -1724,14 +1736,16 @@ class Trails:
         start_year: int,
         start_act_idx: int,
         amount: float = 1.0,
-        max_depth: int | None = 2,
+        max_depth: int | None = None,
         min_amount: float = 1e-18,
         show_progress: bool = True,
         attribute_to_roots: bool = True,
         debug: bool = False,
         adaptive_methods: str | list[str] | tuple[str, ...] | None = None,
         adaptive_score_cutoff: float | None = None,
-        adaptive_relative_score_cutoff: float | None = None,
+        adaptive_relative_score_cutoff: Any = (
+            _DEFAULT_ADAPTIVE_RELATIVE_SCORE_CUTOFF
+        ),
         adaptive_ei_version: str | None = None,
         adaptive_min_depth: int = 1,
         adaptive_use_cache: bool = True,
@@ -1740,8 +1754,8 @@ class Trails:
 
         Routing follows temporalized technosphere exchanges from the root
         demand and stores an explicit graph of process-year nodes. Branches
-        stop at frontier nodes when they reach ``max_depth``, fall below
-        ``min_amount``, have no child demands, or meet the optional adaptive
+        stop at frontier nodes when they reach an optional ``max_depth``, fall
+        below ``min_amount``, have no child demands, or meet the adaptive
         score-potential cutoff. Frontier demands are still solved by ``lca()``
         in the corresponding year-specific background matrices, so adaptive
         pruning changes how much of the graph is routed explicitly, not whether
@@ -1752,8 +1766,11 @@ class Trails:
         as ``abs(amount) * max(abs(static activity score))``. Use
         ``adaptive_score_cutoff`` for an absolute threshold or
         ``adaptive_relative_score_cutoff`` for a threshold relative to the root
-        branch potential. Setting ``max_depth=None`` is allowed only in adaptive
-        mode and lets the score cutoff determine the stopping depth.
+        branch potential. The default public routing mode is adaptive:
+        ``max_depth=None`` and ``adaptive_relative_score_cutoff=1e-4``. Passing
+        an integer ``max_depth`` without an adaptive cutoff selects fixed-depth
+        routing. Passing both an integer ``max_depth`` and an adaptive cutoff
+        combines adaptive pruning with a hard depth cap.
 
         :param start_year: Scenario/calendar year of the functional unit.
         :type start_year: int
@@ -1762,9 +1779,9 @@ class Trails:
         :param amount: Functional-unit amount, expressed in the reference
             product of ``start_act_idx``.
         :type amount: float
-        :param max_depth: Maximum explicit routing depth. Use ``None`` in
-            adaptive mode to let the adaptive score cutoff define the stopping
-            depth.
+        :param max_depth: Maximum explicit routing depth. The default ``None``
+            lets the adaptive score cutoff define the stopping depth. Passing
+            an integer without an adaptive cutoff uses fixed-depth routing.
         :type max_depth: int | None
         :param min_amount: Absolute routed-demand cutoff. Branches with child
             amounts below this value become frontier nodes.
@@ -1785,7 +1802,9 @@ class Trails:
             with potential at or below this value are left as frontier nodes.
         :type adaptive_score_cutoff: float | None
         :param adaptive_relative_score_cutoff: Relative cutoff multiplied by the
-            root static score potential.
+            root static score potential. Defaults to ``1e-4`` when adaptive
+            routing is selected by default. Set to ``None`` to disable adaptive
+            routing when using a fixed ``max_depth``.
         :type adaptive_relative_score_cutoff: float | None
         :param adaptive_ei_version: Ecoinvent LCIA version used for adaptive
             screening factors. If omitted, ``Trails(..., ei_version=...)`` is
@@ -1797,10 +1816,9 @@ class Trails:
         :param adaptive_use_cache: Reuse and write internal static activity score
             cache files.
         :type adaptive_use_cache: bool
-        :raises ValueError: If adaptive cutoffs are provided without explicit or
-            constructor-default regular LCIA methods, if adaptive methods are
-            provided without any cutoff, or if ``max_depth=None`` is used
-            outside adaptive mode.
+        :raises ValueError: If adaptive routing is requested without explicit or
+            constructor-default regular LCIA methods, or if ``max_depth=None``
+            is used while adaptive cutoffs are disabled.
         :raises RuntimeError: If required routing dependencies are missing."""
         try:
             import networkx as nx
@@ -2016,6 +2034,19 @@ class Trails:
             start_activity,
             start_amount,
         )
+
+        default_relative_cutoff = (
+            adaptive_relative_score_cutoff is _DEFAULT_ADAPTIVE_RELATIVE_SCORE_CUTOFF
+        )
+        if default_relative_cutoff:
+            if adaptive_score_cutoff is not None:
+                adaptive_relative_score_cutoff = None
+            elif max_depth is None or adaptive_methods is not None:
+                adaptive_relative_score_cutoff = (
+                    DEFAULT_ADAPTIVE_RELATIVE_SCORE_CUTOFF
+                )
+            else:
+                adaptive_relative_score_cutoff = None
 
         adaptive_requested = bool(
             adaptive_score_cutoff is not None

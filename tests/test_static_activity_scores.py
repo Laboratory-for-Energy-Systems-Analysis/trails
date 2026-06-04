@@ -191,6 +191,8 @@ def test_adaptive_routing_prunes_low_potential_branches() -> None:
     ]
 
     assert adaptive._routing_params["adaptive_enabled"] is True
+    assert adaptive._routing_params["adaptive_score_cutoff"] == pytest.approx(0.001)
+    assert adaptive._routing_params["adaptive_relative_score_cutoff"] is None
     assert adaptive.graph.number_of_nodes() == 15
     assert adaptive.graph.number_of_edges() == 17
     assert adaptive.graph.number_of_nodes() < fixed.graph.number_of_nodes()
@@ -207,12 +209,11 @@ def test_adaptive_routing_prunes_low_potential_branches() -> None:
 def test_adaptive_routing_can_run_without_depth_cap() -> None:
     """Adaptive routing can let score potential define the stopping depth."""
     fixed_mode = _load_example_trails()
-    with pytest.raises(ValueError, match="max_depth=None"):
+    with pytest.raises(ValueError, match="Trails\\(\\.\\.\\., methods=\\.\\.\\.\\)"):
         fixed_mode.temporal_routing(
             start_year=2005,
             start_act_idx=2,
             amount=1.0,
-            max_depth=None,
             min_amount=0.0,
             show_progress=False,
             attribute_to_roots=False,
@@ -242,7 +243,7 @@ def test_adaptive_routing_can_run_without_depth_cap() -> None:
 
 
 def test_adaptive_routing_uses_constructor_method_defaults() -> None:
-    """Constructor methods should provide adaptive screening defaults."""
+    """Default routing should use constructor methods and a relative cutoff."""
     adaptive = Trails(
         Package(str(EXAMPLE_PACKAGE)),
         interpolate_annual=False,
@@ -253,18 +254,45 @@ def test_adaptive_routing_uses_constructor_method_defaults() -> None:
         start_year=2005,
         start_act_idx=2,
         amount=1.0,
-        max_depth=None,
         min_amount=0.0,
         show_progress=False,
         attribute_to_roots=False,
-        adaptive_score_cutoff=0.1,
         adaptive_use_cache=False,
     )
 
     assert adaptive._routing_params["adaptive_methods"] == [GWP_METHOD]
     assert adaptive._routing_params["adaptive_ei_version"] == "3.11"
     assert adaptive._routing_params["max_depth"] is None
-    assert adaptive.graph.number_of_nodes() == 6
+    assert adaptive._routing_params["adaptive_relative_score_cutoff"] == pytest.approx(
+        1e-4
+    )
+    assert adaptive._routing_params["adaptive_enabled"] is True
+    assert adaptive.graph.number_of_nodes() == 25
+    assert adaptive.graph.number_of_edges() == 29
+
+
+def test_explicit_max_depth_uses_fixed_depth_by_default() -> None:
+    """Passing max_depth should remain the explicit fixed-depth routing mode."""
+    fixed = Trails(
+        Package(str(EXAMPLE_PACKAGE)),
+        interpolate_annual=False,
+        methods=[GWP_METHOD],
+        ei_version="3.11",
+    )
+    fixed.temporal_routing(
+        start_year=2005,
+        start_act_idx=2,
+        amount=1.0,
+        max_depth=1,
+        min_amount=0.0,
+        show_progress=False,
+        attribute_to_roots=False,
+    )
+
+    assert fixed._routing_params["adaptive_enabled"] is False
+    assert fixed._routing_params["adaptive_relative_score_cutoff"] is None
+    assert fixed._routing_params["max_depth"] == 1
+    assert fixed.graph.number_of_nodes() == 6
 
 
 def test_adaptive_routing_rejects_edges_only_defaults() -> None:

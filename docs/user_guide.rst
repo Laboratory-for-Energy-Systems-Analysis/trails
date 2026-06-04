@@ -86,12 +86,12 @@ initialization, then reuse those defaults during routing and scoring.
 
     from trails import lca
 
-    # Run temporal routing (builds the traversal graph)
+    # Run temporal routing (builds the traversal graph).
+    # By default this uses adaptive routing with a relative cutoff of 1e-4.
     trails.temporal_routing(
         start_year=2030,
         start_act_idx=start_act_idx,
         amount=1.0,
-        max_depth=3,
         min_amount=1e-18,
         show_progress=True,
         debug=False,
@@ -122,7 +122,9 @@ Adaptive score-potential routing
 For deep temporalized systems, a fixed ``max_depth`` can expand many branches
 whose eventual contribution is negligible. Adaptive routing lets TRAILS use
 static LCIA activity scores as a screening estimate before deciding whether a
-child branch should be routed explicitly.
+child branch should be routed explicitly. This is the default routing mode:
+when ``max_depth`` is omitted, TRAILS uses ``max_depth=None`` and
+``adaptive_relative_score_cutoff=1e-4``.
 
 .. code-block:: python
 
@@ -143,12 +145,66 @@ static potential is at most ``1e-4`` of the root potential. Use
 ``adaptive_score_cutoff`` instead when you want an absolute threshold in the
 LCIA method unit.
 
+Routing modes
+~~~~~~~~~~~~~
+
+There are four common routing configurations:
+
+**1. Default adaptive routing**
+    Use this for normal regular-LCIA workflows. ``temporal_routing()`` defaults
+    to ``max_depth=None`` and ``adaptive_relative_score_cutoff=1e-4``.
+
+    .. code-block:: python
+
+        trails.temporal_routing(
+            start_year=2030,
+            start_act_idx=start_act_idx,
+        )
+
+**2. Adaptive routing with another relative cutoff**
+    Use a smaller value for stricter routing and a larger value for looser
+    routing.
+
+    .. code-block:: python
+
+        trails.temporal_routing(
+            start_year=2030,
+            start_act_idx=start_act_idx,
+            adaptive_relative_score_cutoff=1e-5,
+        )
+
+**3. Adaptive routing with a hard depth cap**
+    Use this when branches should be pruned by score potential but never routed
+    beyond a fixed graph depth.
+
+    .. code-block:: python
+
+        trails.temporal_routing(
+            start_year=2030,
+            start_act_idx=start_act_idx,
+            max_depth=5,
+            adaptive_relative_score_cutoff=1e-4,
+        )
+
+**4. Fixed-depth routing**
+    Use this when you want the older depth-based behavior. Passing an integer
+    ``max_depth`` without adaptive cutoffs disables adaptive pruning.
+
+    .. code-block:: python
+
+        trails.temporal_routing(
+            start_year=2030,
+            start_act_idx=start_act_idx,
+            max_depth=3,
+        )
+
 Important behavior:
 
 * Adaptive pruning only changes graph expansion. Stopped branches are stored as
   frontier demands and still enter the year-wise matrix solve in ``lca()``.
-* ``max_depth=None`` is valid only when adaptive routing is enabled. You can
-  also combine adaptive cutoffs with a finite ``max_depth`` to keep a hard cap.
+* Passing an integer ``max_depth`` without an adaptive cutoff selects
+  fixed-depth routing. You can also combine adaptive cutoffs with a finite
+  ``max_depth`` to keep a hard cap.
 * Adaptive routing uses ``Trails(..., methods=...)`` unless
   ``adaptive_methods=...`` is provided explicitly. EDGES methods cannot
   currently be used for adaptive screening.
@@ -250,7 +306,6 @@ exchange distributions by default:
     trails.temporal_routing(
         start_year=2030,
         start_act_idx=start_act_idx,
-        max_depth=3,
         min_amount=1e-18,
     )
     lca(

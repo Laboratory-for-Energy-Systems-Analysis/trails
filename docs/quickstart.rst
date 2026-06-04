@@ -60,11 +60,11 @@ Run a temporal LCA
     activity_indices = next(iter(trails.activity_indices.values()))
     start_act_idx = next(iter(activity_indices.keys()))
 
-    # Run temporal routing (builds the traversal graph)
+    # Run temporal routing (builds the traversal graph).
+    # By default this uses adaptive routing with a relative cutoff of 1e-4.
     trails.temporal_routing(
         start_year=2030,
         start_act_idx=start_act_idx,
-        max_depth=2,
         min_amount=1e-18,
     )
 
@@ -80,8 +80,7 @@ Run a temporal LCA
     fig = plot_temporal_scores(trails, method_label=method)
     fig.show()
 
-To let an impact-potential cutoff determine how deeply branches are routed,
-enable adaptive routing:
+Adaptive routing is the default. To make the default criterion explicit:
 
 .. code-block:: python
 
@@ -94,6 +93,9 @@ enable adaptive routing:
 
 Branches below the cutoff remain in the matrix-solved frontier, so they are
 still included in the final LCA.
+
+To run fixed-depth routing instead, pass an integer ``max_depth`` and omit
+adaptive cutoffs.
 
 What you get
 ------------
