@@ -1743,9 +1743,7 @@ class Trails:
         debug: bool = False,
         adaptive_methods: str | list[str] | tuple[str, ...] | None = None,
         adaptive_score_cutoff: float | None = None,
-        adaptive_relative_score_cutoff: Any = (
-            _DEFAULT_ADAPTIVE_RELATIVE_SCORE_CUTOFF
-        ),
+        adaptive_relative_score_cutoff: Any = (_DEFAULT_ADAPTIVE_RELATIVE_SCORE_CUTOFF),
         adaptive_ei_version: str | None = None,
         adaptive_min_depth: int = 1,
         adaptive_use_cache: bool = True,
@@ -2042,9 +2040,7 @@ class Trails:
             if adaptive_score_cutoff is not None:
                 adaptive_relative_score_cutoff = None
             elif max_depth is None or adaptive_methods is not None:
-                adaptive_relative_score_cutoff = (
-                    DEFAULT_ADAPTIVE_RELATIVE_SCORE_CUTOFF
-                )
+                adaptive_relative_score_cutoff = DEFAULT_ADAPTIVE_RELATIVE_SCORE_CUTOFF
             else:
                 adaptive_relative_score_cutoff = None
 
