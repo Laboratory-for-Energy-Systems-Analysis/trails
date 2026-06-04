@@ -324,6 +324,59 @@ def test_lca_multi_method_scores_without_inventory(example_trails: Trails) -> No
     assert example_trails.scores.coords["method"].values.tolist() == methods
 
 
+def test_lca_uses_constructor_method_defaults(example_package: Package) -> None:
+    """LCA should use regular LCIA methods configured on the Trails instance."""
+    methods = get_lcia_method_names(ei_version="3.11")[:2]
+    assert len(methods) == 2
+    trails = Trails(
+        example_package,
+        interpolate_annual=False,
+        methods=methods,
+        ei_version="3.11",
+    )
+    activity_indices = next(iter(trails.activity_indices.values()))
+    start_act_idx = next(iter(activity_indices.keys()))
+
+    trails.temporal_routing(
+        start_year=2005,
+        start_act_idx=start_act_idx,
+        max_depth=1,
+        min_amount=0.0,
+        show_progress=False,
+        attribute_to_roots=False,
+        debug=False,
+    )
+
+    lca_module.lca(
+        trails=trails,
+        show_progress=False,
+        compute_score=True,
+        store_inventory=False,
+        attribute_to_roots=False,
+    )
+
+    assert trails.scores is not None
+    assert "method" in trails.scores.dims
+    assert trails.scores.coords["method"].values.tolist() == methods
+
+
+def test_static_lca_uses_constructor_method_defaults(example_package: Package) -> None:
+    """Static LCA should use regular LCIA methods configured on Trails."""
+    methods = get_lcia_method_names(ei_version="3.11")[:1]
+    assert methods
+    trails = Trails(
+        example_package,
+        interpolate_annual=False,
+        methods=methods,
+        ei_version="3.11",
+    )
+
+    trails.static_lca(year=2005, act_idx=2, amount=1.0)
+
+    assert isinstance(trails.static_score, list)
+    assert len(trails.static_score) == 1
+
+
 def test_lca_root_mode_without_inventory_skips_supply_extraction(
     monkeypatch: pytest.MonkeyPatch, example_trails: Trails
 ) -> None:

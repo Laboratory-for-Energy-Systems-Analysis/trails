@@ -33,10 +33,18 @@ Run a temporal LCA
     # Load a Frictionless data package exported by premise (or compatible tooling)
     package = Package("path/to/datapackage.json")
 
+    # Choose an LCIA method bundled with TRAILS
+    method = get_lcia_method_names(ei_version="3.11")[0]
+
     # Initialize TRAILS (annual interpolation is optional).
     # Default interpolation bounds are [min_year-1, max_year+1], where
     # out-of-range years duplicate the nearest endpoint inventory.
-    trails = Trails(package, interpolate_annual=True)
+    trails = Trails(
+        package,
+        interpolate_annual=True,
+        methods=[method],
+        ei_version="3.11",
+    )
 
     # Optional: widen interpolation bounds (e.g., +/-20 years)
     # trails = Trails(
@@ -44,27 +52,25 @@ Run a temporal LCA
     #     interpolate_annual=True,
     #     interpolation_start_year_offset=-20,
     #     interpolation_end_year_offset=20,
+    #     methods=[method],
+    #     ei_version="3.11",
     # )
 
     # Pick an activity index from the metadata
     activity_indices = next(iter(trails.activity_indices.values()))
     start_act_idx = next(iter(activity_indices.keys()))
 
-    # Choose an LCIA method bundled with TRAILS
-    method = get_lcia_method_names(ei_version="3.11")[0]
-
-    # Run temporal routing (builds the traversal graph)
+    # Run temporal routing (builds the traversal graph).
+    # By default this uses adaptive routing with a relative cutoff of 1e-4.
     trails.temporal_routing(
         start_year=2030,
         start_act_idx=start_act_idx,
-        max_depth=2,
         min_amount=1e-18,
     )
 
     # Run temporal LCA (stores scores on trails.scores)
     lca(
         trails=trails,
-        methods=[method],
         # defaults shown explicitly:
         solver_mode="iterative",
         iterative_rtol=1e-3,
@@ -73,6 +79,23 @@ Run a temporal LCA
     # Plot temporal impact scores
     fig = plot_temporal_scores(trails, method_label=method)
     fig.show()
+
+Adaptive routing is the default. To make the default criterion explicit:
+
+.. code-block:: python
+
+    trails.temporal_routing(
+        start_year=2030,
+        start_act_idx=start_act_idx,
+        max_depth=None,
+        adaptive_relative_score_cutoff=1e-4,
+    )
+
+Branches below the cutoff remain in the matrix-solved frontier, so they are
+still included in the final LCA.
+
+To run fixed-depth routing instead, pass an integer ``max_depth`` and omit
+adaptive cutoffs.
 
 What you get
 ------------
@@ -145,7 +168,6 @@ quantiles (2.5, 25, 50, 75, 97.5).
     # Ensure an inventory with root attribution is available
     lca(
         trails=trails,
-        methods=[method],
         store_inventory=True,
     )
 

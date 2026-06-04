@@ -28,10 +28,26 @@ from .datapackage import (
 
 from .temporal_distributions import TemporalDistribution, TemporalExchange
 from .lca import lca_static
+from .static_activity_scores import (
+    _activity_score_potential,
+    _ensure_static_activity_scores,
+)
 
 import logging
 
 logger = logging.getLogger(__name__)
+
+
+DEFAULT_ADAPTIVE_RELATIVE_SCORE_CUTOFF = 1e-4
+
+
+class _DefaultAdaptiveRelativeScoreCutoff:
+    def __repr__(self) -> str:
+        """Represent the adaptive routing default in public signatures."""
+        return repr(DEFAULT_ADAPTIVE_RELATIVE_SCORE_CUTOFF)
+
+
+_DEFAULT_ADAPTIVE_RELATIVE_SCORE_CUTOFF = _DefaultAdaptiveRelativeScoreCutoff()
 
 
 def _log_every(n: int, i: int) -> bool:
@@ -71,10 +87,17 @@ class _BioAccumulationContext:
 
 
 class Trails:
-    """Wrapper around 3D sparse matrices A and B loaded from a Frictionless data package, with
-    optional temporal interpolation.
+    """Wrapper around time-indexed technosphere and biosphere matrices.
 
-    Dimensions: A: (scenario, activity, product) B: (scenario, activity, biosphere_flow)
+    ``Trails`` loads 3D sparse matrices from a Frictionless data package, can
+    interpolate scenario slices to annual resolution, and stores optional
+    default LCIA configuration. Constructor ``methods`` are regular LCIA method
+    names used by ``lca()``, ``static_lca()``, and adaptive routing unless a
+    call provides explicit methods. Constructor ``edges_methods`` are used only
+    for final EDGES scoring in ``lca()``.
+
+    Dimensions: ``A`` is ``(scenario, activity, product)`` and ``B`` is
+    ``(scenario, activity, biosphere_flow)``.
     """
 
     def __init__(
@@ -86,30 +109,50 @@ class Trails:
         interpolation_end_year_offset: int = 1,
         value_dtype: np.dtype = np.float32,
         index_dtype: np.dtype = np.int32,
+        methods: list[str] | None = None,
+        edges_methods: list[Any] | None = None,
+        ei_version: str = "3.11",
         debug: bool = False,
     ) -> None:
-        """init  .
+        """Initialize a Trails data package wrapper.
 
-        :param package: Value for `package`.
+        :param package: Frictionless data package or compatible package object.
         :type package: Any
-        :param interpolate_annual: Value for `interpolate_annual`.
+        :param interpolate_annual: Interpolate scenario matrices to annual
+            resolution.
         :type interpolate_annual: bool
-        :param cache_interpolation: Value for `cache_interpolation`.
+        :param cache_interpolation: Load/write annual interpolation caches.
         :type cache_interpolation: bool
         :param interpolation_start_year_offset: Offset from min inventory year.
         :type interpolation_start_year_offset: int
         :param interpolation_end_year_offset: Offset from max inventory year.
         :type interpolation_end_year_offset: int
-        :param value_dtype: Value for `value_dtype`.
+        :param value_dtype: Sparse matrix value dtype.
         :type value_dtype: np.dtype
-        :param index_dtype: Value for `index_dtype`.
+        :param index_dtype: Sparse matrix coordinate dtype.
         :type index_dtype: np.dtype
-        :param debug: Value for `debug`.
+        :param methods: Default regular LCIA methods. These are used by
+            ``lca()``, ``static_lca()``, and adaptive routing when those calls do
+            not provide explicit methods.
+        :type methods: list[str] | None
+        :param edges_methods: Default EDGES methods for ``lca()``. These are
+            used only for final EDGES scoring, not for adaptive routing.
+        :type edges_methods: list[Any] | None
+        :param ei_version: Default ecoinvent LCIA data version for regular
+            methods and adaptive routing.
+        :type ei_version: str
+        :param debug: Enable diagnostic logging.
         :type debug: bool"""
         self.package = package
         self.value_dtype = value_dtype
         self.index_dtype = index_dtype
         self.debug = debug
+        self.methods = list(methods) if methods else None
+        self.edges_methods = list(edges_methods) if edges_methods else None
+        self.ei_version = str(ei_version)
+        self.default_methods = self.methods
+        self.default_edges_methods = self.edges_methods
+        self.default_ei_version = self.ei_version
         self.interpolation_start_year_offset = int(interpolation_start_year_offset)
         self.interpolation_end_year_offset = int(interpolation_end_year_offset)
 
@@ -300,6 +343,8 @@ class Trails:
             tuple[int, int, int],
             tuple[Optional[TemporalExchange], list[tuple[int, float]]],
         ] = {}
+        self._static_activity_score_cache: dict[str, object] = {}
+        self._static_activity_score_fingerprint: tuple[tuple, str] | None = None
 
     def reset_scores(
         self,
@@ -1668,11 +1713,13 @@ class Trails:
         return TemporalDistribution(tex)
 
     def lca(self, *args: Any, **kwargs: Any) -> Any:
-        """Lca.
+        """Run temporal LCA using the stored routing graph.
 
         :param args: Variadic positional arguments.
         :type args: Any
-        :param kwargs: Variadic keyword arguments.
+        :param kwargs: Keyword arguments forwarded to ``trails.lca.lca``. If
+            ``methods``, ``edges_methods``, or ``ei_version`` are omitted, the
+            defaults configured on this ``Trails`` instance are used.
         :type kwargs: Any
         :returns: Return value.
         :rtype: Any"""
@@ -1689,31 +1736,88 @@ class Trails:
         start_year: int,
         start_act_idx: int,
         amount: float = 1.0,
-        max_depth: int = 2,
+        max_depth: int | None = None,
         min_amount: float = 1e-18,
         show_progress: bool = True,
         attribute_to_roots: bool = True,
         debug: bool = False,
+        adaptive_methods: str | list[str] | tuple[str, ...] | None = None,
+        adaptive_score_cutoff: float | None = None,
+        adaptive_relative_score_cutoff: Any = (_DEFAULT_ADAPTIVE_RELATIVE_SCORE_CUTOFF),
+        adaptive_ei_version: str | None = None,
+        adaptive_min_depth: int = 1,
+        adaptive_use_cache: bool = True,
     ) -> None:
-        """Temporal routing.
+        """Build the temporal routing graph for a functional unit.
 
-        :param start_year: Value for `start_year`.
+        Routing follows temporalized technosphere exchanges from the root
+        demand and stores an explicit graph of process-year nodes. Branches
+        stop at frontier nodes when they reach an optional ``max_depth``, fall
+        below ``min_amount``, have no child demands, or meet the adaptive
+        score-potential cutoff. Frontier demands are still solved by ``lca()``
+        in the corresponding year-specific background matrices, so adaptive
+        pruning changes how much of the graph is routed explicitly, not whether
+        the remaining demand is included.
+
+        Adaptive routing precomputes static activity scores for the selected
+        ``adaptive_methods`` and estimates each child branch's impact potential
+        as ``abs(amount) * max(abs(static activity score))``. Use
+        ``adaptive_score_cutoff`` for an absolute threshold or
+        ``adaptive_relative_score_cutoff`` for a threshold relative to the root
+        branch potential. The default public routing mode is adaptive:
+        ``max_depth=None`` and ``adaptive_relative_score_cutoff=1e-4``. Passing
+        an integer ``max_depth`` without an adaptive cutoff selects fixed-depth
+        routing. Passing both an integer ``max_depth`` and an adaptive cutoff
+        combines adaptive pruning with a hard depth cap.
+
+        :param start_year: Scenario/calendar year of the functional unit.
         :type start_year: int
-        :param start_act_idx: Value for `start_act_idx`.
+        :param start_act_idx: Activity index of the functional unit provider.
         :type start_act_idx: int
-        :param amount: Value for `amount`.
+        :param amount: Functional-unit amount, expressed in the reference
+            product of ``start_act_idx``.
         :type amount: float
-        :param max_depth: Value for `max_depth`.
-        :type max_depth: int
-        :param min_amount: Value for `min_amount`.
+        :param max_depth: Maximum explicit routing depth. The default ``None``
+            lets the adaptive score cutoff define the stopping depth. Passing
+            an integer without an adaptive cutoff uses fixed-depth routing.
+        :type max_depth: int | None
+        :param min_amount: Absolute routed-demand cutoff. Branches with child
+            amounts below this value become frontier nodes.
         :type min_amount: float
-        :param show_progress: Value for `show_progress`.
+        :param show_progress: Show a progress bar while routing.
         :type show_progress: bool
-        :param attribute_to_roots: Value for `attribute_to_roots`.
+        :param attribute_to_roots: Track first-level supplier attribution for
+            frontier and direct biosphere amounts.
         :type attribute_to_roots: bool
-        :param debug: Value for `debug`.
+        :param debug: Enable detailed routing logging.
         :type debug: bool
-        :raises RuntimeError: If an error occurs."""
+        :param adaptive_methods: Optional regular LCIA method or methods used
+            to screen branch impact potential. If omitted and an adaptive cutoff
+            is provided, ``Trails(..., methods=...)`` is used. EDGES methods
+            cannot currently be used for adaptive screening.
+        :type adaptive_methods: str | list[str] | tuple[str, ...] | None
+        :param adaptive_score_cutoff: Absolute score-potential cutoff. Branches
+            with potential at or below this value are left as frontier nodes.
+        :type adaptive_score_cutoff: float | None
+        :param adaptive_relative_score_cutoff: Relative cutoff multiplied by the
+            root static score potential. Defaults to ``1e-4`` when adaptive
+            routing is selected by default. Set to ``None`` to disable adaptive
+            routing when using a fixed ``max_depth``.
+        :type adaptive_relative_score_cutoff: float | None
+        :param adaptive_ei_version: Ecoinvent LCIA version used for adaptive
+            screening factors. If omitted, ``Trails(..., ei_version=...)`` is
+            used.
+        :type adaptive_ei_version: str | None
+        :param adaptive_min_depth: Minimum child depth before adaptive pruning can
+            stop a branch.
+        :type adaptive_min_depth: int
+        :param adaptive_use_cache: Reuse and write internal static activity score
+            cache files.
+        :type adaptive_use_cache: bool
+        :raises ValueError: If adaptive routing is requested without explicit or
+            constructor-default regular LCIA methods, or if ``max_depth=None``
+            is used while adaptive cutoffs are disabled.
+        :raises RuntimeError: If required routing dependencies are missing."""
         try:
             import networkx as nx
         except Exception as exc:  # pragma: no cover - dependency guard
@@ -1826,6 +1930,12 @@ class Trails:
                 amount=0.0,
                 frontier_amount=0.0,
                 direct_bio_amount=0.0,
+                score_potential=0.0,
+                score_potential_by_method={},
+                adaptive_cutoff_reason=None,
+                adaptive_score_cutoff=None,
+                adaptive_cutoff_potential=0.0,
+                frontier_reasons={},
                 frontier_roots={},
                 direct_bio_roots={},
             )
@@ -1846,6 +1956,69 @@ class Trails:
             root = int(root_act) if root_act is not None else int(fallback)
             data[root] = float(data.get(root, 0.0)) + float(amt)
 
+        def _add_frontier_amount(
+            node_key: tuple,
+            *,
+            amt: float,
+            root_act: int | None,
+            fallback: int,
+            reason: str,
+            score_potential: float | None = None,
+        ) -> None:
+            node = G.nodes[node_key]
+            node["frontier_amount"] = float(node["frontier_amount"]) + float(amt)
+            reasons = node.setdefault("frontier_reasons", {})
+            reasons[reason] = float(reasons.get(reason, 0.0)) + float(amt)
+            if reason == "adaptive_score_cutoff":
+                node["adaptive_cutoff_reason"] = reason
+                node["adaptive_score_cutoff"] = float(adaptive_threshold)
+                if score_potential is not None:
+                    node["adaptive_cutoff_potential"] = max(
+                        float(node.get("adaptive_cutoff_potential", 0.0)),
+                        float(score_potential),
+                    )
+            if attribute_to_roots:
+                _add_root_amount(node["frontier_roots"], root_act, amt, fallback)
+
+        def _add_score_potential(
+            node_key: tuple,
+            *,
+            year: int,
+            act_idx: int,
+            amt: float,
+        ) -> float:
+            """Accumulate adaptive static score potential on a graph node."""
+            if adaptive_scores is None:
+                return 0.0
+            potential, by_method = _activity_score_potential(
+                adaptive_scores,
+                year=int(year),
+                activity=int(act_idx),
+                amount=float(amt),
+            )
+            node = G.nodes[node_key]
+            node["score_potential"] = float(node.get("score_potential", 0.0)) + float(
+                potential
+            )
+            method_potentials = node.setdefault("score_potential_by_method", {})
+            for method, value in by_method.items():
+                method_potentials[method] = float(
+                    method_potentials.get(method, 0.0)
+                ) + float(value)
+            return float(potential)
+
+        def _should_adaptively_stop(
+            *,
+            depth: int,
+            potential: float,
+        ) -> bool:
+            """Return True when adaptive routing should leave a child as frontier."""
+            return bool(
+                adaptive_enabled
+                and int(depth) >= int(adaptive_min_depth)
+                and float(potential) <= float(adaptive_threshold)
+            )
+
         G = nx.DiGraph()
 
         queue = deque()
@@ -1859,6 +2032,87 @@ class Trails:
             start_activity,
             start_amount,
         )
+
+        default_relative_cutoff = (
+            adaptive_relative_score_cutoff is _DEFAULT_ADAPTIVE_RELATIVE_SCORE_CUTOFF
+        )
+        if default_relative_cutoff:
+            if adaptive_score_cutoff is not None:
+                adaptive_relative_score_cutoff = None
+            elif max_depth is None or adaptive_methods is not None:
+                adaptive_relative_score_cutoff = DEFAULT_ADAPTIVE_RELATIVE_SCORE_CUTOFF
+            else:
+                adaptive_relative_score_cutoff = None
+
+        adaptive_requested = bool(
+            adaptive_score_cutoff is not None
+            or adaptive_relative_score_cutoff is not None
+        )
+        if adaptive_methods is None and adaptive_requested:
+            default_methods = getattr(self, "default_methods", None)
+            if default_methods:
+                adaptive_methods = list(default_methods)
+            elif getattr(self, "default_edges_methods", None):
+                raise ValueError(
+                    "Adaptive routing requires regular LCIA methods. EDGES "
+                    "methods can be used for final lca(..., edges_methods=...), "
+                    "but provide Trails(..., methods=...) or adaptive_methods=... "
+                    "for adaptive screening."
+                )
+            else:
+                raise ValueError(
+                    "adaptive_methods or Trails(..., methods=...) must be "
+                    "provided when adaptive score cutoffs are set."
+                )
+        adaptive_enabled = adaptive_methods is not None
+        if adaptive_enabled and not adaptive_requested:
+            raise ValueError(
+                "Set adaptive_score_cutoff or adaptive_relative_score_cutoff "
+                "when adaptive_methods or Trails(..., methods=...) is provided "
+                "for adaptive routing."
+            )
+        if max_depth is None and not adaptive_enabled:
+            raise ValueError("max_depth=None is only supported in adaptive mode.")
+        max_depth_int = None if max_depth is None else int(max_depth)
+        adaptive_ei_version_effective = (
+            str(adaptive_ei_version)
+            if adaptive_ei_version is not None
+            else str(getattr(self, "default_ei_version", "3.11"))
+        )
+
+        adaptive_scores = None
+        adaptive_threshold = 0.0
+        adaptive_root_potential = 0.0
+        adaptive_method_names: list[str] = []
+        if adaptive_enabled:
+            if isinstance(adaptive_methods, str):
+                adaptive_method_names = [adaptive_methods]
+            else:
+                adaptive_method_names = [str(method) for method in adaptive_methods]
+            if not adaptive_method_names:
+                raise ValueError("adaptive_methods cannot be empty.")
+            adaptive_scores = _ensure_static_activity_scores(
+                self,
+                methods=adaptive_method_names,
+                ei_version=adaptive_ei_version_effective,
+                use_cache=bool(adaptive_use_cache),
+            )
+            adaptive_root_potential, _ = _activity_score_potential(
+                adaptive_scores,
+                year=start_year_int,
+                activity=start_activity,
+                amount=start_activity_amount,
+            )
+            thresholds = []
+            if adaptive_score_cutoff is not None:
+                thresholds.append(float(adaptive_score_cutoff))
+            if adaptive_relative_score_cutoff is not None:
+                thresholds.append(
+                    abs(float(adaptive_relative_score_cutoff))
+                    * float(adaptive_root_potential)
+                )
+            adaptive_threshold = max(thresholds) if thresholds else 0.0
+
         queue.append(
             (start_year_int, start_activity, start_activity_amount, 0, (), None)
         )
@@ -1901,18 +2155,25 @@ class Trails:
             G.nodes[node_key]["amount"] = float(G.nodes[node_key]["amount"]) + float(
                 amt
             )
+            if depth == 0:
+                _add_score_potential(
+                    node_key,
+                    year=year,
+                    act_idx=act,
+                    amt=amt,
+                )
 
             scenario_year = year
             has_direct_bio = self._has_direct_biosphere(scenario_year, act, bio_cache)
 
-            if depth >= max_depth:
-                G.nodes[node_key]["frontier_amount"] = float(
-                    G.nodes[node_key]["frontier_amount"]
-                ) + float(amt)
-                if attribute_to_roots:
-                    _add_root_amount(
-                        G.nodes[node_key]["frontier_roots"], root_act, amt, act
-                    )
+            if max_depth_int is not None and depth >= max_depth_int:
+                _add_frontier_amount(
+                    node_key,
+                    amt=amt,
+                    root_act=root_act,
+                    fallback=act,
+                    reason="max_depth",
+                )
                 continue
 
             child_demands = self.expand_temporal_exchanges(
@@ -1924,13 +2185,13 @@ class Trails:
             )
 
             if not child_demands:
-                G.nodes[node_key]["frontier_amount"] = float(
-                    G.nodes[node_key]["frontier_amount"]
-                ) + float(amt)
-                if attribute_to_roots:
-                    _add_root_amount(
-                        G.nodes[node_key]["frontier_roots"], root_act, amt, act
-                    )
+                _add_frontier_amount(
+                    node_key,
+                    amt=amt,
+                    root_act=root_act,
+                    fallback=act,
+                    reason="leaf",
+                )
                 continue
 
             if has_direct_bio and depth > 0:
@@ -1968,33 +2229,51 @@ class Trails:
                         child_root = root_act
                         child_path = path + ((child_year, child_act),)
 
-                    if child_depth >= max_depth:
+                    potential = _add_score_potential(
+                        child_node,
+                        year=child_year,
+                        act_idx=child_act,
+                        amt=child_amt,
+                    )
+
+                    if max_depth_int is not None and child_depth >= max_depth_int:
                         G.nodes[child_node]["amount"] = float(
                             G.nodes[child_node]["amount"]
                         ) + float(child_amt)
-                        G.nodes[child_node]["frontier_amount"] = float(
-                            G.nodes[child_node]["frontier_amount"]
-                        ) + float(child_amt)
-                        if attribute_to_roots:
-                            _add_root_amount(
-                                G.nodes[child_node]["frontier_roots"],
-                                child_root,
-                                child_amt,
-                                child_act,
-                            )
+                        _add_frontier_amount(
+                            child_node,
+                            amt=child_amt,
+                            root_act=child_root,
+                            fallback=child_act,
+                            reason="max_depth",
+                        )
                         continue
 
                     if abs(child_amt) < float(min_amount):
-                        G.nodes[child_node]["frontier_amount"] = float(
-                            G.nodes[child_node]["frontier_amount"]
+                        _add_frontier_amount(
+                            child_node,
+                            amt=child_amt,
+                            root_act=child_root,
+                            fallback=child_act,
+                            reason="min_amount",
+                        )
+                        continue
+
+                    if _should_adaptively_stop(
+                        depth=child_depth,
+                        potential=potential,
+                    ):
+                        G.nodes[child_node]["amount"] = float(
+                            G.nodes[child_node]["amount"]
                         ) + float(child_amt)
-                        if attribute_to_roots:
-                            _add_root_amount(
-                                G.nodes[child_node]["frontier_roots"],
-                                child_root,
-                                child_amt,
-                                child_act,
-                            )
+                        _add_frontier_amount(
+                            child_node,
+                            amt=child_amt,
+                            root_act=child_root,
+                            fallback=child_act,
+                            reason="adaptive_score_cutoff",
+                            score_potential=potential,
+                        )
                         continue
 
                     queue.append(
@@ -2017,8 +2296,26 @@ class Trails:
             "start_year": start_year_int,
             "start_act_idx": start_activity,
             "amount": start_amount,
-            "max_depth": int(max_depth),
+            "max_depth": None if max_depth_int is None else int(max_depth_int),
             "min_amount": float(min_amount),
+            "adaptive_enabled": bool(adaptive_enabled),
+            "adaptive_methods": list(adaptive_method_names),
+            "adaptive_score_cutoff": (
+                None if adaptive_score_cutoff is None else float(adaptive_score_cutoff)
+            ),
+            "adaptive_relative_score_cutoff": (
+                None
+                if adaptive_relative_score_cutoff is None
+                else float(adaptive_relative_score_cutoff)
+            ),
+            "adaptive_score_cutoff_effective": (
+                float(adaptive_threshold) if adaptive_enabled else None
+            ),
+            "adaptive_root_score_potential": (
+                float(adaptive_root_potential) if adaptive_enabled else None
+            ),
+            "adaptive_ei_version": adaptive_ei_version_effective,
+            "adaptive_min_depth": int(adaptive_min_depth),
         }
 
         if debug:
@@ -2032,10 +2329,10 @@ class Trails:
         self,
         year: int,
         act_idx: int,
-        methods: list[str],
+        methods: list[str] | None = None,
         amount: float = 1.0,
         debug: bool = False,
-        ei_version: str = "3.11",
+        ei_version: str | None = None,
     ) -> None:
         """Static lca.
 
@@ -2043,14 +2340,16 @@ class Trails:
         :type year: int
         :param act_idx: Value for `act_idx`.
         :type act_idx: int
-        :param methods: Value for `methods`.
-        :type methods: list[str]
+        :param methods: Regular LCIA methods. If omitted, uses
+            ``Trails(..., methods=...)``.
+        :type methods: list[str] | None
         :param amount: Value for `amount`.
         :type amount: float
         :param debug: Value for `debug`.
         :type debug: bool
-        :param ei_version: Value for `ei_version`.
-        :type ei_version: str
+        :param ei_version: LCIA data version. If omitted, uses
+            ``Trails(..., ei_version=...)``.
+        :type ei_version: str | None
         :returns: Return value.
         :rtype: None"""
         lca_static(

@@ -27,6 +27,56 @@ time-resolved inventory and impact scores.
 The final output is a mapping from impact year to characterized impact scores
 (plus attribution to first-level suppliers when available).
 
+Adaptive score-potential routing
+--------------------------------
+
+Fixed-depth routing expands every branch until it reaches the same graph depth
+or an absolute demand cutoff. This is simple and reproducible, but it can spend
+substantial time expanding low-impact branches while stopping high-impact
+branches at the same depth.
+
+Adaptive routing adds an impact-potential screening step. Before routing,
+TRAILS computes static LCIA activity scores for the selected adaptive methods
+and scenario years. For a candidate child demand, the routing step estimates
+the branch potential as:
+
+.. math::
+
+   p(a, y, q) = |q| \max_m |s_m(a, y)|
+
+where ``a`` is the activity, ``y`` is the target year, ``q`` is the routed
+demand amount, and ``s_m(a, y)`` is the static score for one unit of the
+activity's reference product under method ``m``.
+
+A branch is routed explicitly only while this potential remains above the
+chosen cutoff. Branches below the cutoff become frontier nodes and are still
+included in the final calculation through the year-wise matrix solve. The
+adaptive cutoff therefore controls how much of the supply-chain graph is made
+explicit; it does not discard the remaining demand.
+
+Two cutoff forms are supported:
+
+* ``adaptive_score_cutoff``: an absolute score-potential threshold in the LCIA
+  unit of the selected method.
+* ``adaptive_relative_score_cutoff``: a dimensionless fraction of the root
+  activity's static score potential. For example, ``1e-4`` stops branches whose
+  estimated static potential is at most 0.01% of the root potential.
+
+By default, ``temporal_routing()`` uses adaptive routing with ``max_depth=None``
+and ``adaptive_relative_score_cutoff=1e-4``. Passing an integer ``max_depth``
+without an adaptive cutoff selects fixed-depth routing. ``max_depth`` can also
+be combined with adaptive cutoffs as a hard cap. The static activity scores are
+cached using matrix and LCIA-data fingerprints so repeated adaptive runs over
+the same interpolated data package avoid recomputing the upfront screening
+intensities.
+
+In the recommended workflow, regular LCIA methods are configured once with
+``Trails(..., methods=[...], ei_version="...")``. Adaptive routing uses those
+methods when ``adaptive_methods`` is omitted, and ``lca(trails)`` reuses the
+same methods for final scoring. Call-level methods can still be supplied to
+override this default. EDGES methods are currently limited to final scoring and
+cannot provide adaptive routing potentials.
+
 Temporal exchange distributions
 -------------------------------
 

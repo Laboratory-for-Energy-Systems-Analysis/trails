@@ -468,3 +468,29 @@ def test_lca_rejects_regular_and_edges_methods() -> None:
             methods=["regular-method"],
             edges_methods=["edge-method"],
         )
+
+
+def test_lca_defaults_prefer_edges_methods_for_final_scoring() -> None:
+    class DummyTrails:
+        default_methods = ["regular-method"]
+        default_edges_methods = ["edge-method"]
+        default_ei_version = "3.11"
+
+    methods, edges_methods, ei_version = lca_module._resolve_lca_method_defaults(
+        DummyTrails(),
+        methods=None,
+        edges_methods=None,
+        ei_version=None,
+    )
+    assert methods is None
+    assert edges_methods == ["edge-method"]
+    assert ei_version == "3.11"
+
+    methods, edges_methods, _ei_version = lca_module._resolve_lca_method_defaults(
+        DummyTrails(),
+        methods=["explicit-regular"],
+        edges_methods=None,
+        ei_version=None,
+    )
+    assert methods == ["explicit-regular"]
+    assert edges_methods is None

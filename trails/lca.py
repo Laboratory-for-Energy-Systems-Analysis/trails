@@ -62,6 +62,48 @@ if UmfpackWarning is not None:
 _CHAR_CACHE: dict = {}
 
 
+def _default_ei_version(trails: Trails, ei_version: str | None) -> str:
+    """Resolve a call-level LCIA version against Trails instance defaults."""
+    if ei_version is not None:
+        return str(ei_version)
+    return str(
+        getattr(
+            trails,
+            "default_ei_version",
+            getattr(trails, "ei_version", "3.11"),
+        )
+    )
+
+
+def _resolve_lca_method_defaults(
+    trails: Trails,
+    *,
+    methods: List[str] | None,
+    edges_methods: List[Any] | None,
+    ei_version: str | None,
+) -> tuple[List[str] | None, List[Any] | None, str]:
+    """Resolve regular/EDGES method defaults for an LCA-style call.
+
+    Explicit call arguments always win. If neither regular nor EDGES methods
+    are provided, EDGES defaults are preferred for final scoring; regular
+    default methods remain available for adaptive routing and static scoring.
+    """
+    resolved_methods = methods
+    resolved_edges_methods = edges_methods
+    if methods is None and edges_methods is None:
+        default_edges = getattr(trails, "default_edges_methods", None)
+        default_methods = getattr(trails, "default_methods", None)
+        if default_edges:
+            resolved_edges_methods = list(default_edges)
+        elif default_methods:
+            resolved_methods = list(default_methods)
+    return (
+        resolved_methods,
+        resolved_edges_methods,
+        _default_ei_version(trails, ei_version),
+    )
+
+
 class _IdentityProductMap:
     """Mapping-like object returning row index for integer product IDs."""
 
@@ -398,28 +440,44 @@ def lca_static(
     trails: Trails,
     year: int,
     fu_act_idx: int,
-    methods: List[str],
+    methods: List[str] | None = None,
     amount: float = 1.0,
     debug: bool = False,
-    ei_version: str = "3.11",
+    ei_version: str | None = None,
 ) -> None:
-    """Lca static.
+    """Run a conventional static LCA for one activity in one year.
 
-    :param trails: Value for `trails`.
+    The static score uses regular LCIA methods only. If ``methods`` or
+    ``ei_version`` are omitted, the corresponding ``Trails`` constructor
+    defaults are used.
+
+    :param trails: Trails instance containing the scenario matrices.
     :type trails: Trails
     :param year: Value for `year`.
     :type year: int
     :param fu_act_idx: Value for `fu_act_idx`.
     :type fu_act_idx: int
-    :param methods: Value for `methods`.
-    :type methods: List[str]
+    :param methods: Regular LCIA methods. If omitted, uses
+        ``Trails(..., methods=...)``.
+    :type methods: List[str] | None
     :param amount: Value for `amount`.
     :type amount: float
     :param debug: Value for `debug`.
     :type debug: bool
-    :param ei_version: Value for `ei_version`.
-    :type ei_version: str
+    :param ei_version: LCIA data version. If omitted, uses
+        ``Trails(..., ei_version=...)``.
+    :type ei_version: str | None
+    :raises ValueError: If no regular methods are available.
     :raises RuntimeError: If an error occurs."""
+    if methods is None:
+        default_methods = getattr(trails, "default_methods", None)
+        methods = list(default_methods) if default_methods else None
+    ei_version = _default_ei_version(trails, ei_version)
+    if not methods:
+        raise ValueError(
+            "methods or Trails(..., methods=...) must be provided for static_lca()."
+        )
+
     prev_inventory = trails.inventory
     prev_characterized = trails.characterized_inventory
 
@@ -522,7 +580,7 @@ def lca(
     *,
     store_inventory: bool = False,
     compute_score: bool = True,
-    ei_version: str = "3.11",
+    ei_version: str | None = None,
     solver_mode: Literal["bw2calc", "direct", "iterative"] = "iterative",
     iterative_rtol: float = 1e-3,
     iterative_atol: float = 0.0,
@@ -537,14 +595,24 @@ def lca(
     edges_reuse_cached_cfs: bool = True,
     inventory_workers: int | None = None,
 ) -> None:
-    """Lca.
+    """Run temporal LCA from a previously built routing graph.
 
-    :param trails: Value for `trails`.
+    ``temporal_routing()`` must be called first. If ``methods`` and
+    ``edges_methods`` are both omitted and ``compute_score=True``, this function
+    uses constructor defaults from the ``Trails`` instance. EDGES defaults are
+    preferred for final scoring when both regular and EDGES defaults are set;
+    explicit call arguments always override constructor defaults.
+
+    :param trails: Trails instance containing a temporal routing graph.
     :type trails: Trails
-    :param methods: Value for `methods`.
+    :param methods: Regular LCIA methods. If omitted together with
+        ``edges_methods``, uses ``Trails(..., edges_methods=...)`` when set,
+        otherwise ``Trails(..., methods=...)``.
     :type methods: List[str] | None
     :param edges_methods: Optional EDGES method definitions or method names for
         edge-level characterization factors. Mutually exclusive with ``methods``.
+        If omitted together with ``methods``, uses
+        ``Trails(..., edges_methods=...)`` when set.
     :type edges_methods: List[Any] | None
     :param show_progress: Value for `show_progress`.
     :type show_progress: bool
@@ -556,8 +624,9 @@ def lca(
     :type store_inventory: bool
     :param compute_score: Value for `compute_score`.
     :type compute_score: bool
-    :param ei_version: Value for `ei_version`.
-    :type ei_version: str
+    :param ei_version: LCIA data version for regular methods. If omitted, uses
+        ``Trails(..., ei_version=...)``.
+    :type ei_version: str | None
     :param solver_mode: Solver backend mode. Defaults to ``"iterative"``.
     :type solver_mode: Literal["bw2calc", "direct", "iterative"]
     :param iterative_rtol: Relative tolerance for iterative solves.
@@ -591,6 +660,16 @@ def lca(
     :type inventory_workers: int | None
     :raises RuntimeError: If an error occurs.
     :raises ValueError: If an error occurs."""
+    if compute_score or methods is not None or edges_methods is not None:
+        methods, edges_methods, ei_version = _resolve_lca_method_defaults(
+            trails,
+            methods=methods,
+            edges_methods=edges_methods,
+            ei_version=ei_version,
+        )
+    else:
+        ei_version = _default_ei_version(trails, ei_version)
+
     if solver_mode not in ("bw2calc", "direct", "iterative"):
         raise ValueError(
             "solver_mode must be one of {'bw2calc', 'direct', 'iterative'}"
@@ -1351,24 +1430,30 @@ def build_temporal_sankey_tree(
 
 def score_temporal_graph_nodes(
     trails: Trails,
-    methods: List[str],
+    methods: List[str] | None = None,
     *,
     min_amount: float = 0.0,
     show_progress: bool = True,
-    ei_version: str = "3.11",
+    ei_version: str | None = None,
 ) -> dict[tuple, float]:
-    """Score temporal graph nodes.
+    """Estimate individual temporal graph node scores.
 
-    :param trails: Value for `trails`.
+    This diagnostic helper scores routed graph nodes without mutating the main
+    temporal score arrays. If ``methods`` or ``ei_version`` are omitted, regular
+    constructor defaults from the ``Trails`` instance are used.
+
+    :param trails: Trails instance containing a temporal routing graph.
     :type trails: Trails
-    :param methods: Value for `methods`.
-    :type methods: List[str]
+    :param methods: Regular LCIA methods. If omitted, uses
+        ``Trails(..., methods=...)``.
+    :type methods: List[str] | None
     :param min_amount: Value for `min_amount`.
     :type min_amount: float
     :param show_progress: Value for `show_progress`.
     :type show_progress: bool
-    :param ei_version: Value for `ei_version`.
-    :type ei_version: str
+    :param ei_version: LCIA data version. If omitted, uses
+        ``Trails(..., ei_version=...)``.
+    :type ei_version: str | None
     :returns: Return value.
     :rtype: dict[tuple, float]
     :raises RuntimeError: If an error occurs."""
@@ -1380,6 +1465,15 @@ def score_temporal_graph_nodes(
 
     if trails.A is None or trails.B is None:
         raise RuntimeError("Trails matrices missing; run setup before scoring.")
+
+    if methods is None:
+        default_methods = getattr(trails, "default_methods", None)
+        methods = list(default_methods) if default_methods else None
+    if not methods:
+        raise ValueError(
+            "methods or Trails(..., methods=...) must be provided to score nodes."
+        )
+    ei_version = _default_ei_version(trails, ei_version)
 
     cf = get_cf_vector(
         trails=trails,

@@ -28,6 +28,9 @@ At a high level, `TRAILS`:
   technosphere solve.
 * Runs a **temporal traversal** of the supply chain from a functional unit to build
   time-indexed demands.
+* Supports **adaptive temporal routing** using static LCIA score-potential
+  cutoffs, so low-potential branches can remain matrix-solved frontier demands
+  instead of being expanded explicitly.
 * Solves year-specific systems and **routes impacts** through temporal distributions.
 * Can score temporal inventories with optional **EDGES regionalized
   characterization factors**.
@@ -140,10 +143,18 @@ from trails import Trails, lca, get_lcia_method_names, plot_temporal_scores
 # Load a Frictionless data package exported by premise (or compatible tooling)
 package = Package("path/to/datapackage.json")
 
+# Choose an LCIA method bundled with TRAILS
+method = get_lcia_method_names(ei_version="3.11")[0]
+
 # Initialize TRAILS with annual interpolation.
 # By default, annual years are extended by one year on each side
 # (min_year-1 to max_year+1) using endpoint duplication.
-trails = Trails(package, interpolate_annual=True)
+trails = Trails(
+    package,
+    interpolate_annual=True,
+    methods=[method],
+    ei_version="3.11",
+)
 
 # Optional: wider padding, e.g., 20 years before/after
 # trails = Trails(
@@ -151,26 +162,24 @@ trails = Trails(package, interpolate_annual=True)
 #     interpolate_annual=True,
 #     interpolation_start_year_offset=-20,
 #     interpolation_end_year_offset=20,
+#     methods=[method],
+#     ei_version="3.11",
 # )
 
 # Pick an activity index from the metadata
 activity_indices = next(iter(trails.activity_indices.values()))
 start_act_idx = next(iter(activity_indices.keys()))
 
-# Choose an LCIA method bundled with TRAILS
-method = get_lcia_method_names(ei_version="3.11")[0]
-
-# Run temporal routing (builds the traversal graph)
+# Run temporal routing (builds the traversal graph).
+# By default this uses adaptive routing with a relative cutoff of 1e-4.
 trails.temporal_routing(
     start_year=2030,
     start_act_idx=start_act_idx,
-    max_depth=2,
 )
 
 # Run temporal LCA (stores scores on trails.scores)
 lca(
     trails=trails,
-    methods=[method],
     # defaults shown explicitly:
     solver_mode="iterative",
     iterative_rtol=1e-3,
@@ -183,6 +192,48 @@ fig.show()
 
 ---
 
+### Temporal routing modes
+
+`temporal_routing()` is adaptive by default. The default cutoff is a relative
+score-potential cutoff of `1e-4`, meaning that a branch can stop being expanded
+explicitly once its estimated static score potential is at most 0.01% of the
+root activity's score potential. Stopped branches remain frontier demands and
+are still included in the year-wise matrix solve.
+
+```python
+# 1. Default adaptive routing
+trails.temporal_routing(start_year=2030, start_act_idx=start_act_idx)
+
+# 2. Adaptive routing with a different relative cutoff
+trails.temporal_routing(
+    start_year=2030,
+    start_act_idx=start_act_idx,
+    adaptive_relative_score_cutoff=1e-5,
+)
+
+# 3. Adaptive routing with a hard depth cap
+trails.temporal_routing(
+    start_year=2030,
+    start_act_idx=start_act_idx,
+    max_depth=5,
+    adaptive_relative_score_cutoff=1e-4,
+)
+
+# 4. Fixed-depth routing
+trails.temporal_routing(
+    start_year=2030,
+    start_act_idx=start_act_idx,
+    max_depth=3,
+)
+```
+
+Adaptive routing requires regular LCIA methods, usually provided once with
+`Trails(..., methods=[method], ei_version="...")`. EDGES methods are final-score
+methods only; EDGES-only workflows should use fixed-depth routing or also
+provide regular `methods` for adaptive routing before EDGES final scoring.
+
+---
+
 ### Optional EDGES regionalized LCIA
 
 TRAILS can score the finalized temporal inventory with
@@ -191,18 +242,25 @@ edge-level characterization factors. This is optional; normal LCIA methods do
 not require the ``edges`` package.
 
 ```python
-from trails import get_edges_lcia_method_names
+from trails import Trails, get_edges_lcia_method_names
 
 edges_method = get_edges_lcia_method_names()[0]
 
-lca(
-    trails=trails,
+trails_edges = Trails(
+    package,
+    interpolate_annual=True,
     edges_methods=[edges_method],
+)
+
+lca(
+    trails=trails_edges,
     edges_reuse_cached_cfs=True,
 )
 ```
 
-``edges_methods`` is mutually exclusive with regular ``methods``. With the
+``edges_methods`` is mutually exclusive with regular ``methods`` for final
+scoring. Constructor ``methods`` can still be used as regular LCIA proxy
+methods for adaptive routing before final EDGES scoring. With the
 default ``edges_reuse_cached_cfs=True``, TRAILS reuses EDGES matched CF
 templates across scenario years when supplier and consumer metadata signatures
 are identical, while still evaluating numeric CF values for each year. Set

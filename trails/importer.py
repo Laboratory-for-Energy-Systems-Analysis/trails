@@ -1103,6 +1103,11 @@ def import_excel_inventory(
         except Exception:
             print("New activities created from import (unable to format table).")
 
+    if hasattr(trails, "_static_activity_score_cache"):
+        trails._static_activity_score_cache.clear()
+    if hasattr(trails, "_static_activity_score_fingerprint"):
+        trails._static_activity_score_fingerprint = None
+
     if cache_import:
         save_cached_interpolation(
             trails.package,
