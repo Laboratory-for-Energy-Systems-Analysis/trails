@@ -25,9 +25,14 @@ Use methods in temporal LCA
 
 .. code-block:: python
 
-    from trails import lca, get_lcia_method_names
+    from trails import Trails, lca, get_lcia_method_names
 
     method = get_lcia_method_names(ei_version="3.11")[0]
+    trails = Trails(
+        package,
+        methods=[method],
+        ei_version="3.11",
+    )
 
     trails.temporal_routing(
         start_year=2030,
@@ -37,12 +42,13 @@ Use methods in temporal LCA
 
     lca(
         trails=trails,
-        methods=[method],
-        ei_version="3.11",
         # defaults shown explicitly:
         solver_mode="iterative",
         iterative_rtol=1e-3,
     )
+
+Call-level ``methods=...`` and ``ei_version=...`` still override constructor
+defaults when needed.
 
 Use EDGES methods
 -----------------
@@ -54,9 +60,13 @@ package and currently supports EDGES methods whose supplier matrix is
 
 .. code-block:: python
 
-    from trails import lca, get_edges_lcia_method_names
+    from trails import Trails, lca, get_edges_lcia_method_names
 
     method = get_edges_lcia_method_names()[0]
+    trails = Trails(
+        package,
+        edges_methods=[method],
+    )
 
     trails.temporal_routing(
         start_year=2030,
@@ -66,14 +76,17 @@ package and currently supports EDGES methods whose supplier matrix is
 
     lca(
         trails=trails,
-        edges_methods=[method],
         # edges_additional_topologies=topology,  # optional
         edges_reuse_cached_cfs=True,
     )
 
-``edges_methods`` is mutually exclusive with regular ``methods``. In EDGES
-mode, TRAILS builds ``trails.inventory`` internally because edge-level CFs are
-applied after the temporalized biosphere inventory has been assembled.
+Final scoring with ``edges_methods`` is mutually exclusive with regular
+``methods`` in a single ``lca()`` call. In EDGES mode, TRAILS builds
+``trails.inventory`` internally because edge-level CFs are applied after the
+temporalized biosphere inventory has been assembled. Constructor
+``edges_methods`` are used only for final EDGES scoring. Adaptive routing still
+needs regular LCIA methods, passed with ``Trails(..., methods=...)`` or
+``temporal_routing(..., adaptive_methods=...)``.
 
 By default, ``edges_reuse_cached_cfs=True`` reuses EDGES matched CF templates
 across scenario years when the supplier and consumer metadata signatures are
@@ -118,7 +131,7 @@ Version selection
 Set ``ei_version`` consistently in:
 
 * ``get_lcia_method_names``
-* ``trails.lca(..., ei_version=...)``
+* ``Trails(..., ei_version=...)`` or ``trails.lca(..., ei_version=...)``
 * ``trails.lcia.get_lcia_methods``
 
 so method names and factors come from the same bundled dataset.

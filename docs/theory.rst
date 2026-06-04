@@ -69,6 +69,13 @@ activity scores are cached using matrix and LCIA-data fingerprints so repeated
 adaptive runs over the same interpolated data package avoid recomputing the
 upfront screening intensities.
 
+In the recommended workflow, regular LCIA methods are configured once with
+``Trails(..., methods=[...], ei_version="...")``. Adaptive routing uses those
+methods when a cutoff is provided and ``adaptive_methods`` is omitted, and
+``lca(trails)`` reuses the same methods for final scoring. Call-level methods
+can still be supplied to override this default. EDGES methods are currently
+limited to final scoring and cannot provide adaptive routing potentials.
+
 Temporal exchange distributions
 -------------------------------
 

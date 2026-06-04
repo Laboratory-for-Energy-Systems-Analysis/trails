@@ -25,13 +25,19 @@ Loading TRAILS
 .. code-block:: python
 
     from datapackage import Package
-    from trails import Trails
+    from trails import Trails, get_lcia_method_names
 
     package = Package("path/to/datapackage.json")
+    method = get_lcia_method_names(ei_version="3.11")[0]
 
     # interpolate_annual=True expands scenario slices to annual resolution.
     # Default annual bounds are [min_year-1, max_year+1].
-    trails = Trails(package, interpolate_annual=True)
+    trails = Trails(
+        package,
+        interpolate_annual=True,
+        methods=[method],
+        ei_version="3.11",
+    )
 
     # Optional: widen interpolation bounds for endpoint duplication
     # trails = Trails(
@@ -39,6 +45,8 @@ Loading TRAILS
     #     interpolate_annual=True,
     #     interpolation_start_year_offset=-20,
     #     interpolation_end_year_offset=20,
+    #     methods=[method],
+    #     ei_version="3.11",
     # )
 
 After initialization, you can access scenario labels and metadata:
@@ -70,13 +78,13 @@ workflow is to select an activity and store the index for repeated calls:
 Running temporal LCA
 --------------------
 
-The primary entry point is ``trails.lca.lca``:
+The primary entry point is ``trails.lca.lca``. The usual workflow is to store
+regular LCIA methods and the LCIA data version on the ``Trails`` instance at
+initialization, then reuse those defaults during routing and scoring.
 
 .. code-block:: python
 
-    from trails import lca, get_lcia_method_names
-
-    method = get_lcia_method_names(ei_version="3.11")[0]
+    from trails import lca
 
     # Run temporal routing (builds the traversal graph)
     trails.temporal_routing(
@@ -93,11 +101,14 @@ The primary entry point is ``trails.lca.lca``:
     # Run temporal LCA (stores results on the Trails instance)
     lca(
         trails=trails,
-        methods=[method],
         # defaults shown explicitly:
         solver_mode="iterative",
         iterative_rtol=1e-3,
     )
+
+You can still override the constructor defaults in a specific call with
+``lca(trails, methods=[...], ei_version="...")`` or
+``temporal_routing(..., adaptive_methods=[...])``.
 
 Temporal LCA results are stored on the Trails instance. Use ``trails.scores``
 for impact scores (when ``compute_score=True``). If you run
@@ -115,19 +126,16 @@ child branch should be routed explicitly.
 
 .. code-block:: python
 
-    method = get_lcia_method_names(ei_version="3.11")[0]
-
     trails.temporal_routing(
         start_year=2030,
         start_act_idx=start_act_idx,
         amount=1.0,
         max_depth=None,
         min_amount=1e-18,
-        adaptive_methods=[method],
         adaptive_relative_score_cutoff=1e-4,
         adaptive_min_depth=1,
     )
-    lca(trails=trails, methods=[method])
+    lca(trails=trails)
 
 The relative cutoff is multiplied by the root activity's static score
 potential. In the example above, branches are stopped once their estimated
@@ -141,6 +149,9 @@ Important behavior:
   frontier demands and still enter the year-wise matrix solve in ``lca()``.
 * ``max_depth=None`` is valid only when adaptive routing is enabled. You can
   also combine adaptive cutoffs with a finite ``max_depth`` to keep a hard cap.
+* Adaptive routing uses ``Trails(..., methods=...)`` unless
+  ``adaptive_methods=...`` is provided explicitly. EDGES methods cannot
+  currently be used for adaptive screening.
 * Static activity scores are cached by default. Set
   ``adaptive_use_cache=False`` for tests or diagnostics that should recompute
   the screening intensities.
@@ -244,7 +255,6 @@ exchange distributions by default:
     )
     lca(
         trails=trails,
-        methods=[method],
     )
 
 For a non-temporal baseline in a single year, use ``trails.static_lca(...)``.
@@ -311,7 +321,6 @@ across all FaIR_ configurations as quantiles (2.5, 25, 50, 75, 97.5).
     # Ensure an inventory with root attribution is available
     lca(
         trails=trails,
-        methods=[method],
         store_inventory=True,
     )
 

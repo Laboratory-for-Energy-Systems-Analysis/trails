@@ -239,3 +239,51 @@ def test_adaptive_routing_can_run_without_depth_cap() -> None:
         data.get("adaptive_cutoff_reason")
         for _node, data in adaptive.graph.nodes(data=True)
     } == {None, "adaptive_score_cutoff"}
+
+
+def test_adaptive_routing_uses_constructor_method_defaults() -> None:
+    """Constructor methods should provide adaptive screening defaults."""
+    adaptive = Trails(
+        Package(str(EXAMPLE_PACKAGE)),
+        interpolate_annual=False,
+        methods=[GWP_METHOD],
+        ei_version="3.11",
+    )
+    adaptive.temporal_routing(
+        start_year=2005,
+        start_act_idx=2,
+        amount=1.0,
+        max_depth=None,
+        min_amount=0.0,
+        show_progress=False,
+        attribute_to_roots=False,
+        adaptive_score_cutoff=0.1,
+        adaptive_use_cache=False,
+    )
+
+    assert adaptive._routing_params["adaptive_methods"] == [GWP_METHOD]
+    assert adaptive._routing_params["adaptive_ei_version"] == "3.11"
+    assert adaptive._routing_params["max_depth"] is None
+    assert adaptive.graph.number_of_nodes() == 6
+
+
+def test_adaptive_routing_rejects_edges_only_defaults() -> None:
+    """EDGES methods cannot currently provide adaptive screening scores."""
+    trails = Trails(
+        Package(str(EXAMPLE_PACKAGE)),
+        interpolate_annual=False,
+        edges_methods=["edge-method"],
+    )
+
+    with pytest.raises(ValueError, match="requires regular LCIA methods"):
+        trails.temporal_routing(
+            start_year=2005,
+            start_act_idx=2,
+            amount=1.0,
+            max_depth=None,
+            min_amount=0.0,
+            show_progress=False,
+            attribute_to_roots=False,
+            adaptive_score_cutoff=0.1,
+            adaptive_use_cache=False,
+        )

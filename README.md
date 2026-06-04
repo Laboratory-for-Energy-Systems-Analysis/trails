@@ -143,10 +143,18 @@ from trails import Trails, lca, get_lcia_method_names, plot_temporal_scores
 # Load a Frictionless data package exported by premise (or compatible tooling)
 package = Package("path/to/datapackage.json")
 
+# Choose an LCIA method bundled with TRAILS
+method = get_lcia_method_names(ei_version="3.11")[0]
+
 # Initialize TRAILS with annual interpolation.
 # By default, annual years are extended by one year on each side
 # (min_year-1 to max_year+1) using endpoint duplication.
-trails = Trails(package, interpolate_annual=True)
+trails = Trails(
+    package,
+    interpolate_annual=True,
+    methods=[method],
+    ei_version="3.11",
+)
 
 # Optional: wider padding, e.g., 20 years before/after
 # trails = Trails(
@@ -154,14 +162,13 @@ trails = Trails(package, interpolate_annual=True)
 #     interpolate_annual=True,
 #     interpolation_start_year_offset=-20,
 #     interpolation_end_year_offset=20,
+#     methods=[method],
+#     ei_version="3.11",
 # )
 
 # Pick an activity index from the metadata
 activity_indices = next(iter(trails.activity_indices.values()))
 start_act_idx = next(iter(activity_indices.keys()))
-
-# Choose an LCIA method bundled with TRAILS
-method = get_lcia_method_names(ei_version="3.11")[0]
 
 # Run temporal routing (builds the traversal graph)
 trails.temporal_routing(
@@ -173,7 +180,6 @@ trails.temporal_routing(
 # Run temporal LCA (stores scores on trails.scores)
 lca(
     trails=trails,
-    methods=[method],
     # defaults shown explicitly:
     solver_mode="iterative",
     iterative_rtol=1e-3,
@@ -194,18 +200,25 @@ edge-level characterization factors. This is optional; normal LCIA methods do
 not require the ``edges`` package.
 
 ```python
-from trails import get_edges_lcia_method_names
+from trails import Trails, get_edges_lcia_method_names
 
 edges_method = get_edges_lcia_method_names()[0]
 
-lca(
-    trails=trails,
+trails_edges = Trails(
+    package,
+    interpolate_annual=True,
     edges_methods=[edges_method],
+)
+
+lca(
+    trails=trails_edges,
     edges_reuse_cached_cfs=True,
 )
 ```
 
-``edges_methods`` is mutually exclusive with regular ``methods``. With the
+``edges_methods`` is mutually exclusive with regular ``methods`` for final
+scoring. Constructor ``methods`` can still be used as regular LCIA proxy
+methods for adaptive routing before final EDGES scoring. With the
 default ``edges_reuse_cached_cfs=True``, TRAILS reuses EDGES matched CF
 templates across scenario years when supplier and consumer metadata signatures
 are identical, while still evaluating numeric CF values for each year. Set

@@ -75,10 +75,17 @@ class _BioAccumulationContext:
 
 
 class Trails:
-    """Wrapper around 3D sparse matrices A and B loaded from a Frictionless data package, with
-    optional temporal interpolation.
+    """Wrapper around time-indexed technosphere and biosphere matrices.
 
-    Dimensions: A: (scenario, activity, product) B: (scenario, activity, biosphere_flow)
+    ``Trails`` loads 3D sparse matrices from a Frictionless data package, can
+    interpolate scenario slices to annual resolution, and stores optional
+    default LCIA configuration. Constructor ``methods`` are regular LCIA method
+    names used by ``lca()``, ``static_lca()``, and adaptive routing unless a
+    call provides explicit methods. Constructor ``edges_methods`` are used only
+    for final EDGES scoring in ``lca()``.
+
+    Dimensions: ``A`` is ``(scenario, activity, product)`` and ``B`` is
+    ``(scenario, activity, biosphere_flow)``.
     """
 
     def __init__(
@@ -90,30 +97,50 @@ class Trails:
         interpolation_end_year_offset: int = 1,
         value_dtype: np.dtype = np.float32,
         index_dtype: np.dtype = np.int32,
+        methods: list[str] | None = None,
+        edges_methods: list[Any] | None = None,
+        ei_version: str = "3.11",
         debug: bool = False,
     ) -> None:
-        """init  .
+        """Initialize a Trails data package wrapper.
 
-        :param package: Value for `package`.
+        :param package: Frictionless data package or compatible package object.
         :type package: Any
-        :param interpolate_annual: Value for `interpolate_annual`.
+        :param interpolate_annual: Interpolate scenario matrices to annual
+            resolution.
         :type interpolate_annual: bool
-        :param cache_interpolation: Value for `cache_interpolation`.
+        :param cache_interpolation: Load/write annual interpolation caches.
         :type cache_interpolation: bool
         :param interpolation_start_year_offset: Offset from min inventory year.
         :type interpolation_start_year_offset: int
         :param interpolation_end_year_offset: Offset from max inventory year.
         :type interpolation_end_year_offset: int
-        :param value_dtype: Value for `value_dtype`.
+        :param value_dtype: Sparse matrix value dtype.
         :type value_dtype: np.dtype
-        :param index_dtype: Value for `index_dtype`.
+        :param index_dtype: Sparse matrix coordinate dtype.
         :type index_dtype: np.dtype
-        :param debug: Value for `debug`.
+        :param methods: Default regular LCIA methods. These are used by
+            ``lca()``, ``static_lca()``, and adaptive routing when those calls do
+            not provide explicit methods.
+        :type methods: list[str] | None
+        :param edges_methods: Default EDGES methods for ``lca()``. These are
+            used only for final EDGES scoring, not for adaptive routing.
+        :type edges_methods: list[Any] | None
+        :param ei_version: Default ecoinvent LCIA data version for regular
+            methods and adaptive routing.
+        :type ei_version: str
+        :param debug: Enable diagnostic logging.
         :type debug: bool"""
         self.package = package
         self.value_dtype = value_dtype
         self.index_dtype = index_dtype
         self.debug = debug
+        self.methods = list(methods) if methods else None
+        self.edges_methods = list(edges_methods) if edges_methods else None
+        self.ei_version = str(ei_version)
+        self.default_methods = self.methods
+        self.default_edges_methods = self.edges_methods
+        self.default_ei_version = self.ei_version
         self.interpolation_start_year_offset = int(interpolation_start_year_offset)
         self.interpolation_end_year_offset = int(interpolation_end_year_offset)
 
@@ -1674,11 +1701,13 @@ class Trails:
         return TemporalDistribution(tex)
 
     def lca(self, *args: Any, **kwargs: Any) -> Any:
-        """Lca.
+        """Run temporal LCA using the stored routing graph.
 
         :param args: Variadic positional arguments.
         :type args: Any
-        :param kwargs: Variadic keyword arguments.
+        :param kwargs: Keyword arguments forwarded to ``trails.lca.lca``. If
+            ``methods``, ``edges_methods``, or ``ei_version`` are omitted, the
+            defaults configured on this ``Trails`` instance are used.
         :type kwargs: Any
         :returns: Return value.
         :rtype: Any"""
@@ -1703,7 +1732,7 @@ class Trails:
         adaptive_methods: str | list[str] | tuple[str, ...] | None = None,
         adaptive_score_cutoff: float | None = None,
         adaptive_relative_score_cutoff: float | None = None,
-        adaptive_ei_version: str = "3.11",
+        adaptive_ei_version: str | None = None,
         adaptive_min_depth: int = 1,
         adaptive_use_cache: bool = True,
     ) -> None:
@@ -1747,8 +1776,10 @@ class Trails:
         :type attribute_to_roots: bool
         :param debug: Enable detailed routing logging.
         :type debug: bool
-        :param adaptive_methods: Optional LCIA method or methods used to screen
-            branch impact potential. If omitted, routing uses fixed-depth mode.
+        :param adaptive_methods: Optional regular LCIA method or methods used
+            to screen branch impact potential. If omitted and an adaptive cutoff
+            is provided, ``Trails(..., methods=...)`` is used. EDGES methods
+            cannot currently be used for adaptive screening.
         :type adaptive_methods: str | list[str] | tuple[str, ...] | None
         :param adaptive_score_cutoff: Absolute score-potential cutoff. Branches
             with potential at or below this value are left as frontier nodes.
@@ -1757,17 +1788,19 @@ class Trails:
             root static score potential.
         :type adaptive_relative_score_cutoff: float | None
         :param adaptive_ei_version: Ecoinvent LCIA version used for adaptive
-            screening factors.
-        :type adaptive_ei_version: str
+            screening factors. If omitted, ``Trails(..., ei_version=...)`` is
+            used.
+        :type adaptive_ei_version: str | None
         :param adaptive_min_depth: Minimum child depth before adaptive pruning can
             stop a branch.
         :type adaptive_min_depth: int
         :param adaptive_use_cache: Reuse and write internal static activity score
             cache files.
         :type adaptive_use_cache: bool
-        :raises ValueError: If adaptive cutoffs are provided without
-            ``adaptive_methods``, if adaptive methods are provided without any
-            cutoff, or if ``max_depth=None`` is used outside adaptive mode.
+        :raises ValueError: If adaptive cutoffs are provided without explicit or
+            constructor-default regular LCIA methods, if adaptive methods are
+            provided without any cutoff, or if ``max_depth=None`` is used
+            outside adaptive mode.
         :raises RuntimeError: If required routing dependencies are missing."""
         try:
             import networkx as nx
@@ -1984,25 +2017,41 @@ class Trails:
             start_amount,
         )
 
-        adaptive_enabled = adaptive_methods is not None
-        if adaptive_methods is None and (
+        adaptive_requested = bool(
             adaptive_score_cutoff is not None
             or adaptive_relative_score_cutoff is not None
-        ):
-            raise ValueError(
-                "adaptive_methods must be provided when adaptive score cutoffs "
-                "are set."
-            )
-        if adaptive_enabled and (
-            adaptive_score_cutoff is None and adaptive_relative_score_cutoff is None
-        ):
+        )
+        if adaptive_methods is None and adaptive_requested:
+            default_methods = getattr(self, "default_methods", None)
+            if default_methods:
+                adaptive_methods = list(default_methods)
+            elif getattr(self, "default_edges_methods", None):
+                raise ValueError(
+                    "Adaptive routing requires regular LCIA methods. EDGES "
+                    "methods can be used for final lca(..., edges_methods=...), "
+                    "but provide Trails(..., methods=...) or adaptive_methods=... "
+                    "for adaptive screening."
+                )
+            else:
+                raise ValueError(
+                    "adaptive_methods or Trails(..., methods=...) must be "
+                    "provided when adaptive score cutoffs are set."
+                )
+        adaptive_enabled = adaptive_methods is not None
+        if adaptive_enabled and not adaptive_requested:
             raise ValueError(
                 "Set adaptive_score_cutoff or adaptive_relative_score_cutoff "
-                "when adaptive_methods is provided."
+                "when adaptive_methods or Trails(..., methods=...) is provided "
+                "for adaptive routing."
             )
         if max_depth is None and not adaptive_enabled:
             raise ValueError("max_depth=None is only supported in adaptive mode.")
         max_depth_int = None if max_depth is None else int(max_depth)
+        adaptive_ei_version_effective = (
+            str(adaptive_ei_version)
+            if adaptive_ei_version is not None
+            else str(getattr(self, "default_ei_version", "3.11"))
+        )
 
         adaptive_scores = None
         adaptive_threshold = 0.0
@@ -2018,7 +2067,7 @@ class Trails:
             adaptive_scores = _ensure_static_activity_scores(
                 self,
                 methods=adaptive_method_names,
-                ei_version=str(adaptive_ei_version),
+                ei_version=adaptive_ei_version_effective,
                 use_cache=bool(adaptive_use_cache),
             )
             adaptive_root_potential, _ = _activity_score_potential(
@@ -2238,7 +2287,7 @@ class Trails:
             "adaptive_root_score_potential": (
                 float(adaptive_root_potential) if adaptive_enabled else None
             ),
-            "adaptive_ei_version": str(adaptive_ei_version),
+            "adaptive_ei_version": adaptive_ei_version_effective,
             "adaptive_min_depth": int(adaptive_min_depth),
         }
 
@@ -2253,10 +2302,10 @@ class Trails:
         self,
         year: int,
         act_idx: int,
-        methods: list[str],
+        methods: list[str] | None = None,
         amount: float = 1.0,
         debug: bool = False,
-        ei_version: str = "3.11",
+        ei_version: str | None = None,
     ) -> None:
         """Static lca.
 
@@ -2264,14 +2313,16 @@ class Trails:
         :type year: int
         :param act_idx: Value for `act_idx`.
         :type act_idx: int
-        :param methods: Value for `methods`.
-        :type methods: list[str]
+        :param methods: Regular LCIA methods. If omitted, uses
+            ``Trails(..., methods=...)``.
+        :type methods: list[str] | None
         :param amount: Value for `amount`.
         :type amount: float
         :param debug: Value for `debug`.
         :type debug: bool
-        :param ei_version: Value for `ei_version`.
-        :type ei_version: str
+        :param ei_version: LCIA data version. If omitted, uses
+            ``Trails(..., ei_version=...)``.
+        :type ei_version: str | None
         :returns: Return value.
         :rtype: None"""
         lca_static(
