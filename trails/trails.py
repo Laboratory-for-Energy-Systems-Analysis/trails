@@ -86,6 +86,17 @@ class _BioAccumulationContext:
     B_row_cache_local: dict[int, tuple[np.ndarray, np.ndarray, np.ndarray]]
 
 
+@dataclass(frozen=True)
+class _TechExpansionEntry:
+    """Cached technosphere child expansion for one parent activity row."""
+
+    child_act_idx: int
+    scale: float
+    amount_source: str
+    offsets: tuple[int, ...] = ()
+    weights: tuple[float, ...] = ()
+
+
 class Trails:
     """Wrapper around time-indexed technosphere and biosphere matrices.
 
@@ -342,6 +353,9 @@ class Trails:
         self._tech_td_expanded_cache: dict[
             tuple[int, int, int],
             tuple[Optional[TemporalExchange], list[tuple[int, float]]],
+        ] = {}
+        self._tech_expansion_template_cache: dict[
+            tuple[int, int, int, bool], tuple[_TechExpansionEntry, ...]
         ] = {}
         self._static_activity_score_cache: dict[str, object] = {}
         self._static_activity_score_fingerprint: tuple[tuple, str] | None = None
@@ -1649,6 +1663,199 @@ class Trails:
         self._td_offsets_cache[key] = offsets_and_weights
         return offsets_and_weights
 
+    def _get_tech_expansion_template(
+        self,
+        *,
+        year: int,
+        t: int,
+        act_idx: int,
+        use_temporal_distributions: bool,
+        debug: bool,
+    ) -> tuple[_TechExpansionEntry, ...]:
+        """Return cached child-expansion entries for one technosphere row."""
+        if self.A is None:
+            return ()
+
+        template_year = int(self._map_year_to_template_year(int(year)))
+        cache_key = (
+            int(template_year),
+            int(t),
+            int(act_idx),
+            bool(use_temporal_distributions),
+        )
+        cached_template = self._tech_expansion_template_cache.get(cache_key)
+        if cached_template is not None:
+            return cached_template
+
+        row_key = (int(t), int(act_idx))
+        cached_row = self._A_row_cache.get(row_key)
+        if cached_row is not None:
+            product_indices, values = cached_row
+        else:
+            A_row = self.A[int(t), int(act_idx), :]
+            if A_row.nnz == 0:
+                self._tech_expansion_template_cache[cache_key] = ()
+                return ()
+            product_indices = A_row.coords[0]
+            values = A_row.data
+            self._A_row_cache[row_key] = (product_indices, values)
+
+        entries: list[_TechExpansionEntry] = []
+        for product_index_raw, exchange_value_raw in zip(product_indices, values):
+            product_index = int(product_index_raw)
+            exchange_value = float(exchange_value_raw)
+            if exchange_value == 0.0 or product_index == int(act_idx):
+                continue
+
+            tex = None
+            offsets_and_weights: list[tuple[int, float]] = []
+            if use_temporal_distributions:
+                tex, offsets_and_weights = self._get_tech_td_expanded(
+                    year=int(year),
+                    act_idx=int(act_idx),
+                    prod_idx=product_index,
+                    debug=debug,
+                )
+
+            if tex is None or not use_temporal_distributions:
+                production_amount = self._production_amount(int(t), product_index)
+                if production_amount == 0.0:
+                    continue
+                scale = self._child_amount(1.0, exchange_value) / production_amount
+                if scale != 0.0:
+                    entries.append(
+                        _TechExpansionEntry(
+                            child_act_idx=product_index,
+                            scale=float(scale),
+                            amount_source="none",
+                        )
+                    )
+                continue
+
+            if not offsets_and_weights:
+                if debug:
+                    logger.warning(
+                        "expand_temporal_exchanges: TD produced no "
+                        "offsets/weights for (year=%d prod=%d) -> dropping "
+                        "exchange",
+                        int(year),
+                        product_index,
+                    )
+                continue
+
+            offsets = tuple(int(offset) for offset, _weight in offsets_and_weights)
+            weights = tuple(float(weight) for _offset, weight in offsets_and_weights)
+            amount_source = str(getattr(tex, "amount_source", "port"))
+            if amount_source == "matrix":
+                entries.append(
+                    _TechExpansionEntry(
+                        child_act_idx=product_index,
+                        scale=0.0,
+                        amount_source="matrix",
+                        offsets=offsets,
+                        weights=weights,
+                    )
+                )
+                continue
+
+            production_amount = self._production_amount(int(t), product_index)
+            if production_amount == 0.0:
+                continue
+            scale = self._child_amount(1.0, exchange_value) / production_amount
+            if scale != 0.0:
+                entries.append(
+                    _TechExpansionEntry(
+                        child_act_idx=product_index,
+                        scale=float(scale),
+                        amount_source="port",
+                        offsets=offsets,
+                        weights=weights,
+                    )
+                )
+
+        result = tuple(entries)
+        self._tech_expansion_template_cache[cache_key] = result
+        return result
+
+    def _expand_temporal_child_demands_fast(
+        self,
+        *,
+        year: int,
+        act_idx: int,
+        amount: float,
+        use_temporal_distributions: bool = True,
+        debug: bool = False,
+    ) -> dict[tuple[int, int], float]:
+        """Expand child demands as flat ``(year, activity)`` amounts."""
+        context = self._get_scenario_context(int(year))
+        if context is None:
+            return {}
+        _scenario_year, _scenario_label, t = context
+        entries = self._get_tech_expansion_template(
+            year=int(year),
+            t=int(t),
+            act_idx=int(act_idx),
+            use_temporal_distributions=bool(use_temporal_distributions),
+            debug=debug,
+        )
+        if not entries:
+            return {}
+
+        out: dict[tuple[int, int], float] = {}
+
+        def add(raw_year: int, child_act: int, child_amount: float) -> None:
+            if child_amount == 0.0:
+                return
+            key = (int(raw_year), int(child_act))
+            out[key] = float(out.get(key, 0.0)) + float(child_amount)
+
+        parent_amount = float(amount)
+        for entry in entries:
+            child_act = int(entry.child_act_idx)
+            if entry.amount_source == "matrix":
+                for offset, weight in zip(entry.offsets, entry.weights):
+                    if weight == 0.0:
+                        continue
+                    raw_year = int(year) + int(offset)
+                    y_eff = int(self._map_year_to_scenario_year(raw_year))
+                    t_eff = self.scenario_index.get(str(y_eff))
+                    if t_eff is None:
+                        continue
+                    exchange_value = float(
+                        self.A[int(t_eff), int(act_idx), child_act]
+                    )
+                    if exchange_value == 0.0:
+                        continue
+                    product_amount = self._child_amount(1.0, exchange_value)
+                    production_amount = self._production_amount(int(t_eff), child_act)
+                    if production_amount == 0.0:
+                        continue
+                    child_amount = (
+                        parent_amount
+                        * float(product_amount)
+                        / float(production_amount)
+                        * float(weight)
+                    )
+                    add(raw_year, child_act, child_amount)
+                continue
+
+            child_base_amount = parent_amount * float(entry.scale)
+            if child_base_amount == 0.0:
+                continue
+            if not entry.offsets:
+                add(int(year), child_act, child_base_amount)
+                continue
+            for offset, weight in zip(entry.offsets, entry.weights):
+                if weight == 0.0:
+                    continue
+                add(
+                    int(year) + int(offset),
+                    child_act,
+                    child_base_amount * float(weight),
+                )
+
+        return out
+
     def get_A_for_scenario(self, label: str) -> sparse.COO:
         """Get a for scenario.
 
@@ -1838,6 +2045,8 @@ class Trails:
         node_key_cache: dict[tuple[int, int, int], tuple] = {}
         meta_cache: dict[tuple[int, int], dict] = {}
         bio_cache: dict[tuple[int, int], bool] = {}
+        node_attrs: dict[tuple, dict[str, Any]] = {}
+        edge_amounts: dict[tuple[tuple, tuple], float] = {}
 
         def map_year(y: int) -> int:
             """Map year.
@@ -1914,31 +2123,30 @@ class Trails:
             :type depth: int
             :param act_idx: Value for `act_idx`.
             :type act_idx: int"""
-            if key in G:
+            if key in node_attrs:
                 return
             scenario_year = map_year(year)
             label = str(scenario_year)
             meta = _get_activity_meta(label, int(act_idx))
-            G.add_node(
-                key,
-                year=int(year),
-                depth=int(depth),
-                act_idx=int(act_idx),
-                name=meta.get("name") or "",
-                reference_product=meta.get("reference product") or "",
-                location=meta.get("location") or "",
-                amount=0.0,
-                frontier_amount=0.0,
-                direct_bio_amount=0.0,
-                score_potential=0.0,
-                score_potential_by_method={},
-                adaptive_cutoff_reason=None,
-                adaptive_score_cutoff=None,
-                adaptive_cutoff_potential=0.0,
-                frontier_reasons={},
-                frontier_roots={},
-                direct_bio_roots={},
-            )
+            node_attrs[key] = {
+                "year": int(year),
+                "depth": int(depth),
+                "act_idx": int(act_idx),
+                "name": meta.get("name") or "",
+                "reference_product": meta.get("reference product") or "",
+                "location": meta.get("location") or "",
+                "amount": 0.0,
+                "frontier_amount": 0.0,
+                "direct_bio_amount": 0.0,
+                "score_potential": 0.0,
+                "score_potential_by_method": {},
+                "adaptive_cutoff_reason": None,
+                "adaptive_score_cutoff": None,
+                "adaptive_cutoff_potential": 0.0,
+                "frontier_reasons": {},
+                "frontier_roots": {},
+                "direct_bio_roots": {},
+            }
 
         def _add_root_amount(
             data: dict[int, float], root_act: int | None, amt: float, fallback: int
@@ -1965,7 +2173,7 @@ class Trails:
             reason: str,
             score_potential: float | None = None,
         ) -> None:
-            node = G.nodes[node_key]
+            node = node_attrs[node_key]
             node["frontier_amount"] = float(node["frontier_amount"]) + float(amt)
             reasons = node.setdefault("frontier_reasons", {})
             reasons[reason] = float(reasons.get(reason, 0.0)) + float(amt)
@@ -1980,32 +2188,77 @@ class Trails:
             if attribute_to_roots:
                 _add_root_amount(node["frontier_roots"], root_act, amt, fallback)
 
-        def _add_score_potential(
-            node_key: tuple,
+        score_unit_cache: dict[tuple[int, int], tuple[float, tuple[float, ...]]] = {}
+        score_amounts: dict[tuple, float] = {}
+
+        def _cached_unit_score_potential(
+            *,
+            year: int,
+            act_idx: int,
+        ) -> tuple[float, tuple[float, ...]]:
+            """Return cached absolute static score potential for one unit."""
+            if adaptive_scores is None:
+                return 0.0, ()
+            cache_key = (int(year), int(act_idx))
+            cached = score_unit_cache.get(cache_key)
+            if cached is not None:
+                return cached
+            unit_max, unit_values = adaptive_scores.unit_score_potential(
+                year=int(year),
+                activity=int(act_idx),
+            )
+            cached = (
+                float(unit_max),
+                tuple(float(value) for value in unit_values),
+            )
+            score_unit_cache[cache_key] = cached
+            return cached
+
+        def _add_score_amount(node_key: tuple, amt: float) -> None:
+            """Accumulate absolute demand amount for score diagnostics."""
+            if adaptive_scores is None:
+                return
+            score_amounts[node_key] = float(score_amounts.get(node_key, 0.0)) + abs(
+                float(amt)
+            )
+
+        def _score_potential(
             *,
             year: int,
             act_idx: int,
             amt: float,
         ) -> float:
-            """Accumulate adaptive static score potential on a graph node."""
+            """Return adaptive static score potential for one routed amount."""
             if adaptive_scores is None:
                 return 0.0
-            potential, by_method = _activity_score_potential(
-                adaptive_scores,
+            unit_max, _unit_values = _cached_unit_score_potential(
                 year=int(year),
-                activity=int(act_idx),
-                amount=float(amt),
+                act_idx=int(act_idx),
             )
-            node = G.nodes[node_key]
-            node["score_potential"] = float(node.get("score_potential", 0.0)) + float(
-                potential
-            )
-            method_potentials = node.setdefault("score_potential_by_method", {})
-            for method, value in by_method.items():
-                method_potentials[method] = float(
-                    method_potentials.get(method, 0.0)
-                ) + float(value)
-            return float(potential)
+            amount_abs = abs(float(amt))
+            return amount_abs * float(unit_max)
+
+        def _flush_score_potentials() -> None:
+            """Write deferred score-potential diagnostics onto graph nodes."""
+            if adaptive_scores is None:
+                return
+            methods = adaptive_scores.methods
+            for node_key, amount_abs in score_amounts.items():
+                node = node_attrs[node_key]
+                unit_max, unit_values = _cached_unit_score_potential(
+                    year=int(node["year"]),
+                    act_idx=int(node["act_idx"]),
+                )
+                node["score_potential"] = float(amount_abs) * float(unit_max)
+                if len(methods) == 1:
+                    node["score_potential_by_method"] = {
+                        methods[0]: float(amount_abs) * float(unit_values[0])
+                    }
+                    continue
+                node["score_potential_by_method"] = {
+                    method: float(amount_abs) * float(value)
+                    for method, value in zip(methods, unit_values)
+                }
 
         def _should_adaptively_stop(
             *,
@@ -2018,8 +2271,6 @@ class Trails:
                 and int(depth) >= int(adaptive_min_depth)
                 and float(potential) <= float(adaptive_threshold)
             )
-
-        G = nx.DiGraph()
 
         queue = deque()
         start_year_int = int(self._map_year_to_scenario_year(start_year_int))
@@ -2152,16 +2403,11 @@ class Trails:
 
             node_key = _node_key(year, depth, act)
             _ensure_node(node_key, year, depth, act)
-            G.nodes[node_key]["amount"] = float(G.nodes[node_key]["amount"]) + float(
-                amt
-            )
+            node_attrs[node_key]["amount"] = float(
+                node_attrs[node_key]["amount"]
+            ) + float(amt)
             if depth == 0:
-                _add_score_potential(
-                    node_key,
-                    year=year,
-                    act_idx=act,
-                    amt=amt,
-                )
+                _add_score_amount(node_key, amt)
 
             scenario_year = year
             has_direct_bio = self._has_direct_biosphere(scenario_year, act, bio_cache)
@@ -2176,7 +2422,7 @@ class Trails:
                 )
                 continue
 
-            child_demands = self.expand_temporal_exchanges(
+            child_demands = self._expand_temporal_child_demands_fast(
                 year=year,
                 act_idx=act,
                 amount=amt,
@@ -2195,100 +2441,108 @@ class Trails:
                 continue
 
             if has_direct_bio and depth > 0:
-                G.nodes[node_key]["direct_bio_amount"] = float(
-                    G.nodes[node_key]["direct_bio_amount"]
+                node_attrs[node_key]["direct_bio_amount"] = float(
+                    node_attrs[node_key]["direct_bio_amount"]
                 ) + float(amt)
                 if attribute_to_roots:
                     _add_root_amount(
-                        G.nodes[node_key]["direct_bio_roots"], root_act, amt, act
+                        node_attrs[node_key]["direct_bio_roots"], root_act, amt, act
                     )
 
-            for child_year, mapping in child_demands.items():
-                for child_act, child_amt in mapping.items():
-                    child_amt = float(child_amt)
-                    if child_amt == 0.0:
-                        continue
+            for (child_year, child_act), child_amt in child_demands.items():
+                child_amt = float(child_amt)
+                if child_amt == 0.0:
+                    continue
 
-                    child_year = map_year(child_year)
-                    child_act = int(child_act)
-                    child_depth = int(depth) + 1
-                    child_node = _node_key(child_year, child_depth, child_act)
-                    _ensure_node(child_node, child_year, child_depth, child_act)
+                child_year = map_year(child_year)
+                child_act = int(child_act)
+                child_depth = int(depth) + 1
+                child_node = _node_key(child_year, child_depth, child_act)
+                _ensure_node(child_node, child_year, child_depth, child_act)
 
-                    if G.has_edge(node_key, child_node):
-                        G.edges[node_key, child_node]["amount"] = (
-                            float(G.edges[node_key, child_node]["amount"]) + child_amt
-                        )
-                    else:
-                        G.add_edge(node_key, child_node, amount=child_amt)
+                edge_key = (node_key, child_node)
+                edge_amounts[edge_key] = float(edge_amounts.get(edge_key, 0.0)) + (
+                    child_amt
+                )
+                _add_score_amount(child_node, child_amt)
 
-                    if depth == 0:
-                        child_root = child_act
-                        child_path = ((child_year, child_act),)
-                    else:
-                        child_root = root_act
-                        child_path = path + ((child_year, child_act),)
+                if depth == 0:
+                    child_root = child_act
+                    child_path = ((child_year, child_act),)
+                else:
+                    child_root = root_act
+                    child_path = path + ((child_year, child_act),)
 
-                    potential = _add_score_potential(
+                if max_depth_int is not None and child_depth >= max_depth_int:
+                    node_attrs[child_node]["amount"] = float(
+                        node_attrs[child_node]["amount"]
+                    ) + float(child_amt)
+                    _add_frontier_amount(
                         child_node,
+                        amt=child_amt,
+                        root_act=child_root,
+                        fallback=child_act,
+                        reason="max_depth",
+                    )
+                    continue
+
+                if abs(child_amt) < float(min_amount):
+                    _add_frontier_amount(
+                        child_node,
+                        amt=child_amt,
+                        root_act=child_root,
+                        fallback=child_act,
+                        reason="min_amount",
+                    )
+                    continue
+
+                potential = 0.0
+                if adaptive_enabled and int(child_depth) >= int(adaptive_min_depth):
+                    potential = _score_potential(
                         year=child_year,
                         act_idx=child_act,
                         amt=child_amt,
                     )
 
-                    if max_depth_int is not None and child_depth >= max_depth_int:
-                        G.nodes[child_node]["amount"] = float(
-                            G.nodes[child_node]["amount"]
-                        ) + float(child_amt)
-                        _add_frontier_amount(
-                            child_node,
-                            amt=child_amt,
-                            root_act=child_root,
-                            fallback=child_act,
-                            reason="max_depth",
-                        )
-                        continue
-
-                    if abs(child_amt) < float(min_amount):
-                        _add_frontier_amount(
-                            child_node,
-                            amt=child_amt,
-                            root_act=child_root,
-                            fallback=child_act,
-                            reason="min_amount",
-                        )
-                        continue
-
-                    if _should_adaptively_stop(
-                        depth=child_depth,
-                        potential=potential,
-                    ):
-                        G.nodes[child_node]["amount"] = float(
-                            G.nodes[child_node]["amount"]
-                        ) + float(child_amt)
-                        _add_frontier_amount(
-                            child_node,
-                            amt=child_amt,
-                            root_act=child_root,
-                            fallback=child_act,
-                            reason="adaptive_score_cutoff",
-                            score_potential=potential,
-                        )
-                        continue
-
-                    queue.append(
-                        (
-                            child_year,
-                            child_act,
-                            child_amt,
-                            child_depth,
-                            child_path,
-                            child_root,
-                        )
+                if _should_adaptively_stop(
+                    depth=child_depth,
+                    potential=potential,
+                ):
+                    node_attrs[child_node]["amount"] = float(
+                        node_attrs[child_node]["amount"]
+                    ) + float(child_amt)
+                    _add_frontier_amount(
+                        child_node,
+                        amt=child_amt,
+                        root_act=child_root,
+                        fallback=child_act,
+                        reason="adaptive_score_cutoff",
+                        score_potential=potential,
                     )
+                    continue
+
+                queue.append(
+                    (
+                        child_year,
+                        child_act,
+                        child_amt,
+                        child_depth,
+                        child_path,
+                        child_root,
+                    )
+                )
 
         if pbar is not None:
             pbar.close()
+
+        _flush_score_potentials()
+
+        G = nx.DiGraph()
+        G.add_nodes_from((key, attrs) for key, attrs in node_attrs.items())
+        G.add_edges_from(
+            (parent, child, {"amount": amount})
+            for (parent, child), amount in edge_amounts.items()
+        )
 
         self.graph = G
         self._routing_attribute_to_roots = bool(attribute_to_roots)

@@ -1043,6 +1043,8 @@ def import_excel_inventory(
     trails._A_row_cache.clear()
     if hasattr(trails, "_production_amount_cache"):
         trails._production_amount_cache.clear()
+    if hasattr(trails, "_tech_expansion_template_cache"):
+        trails._tech_expansion_template_cache.clear()
     trails._direct_bio_cache_by_year.clear()
     trails._tech_td_cache.clear()
     trails._tech_td_expanded_cache.clear()

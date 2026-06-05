@@ -10,7 +10,7 @@ derive branch score potentials.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import hashlib
 import json
 from pathlib import Path
@@ -45,6 +45,50 @@ class StaticActivityScores:
     method_index: dict[str, int]
     cache_path: Path | None = None
     loaded_from_cache: bool = False
+    _abs_scores: np.ndarray | None = field(default=None, init=False, repr=False)
+    _max_abs_scores: np.ndarray | None = field(default=None, init=False, repr=False)
+
+    def _ensure_potential_arrays(self) -> tuple[np.ndarray, np.ndarray]:
+        """Return cached finite absolute scores and method maxima.
+
+        Adaptive routing may evaluate score potential millions of times. The
+        raw ``scores`` array preserves signed static intensities for diagnostics,
+        while routing only needs finite absolute values and the maximum across
+        methods. These derived arrays are prepared lazily and are intentionally
+        not stored on disk.
+        """
+        if self._abs_scores is None or self._max_abs_scores is None:
+            abs_scores = np.nan_to_num(
+                np.asarray(self.scores, dtype=np.float64),
+                copy=True,
+                nan=0.0,
+                posinf=0.0,
+                neginf=0.0,
+            )
+            np.abs(abs_scores, out=abs_scores)
+            self._abs_scores = abs_scores
+            self._max_abs_scores = abs_scores.max(axis=0)
+        return self._abs_scores, self._max_abs_scores
+
+    def unit_score_potential(
+        self,
+        *,
+        year: int,
+        activity: int,
+    ) -> tuple[float, np.ndarray]:
+        """Return absolute static score potential for one unit of demand.
+
+        :param year: Scenario year to look up.
+        :type year: int
+        :param activity: Activity column index to look up.
+        :type activity: int
+        :returns: Maximum unit potential and per-method unit potentials.
+        :rtype: tuple[float, numpy.ndarray]
+        """
+        abs_scores, max_abs_scores = self._ensure_potential_arrays()
+        year_pos = self.year_index[int(year)]
+        act = int(activity)
+        return float(max_abs_scores[year_pos, act]), abs_scores[:, year_pos, act]
 
 
 def _hash_array(hasher: hashlib._Hash, array: np.ndarray) -> None:
@@ -397,17 +441,13 @@ def _activity_score_potential(
     score across the configured adaptive methods. The per-method dictionary is
     kept on routing graph nodes for diagnostics and plotting.
     """
-    year_pos = scores.year_index[int(year)]
-    act = int(activity)
     amount_abs = abs(float(amount))
-    values = np.nan_to_num(
-        scores.scores[:, year_pos, act],
-        nan=0.0,
-        posinf=0.0,
-        neginf=0.0,
+    unit_max, unit_values = scores.unit_score_potential(
+        year=int(year),
+        activity=int(activity),
     )
-    potentials = amount_abs * np.abs(values)
+    potentials = amount_abs * unit_values
     by_method = {
         method: float(potentials[pos]) for pos, method in enumerate(scores.methods)
     }
-    return float(potentials.max(initial=0.0)), by_method
+    return amount_abs * float(unit_max), by_method

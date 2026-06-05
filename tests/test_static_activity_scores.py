@@ -9,6 +9,8 @@ import pytest
 from trails.lca import lca
 from trails.lcia import get_lcia_method_names
 from trails.static_activity_scores import (
+    StaticActivityScores,
+    _activity_score_potential,
     _activity_scores_from_product_intensities,
     _ensure_static_activity_scores,
 )
@@ -109,6 +111,87 @@ def test_activity_scores_respect_negative_production_sign() -> None:
 
     assert scores[0, 0] == pytest.approx(10.0)
     assert scores[0, 1] == pytest.approx(-20.0)
+
+
+def test_activity_score_potential_reuses_finite_absolute_arrays() -> None:
+    """Potential lookup should sanitize scores once and reuse derived arrays."""
+    scores = StaticActivityScores(
+        methods=("m1", "m2"),
+        years=np.asarray([2030], dtype=np.int64),
+        scores=np.asarray(
+            [
+                [[np.nan, -2.0, np.inf]],
+                [[3.0, -np.inf, -4.0]],
+            ],
+            dtype=np.float64,
+        ),
+        year_index={2030: 0},
+        method_index={"m1": 0, "m2": 1},
+    )
+
+    potential, by_method = _activity_score_potential(
+        scores,
+        year=2030,
+        activity=0,
+        amount=-2.0,
+    )
+    assert potential == pytest.approx(6.0)
+    assert by_method == {"m1": pytest.approx(0.0), "m2": pytest.approx(6.0)}
+
+    abs_scores = scores._abs_scores
+    max_abs_scores = scores._max_abs_scores
+    assert abs_scores is not None
+    assert max_abs_scores is not None
+
+    potential, by_method = _activity_score_potential(
+        scores,
+        year=2030,
+        activity=1,
+        amount=5.0,
+    )
+    assert potential == pytest.approx(10.0)
+    assert by_method == {"m1": pytest.approx(10.0), "m2": pytest.approx(0.0)}
+    assert scores._abs_scores is abs_scores
+    assert scores._max_abs_scores is max_abs_scores
+
+    potential, by_method = _activity_score_potential(
+        scores,
+        year=2030,
+        activity=2,
+        amount=0.5,
+    )
+    assert potential == pytest.approx(2.0)
+    assert by_method == {"m1": pytest.approx(0.0), "m2": pytest.approx(2.0)}
+
+
+def test_fast_temporal_child_expansion_matches_public_expansion() -> None:
+    """Routing's flat expansion helper should match the public dict API."""
+    trails = _load_example_trails()
+
+    for use_temporal_distributions in (False, True):
+        public = trails.expand_temporal_exchanges(
+            year=2005,
+            act_idx=2,
+            amount=1.0,
+            use_temporal_distributions=use_temporal_distributions,
+            debug=False,
+        )
+        expected = {
+            (int(year), int(act)): float(amount)
+            for year, mapping in public.items()
+            for act, amount in mapping.items()
+        }
+        fast = trails._expand_temporal_child_demands_fast(
+            year=2005,
+            act_idx=2,
+            amount=1.0,
+            use_temporal_distributions=use_temporal_distributions,
+            debug=False,
+        )
+
+        assert set(fast) == set(expected)
+        for key, value in expected.items():
+            assert fast[key] == pytest.approx(value, rel=1e-12, abs=1e-15)
 
 
 def test_regular_depth_assessments_remain_available() -> None:
