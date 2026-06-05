@@ -358,6 +358,8 @@ class Trails:
         self._tech_expansion_template_cache: dict[
             tuple[int, int, int, bool], tuple[_TechExpansionEntry, ...]
         ] = {}
+        self._scenario_year_map_cache: dict[int, int] = {}
+        self._template_year_map_cache: dict[int, int] = {}
         self._static_activity_score_cache: dict[str, object] = {}
         self._static_activity_score_fingerprint: tuple[tuple, str] | None = None
 
@@ -1437,15 +1439,23 @@ class Trails:
         :type year: int
         :returns: Return value.
         :rtype: int"""
-        y = max(self.min_year, min(self.max_year, int(year)))
+        year_int = int(year)
+        cached = self._scenario_year_map_cache.get(year_int)
+        if cached is not None:
+            return cached
+
+        y = max(self.min_year, min(self.max_year, year_int))
 
         # If we have a full annual grid, this is effectively identity after clipping
         if len(self.years_int) == (self.max_year - self.min_year + 1):
-            return y
+            self._scenario_year_map_cache[year_int] = int(y)
+            return int(y)
 
         # Otherwise: snap to nearest scenario year
         idx = int(np.abs(self.years_int - y).argmin())
-        return int(self.years_int[idx])
+        mapped = int(self.years_int[idx])
+        self._scenario_year_map_cache[year_int] = mapped
+        return mapped
 
     def _map_year_to_template_year(self, year: int) -> int:
         """map year to template year.
@@ -1455,8 +1465,13 @@ class Trails:
         :returns: Return value.
         :rtype: int"""
         y = int(year)
+        cached = self._template_year_map_cache.get(y)
+        if cached is not None:
+            return cached
         idx = int(np.abs(self.template_years_int - y).argmin())
-        return int(self.template_years_int[idx])
+        mapped = int(self.template_years_int[idx])
+        self._template_year_map_cache[y] = mapped
+        return mapped
 
     def _get_scenario_context(self, year: int) -> tuple[int, str, int] | None:
         """get scenario context.
@@ -1832,26 +1847,24 @@ class Trails:
 
         out: dict[tuple[int, int], float] = {}
 
-        def add(raw_year: int, child_act: int, child_amount: float) -> None:
-            if child_amount == 0.0:
-                return
-            key = (int(raw_year), int(child_act))
-            out[key] = float(out.get(key, 0.0)) + float(child_amount)
-
+        year_int = int(year)
+        act_int = int(act_idx)
         parent_amount = float(amount)
+        out_get = out.get
+        scenario_index_get = self.scenario_index.get
         for entry in entries:
             child_act = int(entry.child_act_idx)
             if entry.amount_source == "matrix":
                 for offset, weight in zip(entry.offsets, entry.weights):
                     if weight == 0.0:
                         continue
-                    raw_year = int(year) + int(offset)
+                    raw_year = year_int + offset
                     y_eff = int(self._map_year_to_scenario_year(raw_year))
-                    t_eff = self.scenario_index.get(str(y_eff))
+                    t_eff = scenario_index_get(str(y_eff))
                     if t_eff is None:
                         continue
                     exchange_value = float(
-                        self.A[int(t_eff), int(act_idx), child_act]
+                        self.A[int(t_eff), act_int, child_act]
                     )
                     if exchange_value == 0.0:
                         continue
@@ -1865,23 +1878,26 @@ class Trails:
                         / float(production_amount)
                         * float(weight)
                     )
-                    add(raw_year, child_act, child_amount)
+                    if child_amount != 0.0:
+                        key = (raw_year, child_act)
+                        out[key] = out_get(key, 0.0) + child_amount
                 continue
 
             child_base_amount = parent_amount * float(entry.scale)
             if child_base_amount == 0.0:
                 continue
             if not entry.offsets:
-                add(int(year), child_act, child_base_amount)
+                key = (year_int, child_act)
+                out[key] = out_get(key, 0.0) + child_base_amount
                 continue
             for offset, weight in zip(entry.offsets, entry.weights):
                 if weight == 0.0:
                     continue
-                add(
-                    int(year) + int(offset),
-                    child_act,
-                    child_base_amount * float(weight),
-                )
+                child_amount = child_base_amount * weight
+                if child_amount != 0.0:
+                    raw_year = year_int + offset
+                    key = (raw_year, child_act)
+                    out[key] = out_get(key, 0.0) + child_amount
 
         return out
 
@@ -2085,6 +2101,10 @@ class Trails:
             "min_amount": {},
             "adaptive_score_cutoff": {},
         }
+        frontier_max_depth = frontier_reasons["max_depth"]
+        frontier_leaf = frontier_reasons["leaf"]
+        frontier_min_amount = frontier_reasons["min_amount"]
+        frontier_adaptive_cutoff = frontier_reasons["adaptive_score_cutoff"]
         frontier_roots: dict[tuple[tuple[int, int, int], int], float] = {}
         adaptive_cutoff_nodes: set[tuple[int, int, int]] = set()
         adaptive_cutoff_potentials: dict[tuple[int, int, int], float] = {}
@@ -2129,10 +2149,6 @@ class Trails:
                     return meta
             return {}
 
-        def _node_key(year: int, depth: int, act_idx: int) -> tuple[int, int, int]:
-            """Return compact internal node key."""
-            return (int(year), int(depth), int(act_idx))
-
         def _public_node_key(key: tuple[int, int, int]) -> tuple:
             """Return public graph key with activity metadata."""
             cached = public_node_key_cache.get(key)
@@ -2156,28 +2172,12 @@ class Trails:
             public_node_key_cache[key] = public_key
             return public_key
 
-        def _ensure_node(
-            key: tuple[int, int, int],
-            year: int,
-            depth: int,
-            act_idx: int,
-        ) -> None:
-            """ensure node.
-
-            :param key: Value for `key`.
-            :type key: tuple
-            :param year: Value for `year`.
-            :type year: int
-            :param depth: Value for `depth`.
-            :type depth: int
-            :param act_idx: Value for `act_idx`.
-            :type act_idx: int"""
-            if key in node_attrs:
-                return
-            node_attrs[key] = {
-                "year": int(year),
-                "depth": int(depth),
-                "act_idx": int(act_idx),
+        def _new_node_attrs(year: int, depth: int, act_idx: int) -> dict[str, Any]:
+            """Return initial graph attributes for one compact routing node."""
+            return {
+                "year": year,
+                "depth": depth,
+                "act_idx": act_idx,
                 "name": "",
                 "reference_product": "",
                 "location": "",
@@ -2215,23 +2215,34 @@ class Trails:
             amt: float,
             root_act: int | None,
             fallback: int,
-            reason: str,
-            score_potential: float | None = None,
+            reason_amounts: dict[tuple[int, int, int], float],
         ) -> None:
             frontier_amounts[node_key] = frontier_amounts.get(node_key, 0.0) + amt
-            reason_amounts = frontier_reasons[reason]
             reason_amounts[node_key] = reason_amounts.get(node_key, 0.0) + amt
-            if reason == "adaptive_score_cutoff":
-                adaptive_cutoff_nodes.add(node_key)
-                if score_potential is not None:
-                    adaptive_cutoff_potentials[node_key] = max(
-                        adaptive_cutoff_potentials.get(node_key, 0.0),
-                        score_potential,
-                    )
             if attribute_to_roots:
                 root = int(root_act) if root_act is not None else int(fallback)
                 root_key = (node_key, root)
                 frontier_roots[root_key] = frontier_roots.get(root_key, 0.0) + amt
+
+        def _add_adaptive_frontier_amount(
+            node_key: tuple[int, int, int],
+            amt: float,
+            root_act: int | None,
+            fallback: int,
+            score_potential: float,
+        ) -> None:
+            _add_frontier_amount(
+                node_key,
+                amt,
+                root_act,
+                fallback,
+                frontier_adaptive_cutoff,
+            )
+            adaptive_cutoff_nodes.add(node_key)
+            adaptive_cutoff_potentials[node_key] = max(
+                adaptive_cutoff_potentials.get(node_key, 0.0),
+                score_potential,
+            )
 
         def _flush_frontier_amounts() -> None:
             """Write deferred frontier bookkeeping onto graph node attributes."""
@@ -2413,6 +2424,7 @@ class Trails:
 
         track_score_amounts = adaptive_scores is not None
         debug_enabled = bool(self.debug)
+        track_roots = bool(attribute_to_roots)
 
         queue.append((start_year_int, start_activity, start_activity_amount, 0, None))
 
@@ -2442,11 +2454,12 @@ class Trails:
             if root_act is None and depth > 0:
                 root_act = int(act)
 
-            node_key = _node_key(year, depth, act)
-            _ensure_node(node_key, year, depth, act)
-            node_attrs[node_key]["amount"] = float(
-                node_attrs[node_key]["amount"]
-            ) + float(amt)
+            node_key = (year, depth, act)
+            node = node_attrs.get(node_key)
+            if node is None:
+                node = _new_node_attrs(year, depth, act)
+                node_attrs[node_key] = node
+            node["amount"] = node["amount"] + amt
             if track_score_amounts and depth == 0:
                 score_amounts[node_key] = score_amounts.get(node_key, 0.0) + abs(amt)
 
@@ -2459,7 +2472,7 @@ class Trails:
                     amt,
                     root_act,
                     act,
-                    "max_depth",
+                    frontier_max_depth,
                 )
                 continue
 
@@ -2477,17 +2490,15 @@ class Trails:
                     amt,
                     root_act,
                     act,
-                    "leaf",
+                    frontier_leaf,
                 )
                 continue
 
             if has_direct_bio and depth > 0:
-                node_attrs[node_key]["direct_bio_amount"] = float(
-                    node_attrs[node_key]["direct_bio_amount"]
-                ) + float(amt)
-                if attribute_to_roots:
+                node["direct_bio_amount"] = node["direct_bio_amount"] + amt
+                if track_roots:
                     _add_root_amount(
-                        node_attrs[node_key]["direct_bio_roots"], root_act, amt, act
+                        node["direct_bio_roots"], root_act, amt, act
                     )
 
             for (child_year, child_act), child_amt in child_demands.items():
@@ -2497,9 +2508,12 @@ class Trails:
 
                 child_year = map_year(child_year)
                 child_act = int(child_act)
-                child_depth = int(depth) + 1
-                child_node = _node_key(child_year, child_depth, child_act)
-                _ensure_node(child_node, child_year, child_depth, child_act)
+                child_depth = depth + 1
+                child_node = (child_year, child_depth, child_act)
+                child_attrs = node_attrs.get(child_node)
+                if child_attrs is None:
+                    child_attrs = _new_node_attrs(child_year, child_depth, child_act)
+                    node_attrs[child_node] = child_attrs
 
                 edge_key = (node_key, child_node)
                 edge_amounts[edge_key] = edge_amounts.get(edge_key, 0.0) + child_amt
@@ -2514,16 +2528,23 @@ class Trails:
                     child_root = root_act
 
                 if max_depth_int is not None and child_depth >= max_depth_int:
-                    node_attrs[child_node]["amount"] = float(
-                        node_attrs[child_node]["amount"]
-                    ) + float(child_amt)
-                    _add_frontier_amount(
-                        child_node,
-                        child_amt,
-                        child_root,
-                        child_act,
-                        "max_depth",
+                    child_attrs["amount"] = child_attrs["amount"] + child_amt
+                    frontier_amounts[child_node] = (
+                        frontier_amounts.get(child_node, 0.0) + child_amt
                     )
+                    frontier_max_depth[child_node] = (
+                        frontier_max_depth.get(child_node, 0.0) + child_amt
+                    )
+                    if track_roots:
+                        root = (
+                            int(child_root)
+                            if child_root is not None
+                            else int(child_act)
+                        )
+                        root_key = (child_node, root)
+                        frontier_roots[root_key] = (
+                            frontier_roots.get(root_key, 0.0) + child_amt
+                        )
                     continue
 
                 if abs(child_amt) < min_amount_float:
@@ -2532,7 +2553,7 @@ class Trails:
                         child_amt,
                         child_root,
                         child_act,
-                        "min_amount",
+                        frontier_min_amount,
                     )
                     continue
 
@@ -2543,15 +2564,12 @@ class Trails:
                         amt=child_amt,
                     )
                     if potential <= adaptive_threshold:
-                        node_attrs[child_node]["amount"] = float(
-                            node_attrs[child_node]["amount"]
-                        ) + float(child_amt)
-                        _add_frontier_amount(
+                        child_attrs["amount"] = child_attrs["amount"] + child_amt
+                        _add_adaptive_frontier_amount(
                             child_node,
                             child_amt,
                             child_root,
                             child_act,
-                            "adaptive_score_cutoff",
                             potential,
                         )
                         continue
