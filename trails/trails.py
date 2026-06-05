@@ -2079,7 +2079,12 @@ class Trails:
             tuple[tuple[int, int, int], tuple[int, int, int]], float
         ] = {}
         frontier_amounts: dict[tuple[int, int, int], float] = {}
-        frontier_reasons: dict[tuple[tuple[int, int, int], str], float] = {}
+        frontier_reasons: dict[str, dict[tuple[int, int, int], float]] = {
+            "max_depth": {},
+            "leaf": {},
+            "min_amount": {},
+            "adaptive_score_cutoff": {},
+        }
         frontier_roots: dict[tuple[tuple[int, int, int], int], float] = {}
         adaptive_cutoff_nodes: set[tuple[int, int, int]] = set()
         adaptive_cutoff_potentials: dict[tuple[int, int, int], float] = {}
@@ -2207,41 +2212,35 @@ class Trails:
 
         def _add_frontier_amount(
             node_key: tuple[int, int, int],
-            *,
             amt: float,
             root_act: int | None,
             fallback: int,
             reason: str,
             score_potential: float | None = None,
         ) -> None:
-            frontier_amounts[node_key] = float(frontier_amounts.get(node_key, 0.0)) + (
-                float(amt)
-            )
-            reason_key = (node_key, str(reason))
-            frontier_reasons[reason_key] = float(
-                frontier_reasons.get(reason_key, 0.0)
-            ) + float(amt)
+            frontier_amounts[node_key] = frontier_amounts.get(node_key, 0.0) + amt
+            reason_amounts = frontier_reasons[reason]
+            reason_amounts[node_key] = reason_amounts.get(node_key, 0.0) + amt
             if reason == "adaptive_score_cutoff":
                 adaptive_cutoff_nodes.add(node_key)
                 if score_potential is not None:
                     adaptive_cutoff_potentials[node_key] = max(
-                        float(adaptive_cutoff_potentials.get(node_key, 0.0)),
-                        float(score_potential),
+                        adaptive_cutoff_potentials.get(node_key, 0.0),
+                        score_potential,
                     )
             if attribute_to_roots:
                 root = int(root_act) if root_act is not None else int(fallback)
                 root_key = (node_key, root)
-                frontier_roots[root_key] = float(
-                    frontier_roots.get(root_key, 0.0)
-                ) + float(amt)
+                frontier_roots[root_key] = frontier_roots.get(root_key, 0.0) + amt
 
         def _flush_frontier_amounts() -> None:
             """Write deferred frontier bookkeeping onto graph node attributes."""
             for node_key, amount in frontier_amounts.items():
                 node_attrs[node_key]["frontier_amount"] = float(amount)
-            for (node_key, reason), amount in frontier_reasons.items():
-                reasons = node_attrs[node_key].setdefault("frontier_reasons", {})
-                reasons[reason] = float(amount)
+            for reason, reason_amounts in frontier_reasons.items():
+                for node_key, amount in reason_amounts.items():
+                    reasons = node_attrs[node_key].setdefault("frontier_reasons", {})
+                    reasons[reason] = float(amount)
             for node_key in adaptive_cutoff_nodes:
                 node = node_attrs[node_key]
                 node["adaptive_cutoff_reason"] = "adaptive_score_cutoff"
@@ -2280,14 +2279,6 @@ class Trails:
             score_unit_cache[cache_key] = cached
             return cached
 
-        def _add_score_amount(node_key: tuple, amt: float) -> None:
-            """Accumulate absolute demand amount for score diagnostics."""
-            if adaptive_scores is None:
-                return
-            score_amounts[node_key] = float(score_amounts.get(node_key, 0.0)) + abs(
-                float(amt)
-            )
-
         def _score_potential(
             *,
             year: int,
@@ -2325,18 +2316,6 @@ class Trails:
                     method: float(amount_abs) * float(value)
                     for method, value in zip(methods, unit_values)
                 }
-
-        def _should_adaptively_stop(
-            *,
-            depth: int,
-            potential: float,
-        ) -> bool:
-            """Return True when adaptive routing should leave a child as frontier."""
-            return bool(
-                adaptive_enabled
-                and int(depth) >= int(adaptive_min_depth)
-                and float(potential) <= float(adaptive_threshold)
-            )
 
         queue = deque()
         start_year_int = int(self._map_year_to_scenario_year(start_year_int))
@@ -2391,6 +2370,8 @@ class Trails:
         if max_depth is None and not adaptive_enabled:
             raise ValueError("max_depth=None is only supported in adaptive mode.")
         max_depth_int = None if max_depth is None else int(max_depth)
+        min_amount_float = float(min_amount)
+        adaptive_min_depth_int = int(adaptive_min_depth)
         adaptive_ei_version_effective = (
             str(adaptive_ei_version)
             if adaptive_ei_version is not None
@@ -2430,9 +2411,10 @@ class Trails:
                 )
             adaptive_threshold = max(thresholds) if thresholds else 0.0
 
-        queue.append(
-            (start_year_int, start_activity, start_activity_amount, 0, (), None)
-        )
+        track_score_amounts = adaptive_scores is not None
+        debug_enabled = bool(self.debug)
+
+        queue.append((start_year_int, start_activity, start_activity_amount, 0, None))
 
         if show_progress:
             pbar = tqdm(
@@ -2447,7 +2429,7 @@ class Trails:
         nodes_processed = 0
 
         while queue:
-            year, act, amt, depth, path, root_act = queue.popleft()
+            year, act, amt, depth, root_act = queue.popleft()
             year = map_year(year)
 
             if amt == 0.0:
@@ -2458,22 +2440,15 @@ class Trails:
                 pbar.update(1)
 
             if root_act is None and depth > 0:
-                if path:
-                    first = path[0]
-                    if isinstance(first, (tuple, list)) and len(first) >= 2:
-                        root_act = int(first[1])
-                    else:
-                        root_act = int(act)
-                else:
-                    root_act = int(act)
+                root_act = int(act)
 
             node_key = _node_key(year, depth, act)
             _ensure_node(node_key, year, depth, act)
             node_attrs[node_key]["amount"] = float(
                 node_attrs[node_key]["amount"]
             ) + float(amt)
-            if depth == 0:
-                _add_score_amount(node_key, amt)
+            if track_score_amounts and depth == 0:
+                score_amounts[node_key] = score_amounts.get(node_key, 0.0) + abs(amt)
 
             scenario_year = year
             has_direct_bio = self._has_direct_biosphere(scenario_year, act, bio_cache)
@@ -2481,10 +2456,10 @@ class Trails:
             if max_depth_int is not None and depth >= max_depth_int:
                 _add_frontier_amount(
                     node_key,
-                    amt=amt,
-                    root_act=root_act,
-                    fallback=act,
-                    reason="max_depth",
+                    amt,
+                    root_act,
+                    act,
+                    "max_depth",
                 )
                 continue
 
@@ -2493,16 +2468,16 @@ class Trails:
                 act_idx=act,
                 amount=amt,
                 use_temporal_distributions=True,
-                debug=bool(self.debug),
+                debug=debug_enabled,
             )
 
             if not child_demands:
                 _add_frontier_amount(
                     node_key,
-                    amt=amt,
-                    root_act=root_act,
-                    fallback=act,
-                    reason="leaf",
+                    amt,
+                    root_act,
+                    act,
+                    "leaf",
                 )
                 continue
 
@@ -2527,17 +2502,16 @@ class Trails:
                 _ensure_node(child_node, child_year, child_depth, child_act)
 
                 edge_key = (node_key, child_node)
-                edge_amounts[edge_key] = float(edge_amounts.get(edge_key, 0.0)) + (
-                    child_amt
-                )
-                _add_score_amount(child_node, child_amt)
+                edge_amounts[edge_key] = edge_amounts.get(edge_key, 0.0) + child_amt
+                if track_score_amounts:
+                    score_amounts[child_node] = (
+                        score_amounts.get(child_node, 0.0) + abs(child_amt)
+                    )
 
                 if depth == 0:
                     child_root = child_act
-                    child_path = ((child_year, child_act),)
                 else:
                     child_root = root_act
-                    child_path = path + ((child_year, child_act),)
 
                 if max_depth_int is not None and child_depth >= max_depth_int:
                     node_attrs[child_node]["amount"] = float(
@@ -2545,47 +2519,42 @@ class Trails:
                     ) + float(child_amt)
                     _add_frontier_amount(
                         child_node,
-                        amt=child_amt,
-                        root_act=child_root,
-                        fallback=child_act,
-                        reason="max_depth",
+                        child_amt,
+                        child_root,
+                        child_act,
+                        "max_depth",
                     )
                     continue
 
-                if abs(child_amt) < float(min_amount):
+                if abs(child_amt) < min_amount_float:
                     _add_frontier_amount(
                         child_node,
-                        amt=child_amt,
-                        root_act=child_root,
-                        fallback=child_act,
-                        reason="min_amount",
+                        child_amt,
+                        child_root,
+                        child_act,
+                        "min_amount",
                     )
                     continue
 
-                potential = 0.0
-                if adaptive_enabled and int(child_depth) >= int(adaptive_min_depth):
+                if adaptive_enabled and child_depth >= adaptive_min_depth_int:
                     potential = _score_potential(
                         year=child_year,
                         act_idx=child_act,
                         amt=child_amt,
                     )
-
-                if _should_adaptively_stop(
-                    depth=child_depth,
-                    potential=potential,
-                ):
-                    node_attrs[child_node]["amount"] = float(
-                        node_attrs[child_node]["amount"]
-                    ) + float(child_amt)
-                    _add_frontier_amount(
-                        child_node,
-                        amt=child_amt,
-                        root_act=child_root,
-                        fallback=child_act,
-                        reason="adaptive_score_cutoff",
-                        score_potential=potential,
-                    )
-                    continue
+                    if potential <= adaptive_threshold:
+                        node_attrs[child_node]["amount"] = float(
+                            node_attrs[child_node]["amount"]
+                        ) + float(child_amt)
+                        _add_frontier_amount(
+                            child_node,
+                            child_amt,
+                            child_root,
+                            child_act,
+                            "adaptive_score_cutoff",
+                            potential,
+                        )
+                        continue
 
                 queue.append(
                     (
@@ -2593,7 +2562,6 @@ class Trails:
                         child_act,
                         child_amt,
                         child_depth,
-                        child_path,
                         child_root,
                     )
                 )
