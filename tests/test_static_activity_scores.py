@@ -194,6 +194,23 @@ def test_fast_temporal_child_expansion_matches_public_expansion() -> None:
             assert fast[key] == pytest.approx(value, rel=1e-12, abs=1e-15)
 
 
+def test_production_amount_vector_matches_sparse_diagonal() -> None:
+    """Production amount cache should match finite nonzero diagonal entries."""
+    trails = _load_example_trails()
+    t = trails.scenario_index["2005"]
+    vector = trails._production_amount_vector(t)
+
+    assert trails._production_amount_vector(t) is vector
+    assert vector.shape == (trails.A.shape[1],)
+
+    for act_idx in range(min(8, int(trails.A.shape[1]))):
+        raw = float(trails.A[int(t), act_idx, act_idx])
+        expected = 1.0 if (not np.isfinite(raw) or abs(raw) < 1e-30) else abs(raw)
+
+        assert vector[act_idx] == pytest.approx(expected)
+        assert trails._production_amount(t, act_idx) == pytest.approx(expected)
+
+
 def test_regular_depth_assessments_remain_available() -> None:
     """The example case should still run with the fixed-depth routing mode."""
     assert GWP_METHOD in get_lcia_method_names()

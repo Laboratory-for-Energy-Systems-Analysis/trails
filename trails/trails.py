@@ -349,6 +349,7 @@ class Trails:
         self._tech_td_cache: dict[tuple[int, int, int], Optional[TemporalExchange]] = {}
         self._A_row_cache: dict[tuple[int, int], tuple[np.ndarray, np.ndarray]] = {}
         self._production_amount_cache: dict[tuple[int, int], float] = {}
+        self._production_amount_vector_cache: dict[int, np.ndarray] = {}
         self._direct_bio_cache_by_year: dict[int, np.ndarray] = {}
         self._tech_td_expanded_cache: dict[
             tuple[int, int, int],
@@ -1511,27 +1512,55 @@ class Trails:
         """Return the absolute production amount for an activity in a scenario."""
         if self.A is None:
             return 1.0
-        key = (int(t), int(act_idx))
+        act = int(act_idx)
+        vector = self._production_amount_vector(int(t))
+        if act < 0 or act >= int(vector.size):
+            return 1.0
+        return float(vector[act])
+
+    def _production_amount_vector(self, t: int) -> np.ndarray:
+        """Return absolute production amounts for all activities in a scenario."""
+        if self.A is None:
+            return np.ones(0, dtype=np.float64)
+        t_int = int(t)
+        vector_cache = getattr(self, "_production_amount_vector_cache", None)
+        if vector_cache is None:
+            vector_cache = self._production_amount_vector_cache = {}
+        cached_vector = vector_cache.get(t_int)
+        if cached_vector is not None:
+            return cached_vector
+
+        n_activities = int(self.A.shape[1])
+        production = np.ones(n_activities, dtype=np.float64)
+        try:
+            A_t = self.A[t_int, :, :]
+            coords = np.asarray(A_t.coords, dtype=np.int64)
+            data = np.asarray(A_t.data, dtype=np.float64)
+            if coords.ndim == 2 and coords.shape[0] == 2 and data.size:
+                diag_mask = coords[0] == coords[1]
+                if np.any(diag_mask):
+                    indices = coords[0, diag_mask].astype(np.intp, copy=False)
+                    values = np.abs(data[diag_mask])
+                    valid = (
+                        (indices >= 0)
+                        & (indices < n_activities)
+                        & np.isfinite(values)
+                        & (values >= 1e-30)
+                    )
+                    if np.any(valid):
+                        production[indices[valid]] = values[valid]
+        except Exception:
+            pass
+
+        vector_cache[t_int] = production
+
+        # Keep the legacy scalar cache coherent for callers that inspect it.
         cache = getattr(self, "_production_amount_cache", None)
         if cache is None:
             cache = self._production_amount_cache = {}
-        if key in cache:
-            return cache[key]
-        try:
-            value = self.A[key[0], key[1], key[1]]
-            amount = float(value)
-        except Exception:
-            try:
-                dense = value.todense() if hasattr(value, "todense") else value
-                amount = float(np.asarray(dense).item())
-            except Exception:
-                cache[key] = 1.0
-                return 1.0
-        if not np.isfinite(amount) or abs(amount) < 1e-30:
-            cache[key] = 1.0
-            return 1.0
-        cache[key] = abs(float(amount))
-        return cache[key]
+        for act, amount in enumerate(production):
+            cache[(t_int, int(act))] = float(amount)
+        return production
 
     def _activity_amount_from_product_demand(
         self,
@@ -2042,11 +2071,18 @@ class Trails:
 
         # Hot-path caches
         year_cache: dict[int, int] = {}
-        node_key_cache: dict[tuple[int, int, int], tuple] = {}
+        public_node_key_cache: dict[tuple[int, int, int], tuple] = {}
         meta_cache: dict[tuple[int, int], dict] = {}
         bio_cache: dict[tuple[int, int], bool] = {}
-        node_attrs: dict[tuple, dict[str, Any]] = {}
-        edge_amounts: dict[tuple[tuple, tuple], float] = {}
+        node_attrs: dict[tuple[int, int, int], dict[str, Any]] = {}
+        edge_amounts: dict[
+            tuple[tuple[int, int, int], tuple[int, int, int]], float
+        ] = {}
+        frontier_amounts: dict[tuple[int, int, int], float] = {}
+        frontier_reasons: dict[tuple[tuple[int, int, int], str], float] = {}
+        frontier_roots: dict[tuple[tuple[int, int, int], int], float] = {}
+        adaptive_cutoff_nodes: set[tuple[int, int, int]] = set()
+        adaptive_cutoff_potentials: dict[tuple[int, int, int], float] = {}
 
         def map_year(y: int) -> int:
             """Map year.
@@ -2088,31 +2124,39 @@ class Trails:
                     return meta
             return {}
 
-        def _node_key(year: int, depth: int, act_idx: int) -> tuple:
-            """node key.
+        def _node_key(year: int, depth: int, act_idx: int) -> tuple[int, int, int]:
+            """Return compact internal node key."""
+            return (int(year), int(depth), int(act_idx))
 
-            :param year: Value for `year`.
-            :type year: int
-            :param depth: Value for `depth`.
-            :type depth: int
-            :param act_idx: Value for `act_idx`.
-            :type act_idx: int
-            :returns: Return value.
-            :rtype: tuple"""
-            k = (int(year), int(depth), int(act_idx))
-            if k in node_key_cache:
-                return node_key_cache[k]
+        def _public_node_key(key: tuple[int, int, int]) -> tuple:
+            """Return public graph key with activity metadata."""
+            cached = public_node_key_cache.get(key)
+            if cached is not None:
+                return cached
+            year, depth, act_idx = key
             scenario_year = map_year(year)
             label = str(scenario_year)
             meta = _get_activity_meta(label, int(act_idx))
             name = meta.get("name") or ""
             ref_prod = meta.get("reference product") or ""
             location = meta.get("location") or ""
-            key = (int(year), int(depth), name, ref_prod, location, int(act_idx))
-            node_key_cache[k] = key
-            return key
+            public_key = (
+                int(year),
+                int(depth),
+                name,
+                ref_prod,
+                location,
+                int(act_idx),
+            )
+            public_node_key_cache[key] = public_key
+            return public_key
 
-        def _ensure_node(key: tuple, year: int, depth: int, act_idx: int) -> None:
+        def _ensure_node(
+            key: tuple[int, int, int],
+            year: int,
+            depth: int,
+            act_idx: int,
+        ) -> None:
             """ensure node.
 
             :param key: Value for `key`.
@@ -2125,16 +2169,13 @@ class Trails:
             :type act_idx: int"""
             if key in node_attrs:
                 return
-            scenario_year = map_year(year)
-            label = str(scenario_year)
-            meta = _get_activity_meta(label, int(act_idx))
             node_attrs[key] = {
                 "year": int(year),
                 "depth": int(depth),
                 "act_idx": int(act_idx),
-                "name": meta.get("name") or "",
-                "reference_product": meta.get("reference product") or "",
-                "location": meta.get("location") or "",
+                "name": "",
+                "reference_product": "",
+                "location": "",
                 "amount": 0.0,
                 "frontier_amount": 0.0,
                 "direct_bio_amount": 0.0,
@@ -2165,7 +2206,7 @@ class Trails:
             data[root] = float(data.get(root, 0.0)) + float(amt)
 
         def _add_frontier_amount(
-            node_key: tuple,
+            node_key: tuple[int, int, int],
             *,
             amt: float,
             root_act: int | None,
@@ -2173,20 +2214,45 @@ class Trails:
             reason: str,
             score_potential: float | None = None,
         ) -> None:
-            node = node_attrs[node_key]
-            node["frontier_amount"] = float(node["frontier_amount"]) + float(amt)
-            reasons = node.setdefault("frontier_reasons", {})
-            reasons[reason] = float(reasons.get(reason, 0.0)) + float(amt)
+            frontier_amounts[node_key] = float(frontier_amounts.get(node_key, 0.0)) + (
+                float(amt)
+            )
+            reason_key = (node_key, str(reason))
+            frontier_reasons[reason_key] = float(
+                frontier_reasons.get(reason_key, 0.0)
+            ) + float(amt)
             if reason == "adaptive_score_cutoff":
-                node["adaptive_cutoff_reason"] = reason
-                node["adaptive_score_cutoff"] = float(adaptive_threshold)
+                adaptive_cutoff_nodes.add(node_key)
                 if score_potential is not None:
-                    node["adaptive_cutoff_potential"] = max(
-                        float(node.get("adaptive_cutoff_potential", 0.0)),
+                    adaptive_cutoff_potentials[node_key] = max(
+                        float(adaptive_cutoff_potentials.get(node_key, 0.0)),
                         float(score_potential),
                     )
             if attribute_to_roots:
-                _add_root_amount(node["frontier_roots"], root_act, amt, fallback)
+                root = int(root_act) if root_act is not None else int(fallback)
+                root_key = (node_key, root)
+                frontier_roots[root_key] = float(
+                    frontier_roots.get(root_key, 0.0)
+                ) + float(amt)
+
+        def _flush_frontier_amounts() -> None:
+            """Write deferred frontier bookkeeping onto graph node attributes."""
+            for node_key, amount in frontier_amounts.items():
+                node_attrs[node_key]["frontier_amount"] = float(amount)
+            for (node_key, reason), amount in frontier_reasons.items():
+                reasons = node_attrs[node_key].setdefault("frontier_reasons", {})
+                reasons[reason] = float(amount)
+            for node_key in adaptive_cutoff_nodes:
+                node = node_attrs[node_key]
+                node["adaptive_cutoff_reason"] = "adaptive_score_cutoff"
+                node["adaptive_score_cutoff"] = float(adaptive_threshold)
+                node["adaptive_cutoff_potential"] = float(
+                    adaptive_cutoff_potentials.get(node_key, 0.0)
+                )
+            if attribute_to_roots:
+                for (node_key, root), amount in frontier_roots.items():
+                    roots = node_attrs[node_key].setdefault("frontier_roots", {})
+                    roots[int(root)] = float(amount)
 
         score_unit_cache: dict[tuple[int, int], tuple[float, tuple[float, ...]]] = {}
         score_amounts: dict[tuple, float] = {}
@@ -2535,12 +2601,22 @@ class Trails:
         if pbar is not None:
             pbar.close()
 
+        _flush_frontier_amounts()
         _flush_score_potentials()
 
         G = nx.DiGraph()
-        G.add_nodes_from((key, attrs) for key, attrs in node_attrs.items())
+        public_node_keys: dict[tuple[int, int, int], tuple] = {}
+        for key, attrs in node_attrs.items():
+            public_key = _public_node_key(key)
+            public_node_keys[key] = public_key
+            graph_attrs = dict(attrs)
+            _year, _depth, name, ref_prod, location, _act_idx = public_key
+            graph_attrs["name"] = name
+            graph_attrs["reference_product"] = ref_prod
+            graph_attrs["location"] = location
+            G.add_node(public_key, **graph_attrs)
         G.add_edges_from(
-            (parent, child, {"amount": amount})
+            (public_node_keys[parent], public_node_keys[child], {"amount": amount})
             for (parent, child), amount in edge_amounts.items()
         )
 
