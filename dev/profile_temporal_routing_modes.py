@@ -425,10 +425,20 @@ def main() -> None:
     parser.add_argument("--amount", type=float, default=None)
     parser.add_argument("--method", default=None)
     parser.add_argument("--ei-version", default="3.12")
-    parser.add_argument("--routing-min-amount", type=float, default=DEFAULT_ROUTING_MIN_AMOUNT)
-    parser.add_argument("--adaptive-relative-score-cutoff", type=float, default=DEFAULT_ADAPTIVE_RELATIVE_SCORE_CUTOFF)
-    parser.add_argument("--adaptive-min-depth", type=int, default=DEFAULT_ADAPTIVE_MIN_DEPTH)
-    parser.add_argument("--adaptive-max-depth", type=int, default=DEFAULT_ADAPTIVE_MAX_DEPTH)
+    parser.add_argument(
+        "--routing-min-amount", type=float, default=DEFAULT_ROUTING_MIN_AMOUNT
+    )
+    parser.add_argument(
+        "--adaptive-relative-score-cutoff",
+        type=float,
+        default=DEFAULT_ADAPTIVE_RELATIVE_SCORE_CUTOFF,
+    )
+    parser.add_argument(
+        "--adaptive-min-depth", type=int, default=DEFAULT_ADAPTIVE_MIN_DEPTH
+    )
+    parser.add_argument(
+        "--adaptive-max-depth", type=int, default=DEFAULT_ADAPTIVE_MAX_DEPTH
+    )
     parser.add_argument(
         "--adaptive-max-depths",
         type=_parse_depth_list,
@@ -460,7 +470,9 @@ def main() -> None:
     parser.add_argument("--iterative-atol", type=float, default=0.0)
     parser.add_argument("--iterative-restart", type=int, default=100)
     parser.add_argument("--iterative-maxiter", type=int, default=1000)
-    parser.add_argument("--iterative-use-guess", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument(
+        "--iterative-use-guess", action=argparse.BooleanOptionalAction, default=True
+    )
     parser.add_argument("--iterative-preconditioner", default="jacobi")
     parser.add_argument("--iterative-ilu-drop-tol", type=float, default=1e-4)
     parser.add_argument("--iterative-ilu-fill-factor", type=float, default=10.0)
@@ -480,7 +492,9 @@ def main() -> None:
     output_dir = Path(args.output_dir) / f"{args.case_key}_{mode_slug}"
 
     if args.lcia_json is not None:
-        os.environ["TRAILS_LCIA_EI312_JSON"] = str(args.lcia_json.expanduser().resolve())
+        os.environ["TRAILS_LCIA_EI312_JSON"] = str(
+            args.lcia_json.expanduser().resolve()
+        )
 
     inventory_paths = _default_inventory_paths(
         use_local=bool(args.use_local_inventories)
@@ -704,7 +718,9 @@ def main() -> None:
             "attribute_to_roots": True,
         }
     else:
-        max_depth = None if bool(args.no_adaptive_max_depth) else int(args.adaptive_max_depth)
+        max_depth = (
+            None if bool(args.no_adaptive_max_depth) else int(args.adaptive_max_depth)
+        )
         routing_kwargs = {
             "start_year": int(args.reference_year),
             "start_act_idx": activity_index,
@@ -714,7 +730,9 @@ def main() -> None:
             "show_progress": False,
             "attribute_to_roots": True,
             "adaptive_methods": [method],
-            "adaptive_relative_score_cutoff": float(args.adaptive_relative_score_cutoff),
+            "adaptive_relative_score_cutoff": float(
+                args.adaptive_relative_score_cutoff
+            ),
             "adaptive_ei_version": str(args.ei_version),
             "adaptive_min_depth": int(args.adaptive_min_depth),
         }
