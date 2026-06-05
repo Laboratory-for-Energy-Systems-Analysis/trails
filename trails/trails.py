@@ -1863,9 +1863,7 @@ class Trails:
                     t_eff = scenario_index_get(str(y_eff))
                     if t_eff is None:
                         continue
-                    exchange_value = float(
-                        self.A[int(t_eff), act_int, child_act]
-                    )
+                    exchange_value = float(self.A[int(t_eff), act_int, child_act])
                     if exchange_value == 0.0:
                         continue
                     product_amount = self._child_amount(1.0, exchange_value)
@@ -2091,9 +2089,9 @@ class Trails:
         meta_cache: dict[tuple[int, int], dict] = {}
         bio_cache: dict[tuple[int, int], bool] = {}
         node_attrs: dict[tuple[int, int, int], dict[str, Any]] = {}
-        edge_amounts: dict[
-            tuple[tuple[int, int, int], tuple[int, int, int]], float
-        ] = {}
+        edge_amounts: dict[tuple[tuple[int, int, int], tuple[int, int, int]], float] = (
+            {}
+        )
         frontier_amounts: dict[tuple[int, int, int], float] = {}
         frontier_reasons: dict[str, dict[tuple[int, int, int], float]] = {
             "max_depth": {},
@@ -2497,9 +2495,7 @@ class Trails:
             if has_direct_bio and depth > 0:
                 node["direct_bio_amount"] = node["direct_bio_amount"] + amt
                 if track_roots:
-                    _add_root_amount(
-                        node["direct_bio_roots"], root_act, amt, act
-                    )
+                    _add_root_amount(node["direct_bio_roots"], root_act, amt, act)
 
             for (child_year, child_act), child_amt in child_demands.items():
                 child_amt = float(child_amt)
@@ -2518,9 +2514,9 @@ class Trails:
                 edge_key = (node_key, child_node)
                 edge_amounts[edge_key] = edge_amounts.get(edge_key, 0.0) + child_amt
                 if track_score_amounts:
-                    score_amounts[child_node] = (
-                        score_amounts.get(child_node, 0.0) + abs(child_amt)
-                    )
+                    score_amounts[child_node] = score_amounts.get(
+                        child_node, 0.0
+                    ) + abs(child_amt)
 
                 if depth == 0:
                     child_root = child_act
