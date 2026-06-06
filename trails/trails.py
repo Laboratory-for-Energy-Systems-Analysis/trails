@@ -2419,9 +2419,8 @@ class Trails:
                 activity=start_activity,
                 amount=start_amount,
             )
-            adaptive_threshold = (
-                abs(float(adaptive_relative_score_cutoff))
-                * float(adaptive_root_potential)
+            adaptive_threshold = abs(float(adaptive_relative_score_cutoff)) * float(
+                adaptive_root_potential
             )
 
         track_score_amounts = adaptive_scores is not None

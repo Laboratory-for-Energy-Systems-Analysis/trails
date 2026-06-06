@@ -358,9 +358,7 @@ def _adaptive_depth_threshold_proof(
         ),
         "proof_depth_csv": str(proof_path),
         "proof_depth_violations_csv": str(violation_path),
-        "proof_depth_static_score_threshold_violations_csv": str(
-            static_violation_path
-        ),
+        "proof_depth_static_score_threshold_violations_csv": str(static_violation_path),
     }
     if run_stats:
         for key in (
@@ -418,8 +416,7 @@ def _adaptive_depth_threshold_proof(
     print(f"Wrote proof node CSV: {proof_path}", flush=True)
     print(f"Wrote proof violation CSV: {violation_path}", flush=True)
     print(
-        "Wrote static-score threshold violation CSV: "
-        f"{static_violation_path}",
+        "Wrote static-score threshold violation CSV: " f"{static_violation_path}",
         flush=True,
     )
     return summary
