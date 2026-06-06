@@ -139,11 +139,9 @@ when ``max_depth`` is omitted, TRAILS uses ``max_depth=None`` and
     )
     lca(trails=trails)
 
-The relative cutoff is multiplied by the root activity's static score
+The relative cutoff is multiplied by the functional unit's static score
 potential. In the example above, branches are stopped once their estimated
-static potential is at most ``1e-4`` of the root potential. Use
-``adaptive_score_cutoff`` instead when you want an absolute threshold in the
-LCIA method unit.
+static potential is at most ``1e-4`` of the functional unit potential.
 
 Routing modes
 ~~~~~~~~~~~~~
@@ -188,7 +186,7 @@ There are four common routing configurations:
 
 **4. Fixed-depth routing**
     Use this when you want the older depth-based behavior. Passing an integer
-    ``max_depth`` without adaptive cutoffs disables adaptive pruning.
+    ``max_depth`` without an adaptive relative cutoff disables adaptive pruning.
 
     .. code-block:: python
 
@@ -203,8 +201,8 @@ Important behavior:
 * Adaptive pruning only changes graph expansion. Stopped branches are stored as
   frontier demands and still enter the year-wise matrix solve in ``lca()``.
 * Passing an integer ``max_depth`` without an adaptive cutoff selects
-  fixed-depth routing. You can also combine adaptive cutoffs with a finite
-  ``max_depth`` to keep a hard cap.
+  fixed-depth routing. You can also combine an adaptive relative cutoff with a
+  finite ``max_depth`` to keep a hard cap.
 * Adaptive routing uses ``Trails(..., methods=...)`` unless
   ``adaptive_methods=...`` is provided explicitly. EDGES methods cannot
   currently be used for adaptive screening.

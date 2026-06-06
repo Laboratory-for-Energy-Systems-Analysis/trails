@@ -8,6 +8,7 @@ import pytest
 
 from trails.lca import lca
 from trails.lcia import get_lcia_method_names
+import trails.trails as trails_module
 from trails.static_activity_scores import (
     StaticActivityScores,
     _activity_score_potential,
@@ -22,10 +23,133 @@ GWP_METHOD = (
     "CML v4.8 2016 no LT - climate change no LT - global warming potential "
     "(GWP100) no LT"
 )
+SYNTHETIC_METHOD = "synthetic adaptive method"
+ADAPTIVE_CUTOFF_REASON = "adaptive_relative_score_cutoff"
 
 
 def _load_example_trails() -> Trails:
     return Trails(Package(str(EXAMPLE_PACKAGE)), interpolate_annual=False)
+
+
+class _SyntheticRoutingTrails(Trails):
+    """Minimal Trails object for deterministic temporal-routing tests."""
+
+    def __init__(
+        self,
+        expansions: dict[tuple[int, int], dict[tuple[int, int], float]],
+        production_amounts: dict[int, float] | None = None,
+    ) -> None:
+        self.debug = False
+        self.default_methods = None
+        self.default_edges_methods = None
+        self.default_ei_version = "3.11"
+        self.activity_indices = {}
+        self.scenario_index = {"2000": 0}
+        self.expansions = {
+            (int(year), int(act)): {
+                (int(child_year), int(child_act)): float(amount)
+                for (child_year, child_act), amount in children.items()
+            }
+            for (year, act), children in expansions.items()
+        }
+        self.production_amounts = {
+            int(activity): float(amount)
+            for activity, amount in (production_amounts or {}).items()
+        }
+        self.expand_calls: list[tuple[int, int, float]] = []
+
+    def _map_year_to_scenario_year(self, year: int) -> int:
+        return int(year)
+
+    def _get_scenario_context(self, year: int) -> tuple[int, str, int]:
+        return int(year), str(int(year)), 0
+
+    def _activity_amount_from_product_demand(
+        self,
+        t: int,
+        act_idx: int,
+        amount: float,
+    ) -> float:
+        return float(amount) / self._production_amount(int(t), int(act_idx))
+
+    def _production_amount(self, t: int, act_idx: int) -> float:
+        return float(self.production_amounts.get(int(act_idx), 1.0))
+
+    def _has_direct_biosphere(
+        self,
+        scenario_year: int,
+        act_idx: int,
+        cache: dict[tuple[int, int], bool],
+    ) -> bool:
+        return False
+
+    def _expand_temporal_child_demands_fast(
+        self,
+        *,
+        year: int,
+        act_idx: int,
+        amount: float,
+        use_temporal_distributions: bool = True,
+        debug: bool = False,
+    ) -> dict[tuple[int, int], float]:
+        self.expand_calls.append((int(year), int(act_idx), float(amount)))
+        return dict(self.expansions.get((int(year), int(act_idx)), {}))
+
+
+def _install_synthetic_static_scores(
+    monkeypatch: pytest.MonkeyPatch,
+    unit_scores: dict[int, float],
+) -> StaticActivityScores:
+    max_activity = max(unit_scores, default=0)
+    scores = np.zeros((1, 1, max_activity + 1), dtype=np.float64)
+    for activity, score in unit_scores.items():
+        scores[0, 0, int(activity)] = float(score)
+
+    result = StaticActivityScores(
+        methods=(SYNTHETIC_METHOD,),
+        years=np.asarray([2000], dtype=np.int64),
+        scores=scores,
+        year_index={2000: 0},
+        method_index={SYNTHETIC_METHOD: 0},
+    )
+
+    monkeypatch.setattr(
+        trails_module,
+        "_ensure_static_activity_scores",
+        lambda *args, **kwargs: result,
+    )
+    return result
+
+
+def _graph_nodes_by_depth_and_activity(trails: Trails) -> dict[tuple[int, int], dict]:
+    return {
+        (int(data["depth"]), int(data["act_idx"])): data
+        for _node, data in trails.graph.nodes(data=True)
+    }
+
+
+def _relative_cutoff_for_effective_score(
+    trails: Trails,
+    *,
+    effective_cutoff: float,
+    start_year: int,
+    start_act_idx: int,
+    amount: float,
+    methods: list[str],
+) -> float:
+    scores = _ensure_static_activity_scores(
+        trails,
+        methods=methods,
+        years=[int(start_year)],
+        use_cache=False,
+    )
+    root_potential, _ = _activity_score_potential(
+        scores,
+        year=int(start_year),
+        activity=int(start_act_idx),
+        amount=float(amount),
+    )
+    return float(effective_cutoff) / float(root_potential)
 
 
 def test_static_activity_scores_match_static_lca() -> None:
@@ -164,6 +288,184 @@ def test_activity_score_potential_reuses_finite_absolute_arrays() -> None:
     assert by_method == {"m1": pytest.approx(0.0), "m2": pytest.approx(2.0)}
 
 
+def test_adaptive_routing_expands_only_branches_above_relative_cutoff(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Adaptive routing should not expand children once potential is at cutoff."""
+    routing = _SyntheticRoutingTrails(
+        {
+            (2000, 0): {
+                (2000, 1): 0.02,
+                (2000, 2): 0.02,
+                (2000, 7): 0.01,
+            },
+            (2000, 1): {(2000, 3): 0.004, (2000, 4): 0.004},
+            (2000, 2): {(2000, 5): 100.0},
+            (2000, 3): {},
+            (2000, 4): {(2000, 6): 100.0},
+            (2000, 7): {(2000, 8): 100.0},
+        }
+    )
+    _install_synthetic_static_scores(
+        monkeypatch,
+        {
+            0: 100.0,
+            1: 100.0,
+            2: 10.0,
+            3: 300.0,
+            4: 100.0,
+            5: 10_000.0,
+            6: 10_000.0,
+            7: 100.0,
+            8: 10_000.0,
+        },
+    )
+
+    routing.temporal_routing(
+        start_year=2000,
+        start_act_idx=0,
+        amount=1.0,
+        max_depth=None,
+        min_amount=0.0,
+        show_progress=False,
+        attribute_to_roots=False,
+        adaptive_methods=[SYNTHETIC_METHOD],
+        adaptive_relative_score_cutoff=0.01,
+        adaptive_use_cache=False,
+    )
+
+    nodes = _graph_nodes_by_depth_and_activity(routing)
+
+    assert [(year, act) for year, act, _amount in routing.expand_calls] == [
+        (2000, 0),
+        (2000, 1),
+        (2000, 3),
+    ]
+    assert set(nodes) == {(0, 0), (1, 1), (1, 2), (1, 7), (2, 3), (2, 4)}
+    assert routing.graph.number_of_edges() == 5
+
+    assert nodes[(1, 1)]["score_potential"] == pytest.approx(2.0)
+    assert nodes[(1, 1)]["adaptive_cutoff_reason"] is None
+    assert nodes[(2, 3)]["score_potential"] == pytest.approx(1.2)
+    assert nodes[(2, 3)]["frontier_reasons"] == {"leaf": pytest.approx(0.004)}
+
+    assert nodes[(1, 2)]["score_potential"] == pytest.approx(0.2)
+    assert nodes[(1, 2)]["adaptive_cutoff_reason"] == ADAPTIVE_CUTOFF_REASON
+    assert nodes[(1, 2)]["adaptive_cutoff_potential"] == pytest.approx(0.2)
+    assert nodes[(1, 2)]["frontier_reasons"] == {
+        ADAPTIVE_CUTOFF_REASON: pytest.approx(0.02)
+    }
+
+    assert nodes[(2, 4)]["score_potential"] == pytest.approx(0.4)
+    assert nodes[(2, 4)]["adaptive_cutoff_reason"] == ADAPTIVE_CUTOFF_REASON
+    assert nodes[(2, 4)]["adaptive_cutoff_potential"] == pytest.approx(0.4)
+
+    assert nodes[(1, 7)]["score_potential"] == pytest.approx(1.0)
+    assert nodes[(1, 7)]["adaptive_cutoff_reason"] == ADAPTIVE_CUTOFF_REASON
+    assert nodes[(1, 7)]["adaptive_cutoff_potential"] == pytest.approx(1.0)
+
+
+def test_adaptive_relative_cutoff_scales_with_root_score_potential(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A relative cutoff should be multiplied by the functional unit potential."""
+    routing = _SyntheticRoutingTrails(
+        {
+            (2000, 0): {(2000, 1): 1.0, (2000, 2): 1.0},
+            (2000, 2): {},
+        }
+    )
+    _install_synthetic_static_scores(
+        monkeypatch,
+        {
+            0: 200.0,
+            1: 0.15,
+            2: 0.25,
+        },
+    )
+
+    routing.temporal_routing(
+        start_year=2000,
+        start_act_idx=0,
+        amount=1.0,
+        max_depth=None,
+        min_amount=0.0,
+        show_progress=False,
+        attribute_to_roots=False,
+        adaptive_methods=[SYNTHETIC_METHOD],
+        adaptive_relative_score_cutoff=1e-3,
+        adaptive_use_cache=False,
+    )
+
+    nodes = _graph_nodes_by_depth_and_activity(routing)
+
+    assert routing._routing_params["adaptive_root_score_potential"] == pytest.approx(
+        200.0
+    )
+    assert routing._routing_params["adaptive_effective_score_cutoff"] == pytest.approx(
+        0.2
+    )
+    assert [(year, act) for year, act, _amount in routing.expand_calls] == [
+        (2000, 0),
+        (2000, 2),
+    ]
+    assert nodes[(1, 1)]["score_potential"] == pytest.approx(0.15)
+    assert nodes[(1, 1)]["adaptive_cutoff_reason"] == ADAPTIVE_CUTOFF_REASON
+    assert nodes[(1, 2)]["score_potential"] == pytest.approx(0.25)
+    assert nodes[(1, 2)]["adaptive_cutoff_reason"] is None
+
+
+def test_adaptive_relative_cutoff_uses_functional_unit_product_score(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Non-unit production exchanges must not shrink the relative threshold."""
+    routing = _SyntheticRoutingTrails(
+        {
+            (2000, 0): {(2000, 1): 0.1, (2000, 2): 0.1},
+            (2000, 2): {},
+        },
+        production_amounts={0: 5.0, 1: 10.0, 2: 10.0},
+    )
+    _install_synthetic_static_scores(
+        monkeypatch,
+        {
+            0: 100.0,
+            1: 0.5,
+            2: 1.5,
+        },
+    )
+
+    routing.temporal_routing(
+        start_year=2000,
+        start_act_idx=0,
+        amount=10.0,
+        max_depth=None,
+        min_amount=0.0,
+        show_progress=False,
+        attribute_to_roots=False,
+        adaptive_methods=[SYNTHETIC_METHOD],
+        adaptive_relative_score_cutoff=1e-3,
+        adaptive_use_cache=False,
+    )
+
+    nodes = _graph_nodes_by_depth_and_activity(routing)
+
+    assert routing._routing_params["adaptive_root_score_potential"] == pytest.approx(
+        1000.0
+    )
+    assert routing._routing_params["adaptive_effective_score_cutoff"] == pytest.approx(
+        1.0
+    )
+    assert [(year, act) for year, act, _amount in routing.expand_calls] == [
+        (2000, 0),
+        (2000, 2),
+    ]
+    assert nodes[(1, 1)]["score_potential"] == pytest.approx(0.5)
+    assert nodes[(1, 1)]["adaptive_cutoff_reason"] == ADAPTIVE_CUTOFF_REASON
+    assert nodes[(1, 2)]["score_potential"] == pytest.approx(1.5)
+    assert nodes[(1, 2)]["adaptive_cutoff_reason"] is None
+
+
 def test_fast_temporal_child_expansion_matches_public_expansion() -> None:
     """Routing's flat expansion helper should match the public dict API."""
     trails = _load_example_trails()
@@ -250,6 +552,7 @@ def test_regular_depth_assessments_remain_available() -> None:
 
 def test_adaptive_routing_prunes_low_potential_branches() -> None:
     """Adaptive routing should coexist with max-depth routing and mark pruned nodes."""
+    effective_cutoff = 0.001
     fixed = _load_example_trails()
     fixed.temporal_routing(
         start_year=2005,
@@ -262,6 +565,14 @@ def test_adaptive_routing_prunes_low_potential_branches() -> None:
     )
 
     adaptive = _load_example_trails()
+    relative_cutoff = _relative_cutoff_for_effective_score(
+        adaptive,
+        effective_cutoff=effective_cutoff,
+        start_year=2005,
+        start_act_idx=2,
+        amount=1.0,
+        methods=[GWP_METHOD],
+    )
     adaptive.temporal_routing(
         start_year=2005,
         start_act_idx=2,
@@ -271,7 +582,7 @@ def test_adaptive_routing_prunes_low_potential_branches() -> None:
         show_progress=False,
         attribute_to_roots=False,
         adaptive_methods=[GWP_METHOD],
-        adaptive_score_cutoff=0.001,
+        adaptive_relative_score_cutoff=relative_cutoff,
         adaptive_use_cache=False,
     )
     lca(
@@ -287,18 +598,23 @@ def test_adaptive_routing_prunes_low_potential_branches() -> None:
     pruned_nodes = [
         data
         for _node, data in adaptive.graph.nodes(data=True)
-        if data.get("adaptive_cutoff_reason") == "adaptive_score_cutoff"
+        if data.get("adaptive_cutoff_reason") == ADAPTIVE_CUTOFF_REASON
     ]
 
     assert adaptive._routing_params["adaptive_enabled"] is True
-    assert adaptive._routing_params["adaptive_score_cutoff"] == pytest.approx(0.001)
-    assert adaptive._routing_params["adaptive_relative_score_cutoff"] is None
+    assert adaptive._routing_params["adaptive_relative_score_cutoff"] == pytest.approx(
+        relative_cutoff
+    )
+    assert adaptive._routing_params["adaptive_effective_score_cutoff"] == pytest.approx(
+        effective_cutoff
+    )
     assert adaptive.graph.number_of_nodes() == 15
     assert adaptive.graph.number_of_edges() == 17
     assert adaptive.graph.number_of_nodes() < fixed.graph.number_of_nodes()
     assert pruned_nodes
     assert all(
-        float(data["adaptive_cutoff_potential"]) <= 0.001 for data in pruned_nodes
+        float(data["adaptive_cutoff_potential"]) <= effective_cutoff
+        for data in pruned_nodes
     )
     assert float(adaptive.scores.sum()) == pytest.approx(
         0.15497121214866638,
@@ -308,6 +624,7 @@ def test_adaptive_routing_prunes_low_potential_branches() -> None:
 
 def test_adaptive_routing_can_run_without_depth_cap() -> None:
     """Adaptive routing can let score potential define the stopping depth."""
+    effective_cutoff = 0.1
     fixed_mode = _load_example_trails()
     with pytest.raises(ValueError, match="Trails\\(\\.\\.\\., methods=\\.\\.\\.\\)"):
         fixed_mode.temporal_routing(
@@ -320,6 +637,14 @@ def test_adaptive_routing_can_run_without_depth_cap() -> None:
         )
 
     adaptive = _load_example_trails()
+    relative_cutoff = _relative_cutoff_for_effective_score(
+        adaptive,
+        effective_cutoff=effective_cutoff,
+        start_year=2005,
+        start_act_idx=2,
+        amount=1.0,
+        methods=[GWP_METHOD],
+    )
     adaptive.temporal_routing(
         start_year=2005,
         start_act_idx=2,
@@ -329,7 +654,7 @@ def test_adaptive_routing_can_run_without_depth_cap() -> None:
         show_progress=False,
         attribute_to_roots=False,
         adaptive_methods=[GWP_METHOD],
-        adaptive_score_cutoff=0.1,
+        adaptive_relative_score_cutoff=relative_cutoff,
         adaptive_use_cache=False,
     )
 
@@ -339,7 +664,7 @@ def test_adaptive_routing_can_run_without_depth_cap() -> None:
     assert {
         data.get("adaptive_cutoff_reason")
         for _node, data in adaptive.graph.nodes(data=True)
-    } == {None, "adaptive_score_cutoff"}
+    } == {None, ADAPTIVE_CUTOFF_REASON}
 
 
 def test_adaptive_routing_uses_constructor_method_defaults() -> None:
@@ -412,6 +737,6 @@ def test_adaptive_routing_rejects_edges_only_defaults() -> None:
             min_amount=0.0,
             show_progress=False,
             attribute_to_roots=False,
-            adaptive_score_cutoff=0.1,
+            adaptive_relative_score_cutoff=0.1,
             adaptive_use_cache=False,
         )

@@ -214,7 +214,7 @@ def _graph_stats(trails: Any) -> dict[str, Any]:
                 frontier_reasons[key] = frontier_reasons.get(key, 0.0) + float(amount)
         if data.get("direct_bio_amount"):
             direct_bio_nodes += 1
-        if data.get("adaptive_cutoff_reason") == "adaptive_score_cutoff":
+        if data.get("adaptive_cutoff_reason") == "adaptive_relative_score_cutoff":
             adaptive_pruned_nodes += 1
             adaptive_pruned_amount_abs += abs(frontier_amount)
             adaptive_cutoff_potentials.append(
@@ -250,7 +250,7 @@ def _safe_slug(value: str) -> str:
 
 def _reason_label(reason: str) -> str:
     labels = {
-        "adaptive_score_cutoff": "Adaptive cutoff",
+        "adaptive_relative_score_cutoff": "Adaptive cutoff",
         "max_depth": "Max depth",
         "min_amount": "Minimum amount",
         "leaf": "Leaf",
@@ -260,7 +260,7 @@ def _reason_label(reason: str) -> str:
 
 def _short_reason_label(reason: str) -> str:
     labels = {
-        "adaptive_score_cutoff": "Cutoff",
+        "adaptive_relative_score_cutoff": "Cutoff",
         "max_depth": "Max depth",
         "min_amount": "Min. amount",
         "leaf": "Leaf",
@@ -270,7 +270,7 @@ def _short_reason_label(reason: str) -> str:
 
 def _reason_color(reason: str, alpha: float = 0.55) -> str:
     colors = {
-        "adaptive_score_cutoff": (228, 87, 86),
+        "adaptive_relative_score_cutoff": (228, 87, 86),
         "max_depth": (90, 90, 90),
         "min_amount": (139, 102, 190),
         "leaf": (89, 161, 79),
@@ -331,7 +331,7 @@ def _routing_depth_summary_rows(
         row: dict[str, Any] = {
             "case": case,
             "adaptive_relative_score_cutoff": float(relative_cutoff),
-            "adaptive_score_cutoff_effective": effective_cutoff,
+            "adaptive_effective_score_cutoff": effective_cutoff,
             "depth": int(depth),
             "nodes": int(nodes_by_depth.get(depth, 0)),
             "score_potential_sum": float(score_potential_by_depth.get(depth, 0.0)),
@@ -464,7 +464,7 @@ def _write_routing_depth_sankey(
             f"<br>Sum score potential: {frontier_potentials[(depth, reason)]:.4g}"
         )
 
-    effective_cutoff = routing_params.get("adaptive_score_cutoff_effective")
+    effective_cutoff = routing_params.get("adaptive_effective_score_cutoff")
     root_potential = routing_params.get("adaptive_root_score_potential")
     score_text = "not recalculated"
     if np.isfinite(score):
@@ -477,7 +477,7 @@ def _write_routing_depth_sankey(
         "Adaptive routing depth Sankey"
         f"<br><sup>{case}; relative cutoff={relative_cutoff:g}; "
         f"effective cutoff={float(effective_cutoff):.4g}; "
-        f"root potential={float(root_potential):.4g}; "
+        f"FU potential={float(root_potential):.4g}; "
         f"score={score_text}; "
         f"nodes={int(graph_stats.get('graph_nodes', 0)):,}; "
         f"edges={int(graph_stats.get('graph_edges', 0)):,}. "
@@ -1052,7 +1052,7 @@ def _write_activity_year_score_sankey(
             f"<br>Sum abs(amount): {float(row['amount_abs']):.6g}"
         )
 
-    effective_cutoff = routing_params.get("adaptive_score_cutoff_effective")
+    effective_cutoff = routing_params.get("adaptive_effective_score_cutoff")
     root_potential = routing_params.get("adaptive_root_score_potential")
     depth_spine_depth = max(
         (node_depth.get(node, 0) for node in depth_spine_nodes),
@@ -1063,7 +1063,7 @@ def _write_activity_year_score_sankey(
         f"<br><span style='font-size:11px'>case={case}</span>"
         f"<br><span style='font-size:11px'>relative cutoff={relative_cutoff:g}; "
         f"effective cutoff={float(effective_cutoff):.4g}; "
-        f"root potential={float(root_potential):.4g}</span>"
+        f"FU potential={float(root_potential):.4g}</span>"
         f"<br><span style='font-size:11px'>temporal score={score:.5g}; "
         f"static score={static_score:.5g}; "
         f"deviation={relative_deviation:.3%}</span>"
@@ -1272,7 +1272,7 @@ def _comparison_rows(
             {
                 "adaptive_case": row["case"],
                 "adaptive_relative_cutoff": row["adaptive_relative_score_cutoff"],
-                "adaptive_effective_cutoff": row["adaptive_score_cutoff_effective"],
+                "adaptive_effective_cutoff": row["adaptive_effective_score_cutoff"],
                 "adaptive_score": score,
                 "adaptive_relative_deviation_from_static": row[
                     "relative_deviation_from_static"
@@ -1503,7 +1503,7 @@ def run(args: argparse.Namespace) -> int:
                     case=case,
                     relative_cutoff=relative_cutoff,
                     effective_cutoff=routing_params.get(
-                        "adaptive_score_cutoff_effective"
+                        "adaptive_effective_score_cutoff"
                     ),
                 )
             )
@@ -1544,8 +1544,8 @@ def run(args: argparse.Namespace) -> int:
             "routing_min_amount": float(args.routing_min_amount),
             "adaptive_min_depth": int(args.adaptive_min_depth),
             "adaptive_relative_score_cutoff": relative_cutoff,
-            "adaptive_score_cutoff_effective": routing_params.get(
-                "adaptive_score_cutoff_effective"
+            "adaptive_effective_score_cutoff": routing_params.get(
+                "adaptive_effective_score_cutoff"
             ),
             "adaptive_root_score_potential": routing_params.get(
                 "adaptive_root_score_potential"

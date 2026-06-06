@@ -1992,7 +1992,6 @@ class Trails:
         attribute_to_roots: bool = True,
         debug: bool = False,
         adaptive_methods: str | list[str] | tuple[str, ...] | None = None,
-        adaptive_score_cutoff: float | None = None,
         adaptive_relative_score_cutoff: Any = (_DEFAULT_ADAPTIVE_RELATIVE_SCORE_CUTOFF),
         adaptive_ei_version: str | None = None,
         adaptive_min_depth: int = 1,
@@ -2011,13 +2010,13 @@ class Trails:
 
         Adaptive routing precomputes static activity scores for the selected
         ``adaptive_methods`` and estimates each child branch's impact potential
-        as ``abs(amount) * max(abs(static activity score))``. Use
-        ``adaptive_score_cutoff`` for an absolute threshold or
-        ``adaptive_relative_score_cutoff`` for a threshold relative to the root
-        branch potential. The default public routing mode is adaptive:
-        ``max_depth=None`` and ``adaptive_relative_score_cutoff=1e-4``. Passing
-        an integer ``max_depth`` without an adaptive cutoff selects fixed-depth
-        routing. Passing both an integer ``max_depth`` and an adaptive cutoff
+        as ``abs(reference product demand) * max(abs(static activity score))``.
+        The relative cutoff is multiplied by the functional-unit static score
+        potential to get the effective score-potential threshold. The
+        default public routing mode is adaptive: ``max_depth=None`` and
+        ``adaptive_relative_score_cutoff=1e-4``. Passing an integer
+        ``max_depth`` without an adaptive cutoff selects fixed-depth routing.
+        Passing both an integer ``max_depth`` and a relative adaptive cutoff
         combines adaptive pruning with a hard depth cap.
 
         :param start_year: Scenario/calendar year of the functional unit.
@@ -2046,13 +2045,10 @@ class Trails:
             is provided, ``Trails(..., methods=...)`` is used. EDGES methods
             cannot currently be used for adaptive screening.
         :type adaptive_methods: str | list[str] | tuple[str, ...] | None
-        :param adaptive_score_cutoff: Absolute score-potential cutoff. Branches
-            with potential at or below this value are left as frontier nodes.
-        :type adaptive_score_cutoff: float | None
         :param adaptive_relative_score_cutoff: Relative cutoff multiplied by the
-            root static score potential. Defaults to ``1e-4`` when adaptive
-            routing is selected by default. Set to ``None`` to disable adaptive
-            routing when using a fixed ``max_depth``.
+            functional-unit static score potential. Defaults to ``1e-4`` when
+            adaptive routing is selected by default. Set to ``None`` to disable
+            adaptive routing when using a fixed ``max_depth``.
         :type adaptive_relative_score_cutoff: float | None
         :param adaptive_ei_version: Ecoinvent LCIA version used for adaptive
             screening factors. If omitted, ``Trails(..., ei_version=...)`` is
@@ -2066,7 +2062,7 @@ class Trails:
         :type adaptive_use_cache: bool
         :raises ValueError: If adaptive routing is requested without explicit or
             constructor-default regular LCIA methods, or if ``max_depth=None``
-            is used while adaptive cutoffs are disabled.
+            is used while the adaptive relative cutoff is disabled.
         :raises RuntimeError: If required routing dependencies are missing."""
         try:
             import networkx as nx
@@ -2097,12 +2093,12 @@ class Trails:
             "max_depth": {},
             "leaf": {},
             "min_amount": {},
-            "adaptive_score_cutoff": {},
+            "adaptive_relative_score_cutoff": {},
         }
         frontier_max_depth = frontier_reasons["max_depth"]
         frontier_leaf = frontier_reasons["leaf"]
         frontier_min_amount = frontier_reasons["min_amount"]
-        frontier_adaptive_cutoff = frontier_reasons["adaptive_score_cutoff"]
+        frontier_adaptive_cutoff = frontier_reasons["adaptive_relative_score_cutoff"]
         frontier_roots: dict[tuple[tuple[int, int, int], int], float] = {}
         adaptive_cutoff_nodes: set[tuple[int, int, int]] = set()
         adaptive_cutoff_potentials: dict[tuple[int, int, int], float] = {}
@@ -2185,7 +2181,7 @@ class Trails:
                 "score_potential": 0.0,
                 "score_potential_by_method": {},
                 "adaptive_cutoff_reason": None,
-                "adaptive_score_cutoff": None,
+                "adaptive_effective_score_cutoff": None,
                 "adaptive_cutoff_potential": 0.0,
                 "frontier_reasons": {},
                 "frontier_roots": {},
@@ -2252,8 +2248,8 @@ class Trails:
                     reasons[reason] = float(amount)
             for node_key in adaptive_cutoff_nodes:
                 node = node_attrs[node_key]
-                node["adaptive_cutoff_reason"] = "adaptive_score_cutoff"
-                node["adaptive_score_cutoff"] = float(adaptive_threshold)
+                node["adaptive_cutoff_reason"] = "adaptive_relative_score_cutoff"
+                node["adaptive_effective_score_cutoff"] = float(adaptive_threshold)
                 node["adaptive_cutoff_potential"] = float(
                     adaptive_cutoff_potentials.get(node_key, 0.0)
                 )
@@ -2264,6 +2260,20 @@ class Trails:
 
         score_unit_cache: dict[tuple[int, int], tuple[float, tuple[float, ...]]] = {}
         score_amounts: dict[tuple, float] = {}
+
+        def _score_product_amount_abs(
+            *,
+            year: int,
+            act_idx: int,
+            amt: float,
+        ) -> float:
+            """Return absolute reference-product demand for a routed amount."""
+            context = self._get_scenario_context(int(year))
+            if context is None:
+                return abs(float(amt))
+            _scenario_year, _scenario_label, t = context
+            production_amount = self._production_amount(int(t), int(act_idx))
+            return abs(float(amt)) * abs(float(production_amount))
 
         def _cached_unit_score_potential(
             *,
@@ -2301,7 +2311,11 @@ class Trails:
                 year=int(year),
                 act_idx=int(act_idx),
             )
-            amount_abs = abs(float(amt))
+            amount_abs = _score_product_amount_abs(
+                year=int(year),
+                act_idx=int(act_idx),
+                amt=float(amt),
+            )
             return amount_abs * float(unit_max)
 
         def _flush_score_potentials() -> None:
@@ -2342,17 +2356,12 @@ class Trails:
             adaptive_relative_score_cutoff is _DEFAULT_ADAPTIVE_RELATIVE_SCORE_CUTOFF
         )
         if default_relative_cutoff:
-            if adaptive_score_cutoff is not None:
-                adaptive_relative_score_cutoff = None
-            elif max_depth is None or adaptive_methods is not None:
+            if max_depth is None or adaptive_methods is not None:
                 adaptive_relative_score_cutoff = DEFAULT_ADAPTIVE_RELATIVE_SCORE_CUTOFF
             else:
                 adaptive_relative_score_cutoff = None
 
-        adaptive_requested = bool(
-            adaptive_score_cutoff is not None
-            or adaptive_relative_score_cutoff is not None
-        )
+        adaptive_requested = adaptive_relative_score_cutoff is not None
         if adaptive_methods is None and adaptive_requested:
             default_methods = getattr(self, "default_methods", None)
             if default_methods:
@@ -2367,12 +2376,12 @@ class Trails:
             else:
                 raise ValueError(
                     "adaptive_methods or Trails(..., methods=...) must be "
-                    "provided when adaptive score cutoffs are set."
+                    "provided when an adaptive relative score cutoff is set."
                 )
         adaptive_enabled = adaptive_methods is not None
         if adaptive_enabled and not adaptive_requested:
             raise ValueError(
-                "Set adaptive_score_cutoff or adaptive_relative_score_cutoff "
+                "Set adaptive_relative_score_cutoff "
                 "when adaptive_methods or Trails(..., methods=...) is provided "
                 "for adaptive routing."
             )
@@ -2408,17 +2417,12 @@ class Trails:
                 adaptive_scores,
                 year=start_year_int,
                 activity=start_activity,
-                amount=start_activity_amount,
+                amount=start_amount,
             )
-            thresholds = []
-            if adaptive_score_cutoff is not None:
-                thresholds.append(float(adaptive_score_cutoff))
-            if adaptive_relative_score_cutoff is not None:
-                thresholds.append(
-                    abs(float(adaptive_relative_score_cutoff))
-                    * float(adaptive_root_potential)
-                )
-            adaptive_threshold = max(thresholds) if thresholds else 0.0
+            adaptive_threshold = (
+                abs(float(adaptive_relative_score_cutoff))
+                * float(adaptive_root_potential)
+            )
 
         track_score_amounts = adaptive_scores is not None
         debug_enabled = bool(self.debug)
@@ -2437,6 +2441,7 @@ class Trails:
             pbar = None
 
         nodes_processed = 0
+        max_processed_depth = 0
 
         while queue:
             year, act, amt, depth, root_act = queue.popleft()
@@ -2446,6 +2451,8 @@ class Trails:
                 continue
 
             nodes_processed += 1
+            if int(depth) > max_processed_depth:
+                max_processed_depth = int(depth)
             if pbar is not None:
                 pbar.update(1)
 
@@ -2459,7 +2466,9 @@ class Trails:
                 node_attrs[node_key] = node
             node["amount"] = node["amount"] + amt
             if track_score_amounts and depth == 0:
-                score_amounts[node_key] = score_amounts.get(node_key, 0.0) + abs(amt)
+                score_amounts[node_key] = score_amounts.get(
+                    node_key, 0.0
+                ) + _score_product_amount_abs(year=year, act_idx=act, amt=amt)
 
             scenario_year = year
             has_direct_bio = self._has_direct_biosphere(scenario_year, act, bio_cache)
@@ -2516,7 +2525,11 @@ class Trails:
                 if track_score_amounts:
                     score_amounts[child_node] = score_amounts.get(
                         child_node, 0.0
-                    ) + abs(child_amt)
+                    ) + _score_product_amount_abs(
+                        year=child_year,
+                        act_idx=child_act,
+                        amt=child_amt,
+                    )
 
                 if depth == 0:
                     child_root = child_act
@@ -2610,17 +2623,16 @@ class Trails:
             "amount": start_amount,
             "max_depth": None if max_depth_int is None else int(max_depth_int),
             "min_amount": float(min_amount),
+            "nodes_processed": int(nodes_processed),
+            "max_processed_depth": int(max_processed_depth),
             "adaptive_enabled": bool(adaptive_enabled),
             "adaptive_methods": list(adaptive_method_names),
-            "adaptive_score_cutoff": (
-                None if adaptive_score_cutoff is None else float(adaptive_score_cutoff)
-            ),
             "adaptive_relative_score_cutoff": (
                 None
                 if adaptive_relative_score_cutoff is None
                 else float(adaptive_relative_score_cutoff)
             ),
-            "adaptive_score_cutoff_effective": (
+            "adaptive_effective_score_cutoff": (
                 float(adaptive_threshold) if adaptive_enabled else None
             ),
             "adaptive_root_score_potential": (

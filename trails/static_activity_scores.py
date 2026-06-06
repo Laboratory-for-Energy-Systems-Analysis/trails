@@ -4,8 +4,8 @@ Adaptive routing needs a cheap estimate of the impact that remains behind a
 candidate branch before deciding whether to route it explicitly. This module
 precomputes static LCIA scores for every activity and scenario year by solving
 the adjoint static LCA problem once per method/year. The resulting activity
-score intensities are cached and later multiplied by routed demand amounts to
-derive branch score potentials.
+score intensities are cached and later multiplied by routed reference-product
+demands to derive branch score potentials.
 """
 
 from __future__ import annotations
@@ -240,9 +240,9 @@ def _activity_scores_from_product_intensities(
 ) -> np.ndarray:
     """Map product intensities to activity reference-product scores.
 
-    The adjoint solve returns static intensities per product row. Routing works
-    with activity demands, so this function selects each activity's reference
-    product row and applies the production-exchange sign.
+    The adjoint solve returns static intensities per product row. Routing stores
+    activity identifiers on graph nodes, so this function selects each
+    activity's reference product row and applies the production-exchange sign.
     """
     scores = np.full(
         (int(intensities.shape[1]), int(product_indices.size)),
@@ -437,9 +437,10 @@ def _activity_score_potential(
 ) -> tuple[float, dict[str, float]]:
     """Estimate the static impact potential of a routed activity demand.
 
-    The scalar potential is ``abs(amount)`` times the maximum absolute static
-    score across the configured adaptive methods. The per-method dictionary is
-    kept on routing graph nodes for diagnostics and plotting.
+    ``amount`` is a reference-product demand. The scalar potential is
+    ``abs(amount)`` times the maximum absolute static score across the
+    configured adaptive methods. The per-method dictionary is kept on routing
+    graph nodes for diagnostics and plotting.
     """
     amount_abs = abs(float(amount))
     unit_max, unit_values = scores.unit_score_potential(

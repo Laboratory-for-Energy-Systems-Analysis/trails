@@ -95,7 +95,7 @@ Branches below the cutoff remain in the matrix-solved frontier, so they are
 still included in the final LCA.
 
 To run fixed-depth routing instead, pass an integer ``max_depth`` and omit
-adaptive cutoffs.
+the adaptive relative cutoff.
 
 What you get
 ------------

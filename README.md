@@ -28,9 +28,9 @@ At a high level, `TRAILS`:
   technosphere solve.
 * Runs a **temporal traversal** of the supply chain from a functional unit to build
   time-indexed demands.
-* Supports **adaptive temporal routing** using static LCIA score-potential
-  cutoffs, so low-potential branches can remain matrix-solved frontier demands
-  instead of being expanded explicitly.
+* Supports **adaptive temporal routing** using a relative static LCIA
+  score-potential cutoff, so low-potential branches can remain matrix-solved
+  frontier demands instead of being expanded explicitly.
 * Solves year-specific systems and **routes impacts** through temporal distributions.
 * Can score temporal inventories with optional **EDGES regionalized
   characterization factors**.
@@ -197,8 +197,8 @@ fig.show()
 `temporal_routing()` is adaptive by default. The default cutoff is a relative
 score-potential cutoff of `1e-4`, meaning that a branch can stop being expanded
 explicitly once its estimated static score potential is at most 0.01% of the
-root activity's score potential. Stopped branches remain frontier demands and
-are still included in the year-wise matrix solve.
+functional unit's static score potential. Stopped branches remain frontier
+demands and are still included in the year-wise matrix solve.
 
 ```python
 # 1. Default adaptive routing
