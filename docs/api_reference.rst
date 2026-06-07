@@ -42,6 +42,7 @@ Plotting
 --------
 
 .. autofunction:: trails.plot_temporal_scores
+.. autofunction:: trails.plot_adaptive_sankey
 .. autofunction:: trails.plot_rf
 .. autofunction:: trails.plot_temp
 

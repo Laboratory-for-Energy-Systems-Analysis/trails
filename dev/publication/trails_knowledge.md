@@ -27,7 +27,7 @@ The public API exposed by `trails/__init__.py` includes:
 - `lca`
 - `get_lcia_method_names`
 - `plot_temporal_scores`
-- `plot_temporal_sankey_graphlike`
+- `plot_adaptive_sankey`
 - `plot_rf`
 - `plot_temp`
 - `clear_cache`
@@ -781,8 +781,7 @@ Plotting is implemented with Plotly.
 Important plotting functions include:
 
 - `plot_temporal_scores`
-- `plot_temporal_sankey`
-- `plot_temporal_sankey_graphlike`
+- `plot_adaptive_sankey`
 - `plot_traversal_grid_flow`
 - `plot_rf`
 - `plot_temp`
@@ -1076,4 +1075,3 @@ The following points are useful when developing or interpreting results:
   caused by the Trails inventory relative to a baseline scenario.
 - `delta temperature`: FaIR-estimated temperature perturbation caused by the
   Trails inventory relative to a baseline scenario.
-

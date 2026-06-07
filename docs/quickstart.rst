@@ -28,7 +28,13 @@ Run a temporal LCA
 
     from datapackage import Package
 
-    from trails import Trails, lca, get_lcia_method_names, plot_temporal_scores
+    from trails import (
+        Trails,
+        lca,
+        get_lcia_method_names,
+        plot_temporal_scores,
+        plot_adaptive_sankey,
+    )
 
     # Load a Frictionless data package exported by premise (or compatible tooling)
     package = Package("path/to/datapackage.json")
@@ -80,6 +86,14 @@ Run a temporal LCA
     fig = plot_temporal_scores(trails, method_label=method)
     fig.show()
 
+    # Plot the explicit adaptive routed graph as a depth/year Sankey
+    sankey = plot_adaptive_sankey(
+        trails,
+        method=method,
+        branch_visual_cutoff=0.001,
+    )
+    sankey.show()
+
 Adaptive routing is the default. To make the default criterion explicit:
 
 .. code-block:: python
@@ -93,6 +107,24 @@ Adaptive routing is the default. To make the default criterion explicit:
 
 Branches below the cutoff remain in the matrix-solved frontier, so they are
 still included in the final LCA.
+
+The routed graph can be inspected with ``plot_adaptive_sankey``:
+
+.. code-block:: python
+
+    fig = trails.plot_adaptive_sankey(
+        method=method,
+        branch_visual_cutoff=0.001,
+        max_sankey_links=0,
+        output_path="adaptive_sankey.html",
+    )
+    fig.show()
+
+This figure uses only explicit routed graph edges. Link widths are based on
+adaptive routing score potential; nodes are positioned by routing depth and
+calendar year. Frontier branches that are not explicitly expanded are still
+included in ``lca(...)`` through the matrix solve, but they are not drawn as
+downstream Sankey paths.
 
 To run fixed-depth routing instead, pass an integer ``max_depth`` and omit
 the adaptive relative cutoff.

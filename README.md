@@ -138,7 +138,13 @@ temporal LCA, and plots the resulting impact time series.
 ```python
 from datapackage import Package
 
-from trails import Trails, lca, get_lcia_method_names, plot_temporal_scores
+from trails import (
+    Trails,
+    lca,
+    get_lcia_method_names,
+    plot_temporal_scores,
+    plot_adaptive_sankey,
+)
 
 # Load a Frictionless data package exported by premise (or compatible tooling)
 package = Package("path/to/datapackage.json")
@@ -188,6 +194,14 @@ lca(
 # Plot temporal impact scores
 fig = plot_temporal_scores(trails, method_label=method)
 fig.show()
+
+# Plot the explicit adaptive routed graph as a depth/year Sankey
+sankey = plot_adaptive_sankey(
+    trails,
+    method=method,
+    branch_visual_cutoff=0.001,
+)
+sankey.show()
 ```
 
 ---
@@ -231,6 +245,42 @@ Adaptive routing requires regular LCIA methods, usually provided once with
 `Trails(..., methods=[method], ei_version="...")`. EDGES methods are final-score
 methods only; EDGES-only workflows should use fixed-depth routing or also
 provide regular `methods` for adaptive routing before EDGES final scoring.
+
+---
+
+### Adaptive Sankey plotting
+
+`plot_adaptive_sankey()` visualizes the explicit graph created by adaptive
+`temporal_routing()`. Link widths use the routed child node's static
+score-potential contribution, nodes are arranged horizontally by routing depth
+and vertically by year, and labels are available on hover. Matrix-solved
+frontier demands are included in the LCA, but only explicitly routed graph
+edges appear in the Sankey.
+
+```python
+from trails import plot_adaptive_sankey
+
+trails.temporal_routing(
+    start_year=2030,
+    start_act_idx=start_act_idx,
+    adaptive_relative_score_cutoff=1e-4,
+)
+
+fig = plot_adaptive_sankey(
+    trails,
+    method=method,
+    branch_visual_cutoff=0.001,
+    max_sankey_links=0,  # no hard link cap
+    output_path="adaptive_sankey.html",
+)
+fig.show()
+```
+
+The same plot is also available as a convenience method:
+
+```python
+fig = trails.plot_adaptive_sankey(method=method)
+```
 
 ---
 

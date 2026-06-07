@@ -330,6 +330,35 @@ first-level suppliers:
     )
     fig.show()
 
+Use ``plot_adaptive_sankey`` to inspect the explicit graph created by adaptive
+``temporal_routing``:
+
+.. code-block:: python
+
+    from trails import plot_adaptive_sankey
+
+    fig = plot_adaptive_sankey(
+        trails,
+        method=method,
+        branch_visual_cutoff=0.001,
+        max_sankey_links=0,
+        output_path="adaptive_sankey.html",
+    )
+    fig.show()
+
+The Sankey links represent routed graph edges weighted by the child node's
+adaptive score potential. Nodes are placed by routing depth and year, labels
+are shown on hover, and optional right/bottom density panels summarize impact
+density over time and depth. Matrix-solved frontier demands remain part of the
+final LCA results, but only explicitly routed edges are displayed in the
+Sankey.
+
+The same helper is available on a ``Trails`` instance:
+
+.. code-block:: python
+
+    fig = trails.plot_adaptive_sankey(method=method)
+
 Interpreting outputs
 --------------------
 
