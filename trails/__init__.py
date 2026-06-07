@@ -10,7 +10,7 @@ __all__ = (
     "plot_temporal_scores",
     "plot_rf",
     "plot_temp",
-    "plot_temporal_sankey_graphlike",
+    "plot_adaptive_sankey",
     "clear_cache",
     "search_activity",
 )
@@ -25,7 +25,7 @@ from .plotting import (
     plot_temporal_scores,
     plot_rf,
     plot_temp,
-    plot_temporal_sankey_graphlike,
+    plot_adaptive_sankey,
 )
 from .cache import clear_cache
 from .search import search_activity

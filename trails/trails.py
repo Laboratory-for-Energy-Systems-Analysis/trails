@@ -2648,6 +2648,23 @@ class Trails:
                 int(G.number_of_edges()),
             )
 
+    def plot_adaptive_sankey(self, **kwargs: Any) -> Any:
+        """Plot the current adaptive routed graph as a depth/year Sankey.
+
+        This is a convenience wrapper around
+        :func:`trails.plotting.plot_adaptive_sankey`. Run
+        ``temporal_routing(...)`` first so ``self.graph`` contains the routed
+        graph and adaptive score-potential attributes.
+
+        :param kwargs: Keyword arguments forwarded to
+            ``plot_adaptive_sankey``.
+        :type kwargs: Any
+        :returns: Plotly figure.
+        :rtype: Any"""
+        from .plotting import plot_adaptive_sankey
+
+        return plot_adaptive_sankey(self, **kwargs)
+
     def static_lca(
         self,
         year: int,

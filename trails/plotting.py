@@ -3,12 +3,12 @@ import json
 import os
 
 import math
-import bisect
+from pathlib import Path
+from textwrap import shorten as _shorten_text
 
 from collections import defaultdict
 import numpy as np
 import plotly.graph_objects as go
-import plotly.io as pio
 import plotly.express as px
 from plotly.subplots import make_subplots
 import sparse
@@ -2602,1546 +2602,1592 @@ def plot_top_paths_for_year(
     return fig
 
 
-def _collect_activity_meta(trails_local: Trails) -> Dict[int, Dict[str, Any]]:
-    """collect activity meta.
-
-    :param trails_local: Value for `trails_local`.
-    :type trails_local: Trails
-    :returns: Return value.
-    :rtype: Dict[int, Dict[str, Any]]"""
-    meta_by_idx: Dict[int, Dict[str, Any]] = {}
-    for scen_label, mapping in trails_local.activity_indices.items():
-        for idx, meta in mapping.items():
-            if idx not in meta_by_idx:
-                meta_by_idx[idx] = meta
-    return meta_by_idx
-
-
-def _activity_label_from_meta(act_meta: Dict[int, Dict[str, Any]], act_idx: int) -> str:
-    """activity label from meta.
-
-    :param act_meta: Value for `act_meta`.
-    :type act_meta: Dict[int, Dict[str, Any]]
-    :param act_idx: Value for `act_idx`.
-    :type act_idx: int
-    :returns: Return value.
-    :rtype: str"""
-    meta = act_meta.get(act_idx, {})
-    name = meta.get("name", f"Activity {act_idx}")
-    rp = meta.get("reference product") or ""
-    loc = meta.get("location") or ""
-    label = name
-    if rp:
-        label += f" | {rp}"
-    if loc:
-        label += f" ({loc})"
-    return label
+_ADAPTIVE_SANKEY_PALETTE = [
+    "#4c78a8",
+    "#f58518",
+    "#54a24b",
+    "#e45756",
+    "#72b7b2",
+    "#b279a2",
+    "#ff9da6",
+    "#9d755d",
+    "#bab0ac",
+    "#2f4b7c",
+    "#a05195",
+    "#d45087",
+]
 
 
-def _build_full_path_amounts(
-    provenance: Dict[tuple[int, int], Dict[tuple[int, ...], float]],
-    start_year: int,
-    start_act_idx: int,
-) -> Dict[Tuple[Tuple[int, int], ...], float]:
-    """build full path amounts.
-
-    :param provenance: Value for `provenance`.
-    :type provenance: Dict[tuple[int, int], Dict[tuple[int, ...], float]]
-    :param start_year: Value for `start_year`.
-    :type start_year: int
-    :param start_act_idx: Value for `start_act_idx`.
-    :type start_act_idx: int
-    :returns: Return value.
-    :rtype: Dict[Tuple[Tuple[int, int], ...], float]
-    :raises ValueError: If an error occurs."""
-    full_path_amounts: Dict[Tuple[Tuple[int, int], ...], float] = defaultdict(float)
-    root_node = (start_year, start_act_idx)
-
-    for (year_final, act_final), path_map in provenance.items():
-        for path, amt in path_map.items():
-            if not path:
-                continue
-            full_path = (root_node,) + path
-            full_path_amounts[full_path] += float(amt)
-
-    if not full_path_amounts:
-        raise ValueError("No non-empty paths in provenance; nothing to plot.")
-
-    return full_path_amounts
+def _adaptive_sankey_activity_metadata(
+    trails_obj: Trails,
+    activity_index: int,
+) -> dict[str, Any]:
+    """Return activity metadata from the loaded Trails index mappings."""
+    for mapping in getattr(trails_obj, "activity_indices", {}).values():
+        meta = mapping.get(int(activity_index))
+        if isinstance(meta, dict):
+            return dict(meta)
+    return {}
 
 
-def _select_paths(
-    full_path_amounts: Dict[Tuple[Tuple[int, int], ...], float],
-    top_n_paths: int | None,
-) -> list[tuple[tuple[tuple[int, int], ...], float]]:
-    """select paths.
-
-    :param full_path_amounts: Value for `full_path_amounts`.
-    :type full_path_amounts: Dict[Tuple[Tuple[int, int], ...], float]
-    :param top_n_paths: Value for `top_n_paths`.
-    :type top_n_paths: int | None
-    :returns: Return value.
-    :rtype: list[tuple[tuple[tuple[int, int], ...], float]]"""
-    if top_n_paths is None:
-        return list(full_path_amounts.items())
-    return sorted(
-        full_path_amounts.items(),
-        key=lambda kv: abs(kv[1]),
-        reverse=True,
-    )[:top_n_paths]
-
-
-def _build_depth_map(
-    selected_paths: list[tuple[tuple[tuple[int, int], ...], float]],
-) -> tuple[list[tuple[int, int]], dict[tuple[int, int], int]]:
-    """build depth map.
-
-    :param selected_paths: Value for `selected_paths`.
-    :type selected_paths: list[tuple[tuple[tuple[int, int], ...], float]]
-    :returns: Return value.
-    :rtype: tuple[list[tuple[int, int]], dict[tuple[int, int], int]]"""
-    node_keys: set[Tuple[int, int]] = set()
-    depth_map: Dict[Tuple[int, int], int] = {}
-
-    for full_path, _ in selected_paths:
-        for depth, node in enumerate(full_path):
-            node_keys.add(node)
-            if node not in depth_map or depth < depth_map[node]:
-                depth_map[node] = depth
-
-    node_keys = sorted(node_keys)
-    return node_keys, depth_map
-
-
-def _aggregate_link_impacts(
-    selected_paths: list[tuple[tuple[tuple[int, int], ...], float]],
-    depth_map: dict[tuple[int, int], int],
-    node_intensity: dict[tuple[int, int], float],
-) -> tuple[
-    dict[tuple[tuple[int, int], tuple[int, int]], float],
-    dict[tuple[tuple[int, int], tuple[int, int]], dict[int, float]],
-]:
-    """aggregate link impacts.
-
-    :param selected_paths: Value for `selected_paths`.
-    :type selected_paths: list[tuple[tuple[tuple[int, int], ...], float]]
-    :param depth_map: Value for `depth_map`.
-    :type depth_map: dict[tuple[int, int], int]
-    :param node_intensity: Value for `node_intensity`.
-    :type node_intensity: dict[tuple[int, int], float]
-    :returns: Return value.
-    :rtype: tuple[dict[tuple[tuple[int, int], tuple[int, int]], float], dict[tuple[tuple[int, int], tuple[int, int]], dict[int, float]]]
-    :raises ValueError: If an error occurs."""
-    link_impact_agg: Dict[Tuple[Tuple[int, int], Tuple[int, int]], float] = defaultdict(
-        float
+def _adaptive_sankey_full_label(
+    trails_obj: Trails,
+    activity_index: int,
+) -> str:
+    meta = _adaptive_sankey_activity_metadata(trails_obj, int(activity_index))
+    label = " | ".join(
+        part
+        for part in (
+            str(meta.get("name") or ""),
+            str(meta.get("reference product") or ""),
+            str(meta.get("location") or ""),
+        )
+        if part
     )
-    edge_activity_contrib: Dict[
-        Tuple[Tuple[int, int], Tuple[int, int]], Dict[int, float]
-    ] = defaultdict(lambda: defaultdict(float))
+    return label or f"Activity {int(activity_index)}"
 
-    for full_path, amt in selected_paths:
-        if len(full_path) < 2:
+
+def _adaptive_sankey_reference_product(
+    trails_obj: Trails,
+    activity_index: int,
+) -> str:
+    meta = _adaptive_sankey_activity_metadata(trails_obj, int(activity_index))
+    reference_product = str(meta.get("reference product") or "").strip()
+    if reference_product:
+        return reference_product
+    name = str(meta.get("name") or "").strip()
+    return name or f"Activity {int(activity_index)}"
+
+
+def _adaptive_sankey_rgba_color(
+    branch: str,
+    color_map: dict[str, str],
+    alpha: float,
+) -> str:
+    if branch not in color_map:
+        idx = len(color_map) % len(_ADAPTIVE_SANKEY_PALETTE)
+        color_map[branch] = _ADAPTIVE_SANKEY_PALETTE[idx]
+    color = color_map[branch]
+    red = int(color[1:3], 16)
+    green = int(color[3:5], 16)
+    blue = int(color[5:7], 16)
+    return f"rgba({red},{green},{blue},{float(alpha):.3f})"
+
+
+def _adaptive_sankey_edge_color(
+    branch: str,
+    color_map: dict[str, str],
+) -> str:
+    return _adaptive_sankey_rgba_color(branch, color_map, 0.42)
+
+
+def _adaptive_sankey_root_routed_amounts(
+    graph: Any,
+    *,
+    root_indices: set[int],
+) -> tuple[
+    dict[object, dict[int, float]],
+    dict[tuple[object, object, int], float],
+]:
+    """Allocate routed edge amounts to first-level root branches."""
+    node_root_amounts: dict[object, dict[int, float]] = defaultdict(
+        lambda: defaultdict(float)
+    )
+    edge_root_amounts: dict[tuple[object, object, int], float] = defaultdict(float)
+
+    edges = sorted(
+        graph.edges(data=True),
+        key=lambda edge: (
+            int(graph.nodes[edge[0]].get("depth", 0)),
+            int(graph.nodes[edge[1]].get("depth", 0)),
+            int(graph.nodes[edge[1]].get("year", 0)),
+            repr(edge[0]),
+            repr(edge[1]),
+        ),
+    )
+    for source, target, data in edges:
+        source_depth = int(graph.nodes[source].get("depth", 0))
+        target_depth = int(graph.nodes[target].get("depth", 0))
+        if target_depth <= source_depth:
+            continue
+        amount_abs = abs(float(data.get("amount", 0.0)))
+        if amount_abs == 0.0:
             continue
 
-        for i in range(len(full_path) - 1):
-            parent = full_path[i]
-            child = full_path[i + 1]
+        if source_depth == 0:
+            root_idx = int(graph.nodes[target].get("act_idx", -1))
+            if root_idx not in root_indices:
+                continue
+            edge_root_amounts[(source, target, root_idx)] += amount_abs
+            node_root_amounts[target][root_idx] += amount_abs
+            continue
 
-            parent_depth = depth_map[parent]
-            child_depth = depth_map[child]
+        source_roots = node_root_amounts.get(source, {})
+        source_total = sum(abs(float(value)) for value in source_roots.values())
+        if source_total <= 0.0:
+            continue
+        for root_idx, source_root_amount in source_roots.items():
+            share = abs(float(source_root_amount)) / source_total
+            root_amount = amount_abs * share
+            if root_amount == 0.0:
+                continue
+            edge_root_amounts[(source, target, int(root_idx))] += root_amount
+            node_root_amounts[target][int(root_idx)] += root_amount
 
-            parent_year, _ = parent
-            child_year, child_act = child
-
-            intensity = node_intensity.get(child, 0.0)
-            imp = float(amt) * float(intensity)
-
-            src_agg = (parent_depth, parent_year)
-            tgt_agg = (child_depth, child_year)
-
-            link_impact_agg[(src_agg, tgt_agg)] += imp
-            edge_activity_contrib[(src_agg, tgt_agg)][child_act] += imp
-
-    if not link_impact_agg:
-        raise ValueError("No aggregated link impacts; nothing to plot.")
-
-    return link_impact_agg, edge_activity_contrib
+    return node_root_amounts, edge_root_amounts
 
 
-def _build_agg_nodes(
-    link_impact_agg: dict[tuple[tuple[int, int], tuple[int, int]], float],
-) -> tuple[list[tuple[int, int]], dict[tuple[int, int], int]]:
-    """build agg nodes.
-
-    :param link_impact_agg: Value for `link_impact_agg`.
-    :type link_impact_agg: dict[tuple[tuple[int, int], tuple[int, int]], float]
-    :returns: Return value.
-    :rtype: tuple[list[tuple[int, int]], dict[tuple[int, int], int]]"""
-    agg_nodes: set[Tuple[int, int]] = set()
-    for src_agg, tgt_agg in link_impact_agg.keys():
-        agg_nodes.add(src_agg)
-        agg_nodes.add(tgt_agg)
-
-    agg_nodes = sorted(agg_nodes)
-    node_index_agg: Dict[Tuple[int, int], int] = {
-        key: i for i, key in enumerate(agg_nodes)
-    }
-    return agg_nodes, node_index_agg
-
-
-def _compute_node_totals(
-    link_impact_agg: dict[tuple[tuple[int, int], tuple[int, int]], float],
-) -> dict[tuple[int, int], float]:
-    """compute node totals.
-
-    :param link_impact_agg: Value for `link_impact_agg`.
-    :type link_impact_agg: dict[tuple[tuple[int, int], tuple[int, int]], float]
-    :returns: Return value.
-    :rtype: dict[tuple[int, int], float]"""
-    node_total_impact: Dict[Tuple[int, int], float] = defaultdict(float)
-    for (src_agg, tgt_agg), imp in link_impact_agg.items():
-        node_total_impact[tgt_agg] += imp
-    return node_total_impact
-
-
-def _compute_sankey_layout(
-    agg_nodes: list[tuple[int, int]],
-) -> tuple[list[float], list[float], list[int], list[int]]:
-    """compute sankey layout.
-
-    :param agg_nodes: Value for `agg_nodes`.
-    :type agg_nodes: list[tuple[int, int]]
-    :returns: Return value.
-    :rtype: tuple[list[float], list[float], list[int], list[int]]"""
-    depths = sorted({d for (d, y) in agg_nodes})
-    years = sorted({y for (d, y) in agg_nodes})
-
-    if len(depths) == 1:
-        depth_to_x = {depths[0]: 0.5}
-    else:
-        depth_to_x = {
-            d: 0.05 + 0.9 * (i / (len(depths) - 1)) for i, d in enumerate(depths)
-        }
-
-    if len(years) == 1:
-        year_to_y = {years[0]: 0.5}
-    else:
-        year_to_y = {
-            y: 0.05 + 0.9 * (i / (len(years) - 1)) for i, y in enumerate(years)
-        }
-
-    node_x = [depth_to_x[d] for (d, y) in agg_nodes]
-    node_y = [year_to_y[y] for (d, y) in agg_nodes]
-
-    return node_x, node_y, depths, years
-
-
-def _build_node_labels(
-    agg_nodes: list[tuple[int, int]],
-    node_total_impact: dict[tuple[int, int], float],
-    amount_label: str,
-) -> list[str]:
-    """build node labels.
-
-    :param agg_nodes: Value for `agg_nodes`.
-    :type agg_nodes: list[tuple[int, int]]
-    :param node_total_impact: Value for `node_total_impact`.
-    :type node_total_impact: dict[tuple[int, int], float]
-    :param amount_label: Value for `amount_label`.
-    :type amount_label: str
-    :returns: Return value.
-    :rtype: list[str]"""
-    node_labels: List[str] = []
-    for d, y in agg_nodes:
-        total_imp = node_total_impact.get((d, y), 0.0)
-        node_labels.append(
-            f"Depth {d}, Year {y}<br>" f"Incoming {amount_label}: {total_imp:.3g}"
-        )
-    return node_labels
-
-
-def _assign_year_colors(years: list[int]) -> dict[int, str]:
-    """assign year colors.
-
-    :param years: Value for `years`.
-    :type years: list[int]
-    :returns: Return value.
-    :rtype: dict[int, str]"""
-    year_palette = px.colors.sequential.Viridis
-    if len(years) > len(year_palette):
-        repeats = (len(years) // len(year_palette)) + 1
-        full_year_palette = (year_palette * repeats)[: len(years)]
-    else:
-        full_year_palette = year_palette[: len(years)]
-
-    year_to_color = {y: col for y, col in zip(years, full_year_palette)}
-    return year_to_color
-
-
-def _build_link_arrays(
-    link_impact_agg: dict[tuple[tuple[int, int], tuple[int, int]], float],
-    edge_activity_contrib: dict[
-        tuple[tuple[int, int], tuple[int, int]], dict[int, float]
-    ],
-    node_index_agg: dict[tuple[int, int], int],
-    year_to_color: dict[int, str],
-    amount_label: str,
-    activity_label: Callable[[int], str],
-) -> tuple[list[int], list[int], list[float], list[str], list[str]]:
-    """build link arrays.
-
-    :param link_impact_agg: Value for `link_impact_agg`.
-    :type link_impact_agg: dict[tuple[tuple[int, int], tuple[int, int]], float]
-    :param edge_activity_contrib: Value for `edge_activity_contrib`.
-    :type edge_activity_contrib: dict[tuple[tuple[int, int], tuple[int, int]], dict[int, float]]
-    :param node_index_agg: Value for `node_index_agg`.
-    :type node_index_agg: dict[tuple[int, int], int]
-    :param year_to_color: Value for `year_to_color`.
-    :type year_to_color: dict[int, str]
-    :param amount_label: Value for `amount_label`.
-    :type amount_label: str
-    :param activity_label: Value for `activity_label`.
-    :type activity_label: Callable[[int], str]
-    :returns: Return value.
-    :rtype: tuple[list[int], list[int], list[float], list[str], list[str]]"""
-    link_sources: List[int] = []
-    link_targets: List[int] = []
-    link_values: List[float] = []
-    link_colors: List[str] = []
-    link_hovertemplates: List[str] = []
-
-    for (src_agg, tgt_agg), imp in link_impact_agg.items():
-        src_idx = node_index_agg[src_agg]
-        tgt_idx = node_index_agg[tgt_agg]
-
-        src_depth, src_year = src_agg
-        tgt_depth, tgt_year = tgt_agg
-
-        color = year_to_color.get(tgt_year, "rgba(150,150,150,0.7)")
-
-        activity_map = edge_activity_contrib[(src_agg, tgt_agg)]
-        sorted_acts = sorted(
-            activity_map.items(), key=lambda kv: abs(kv[1]), reverse=True
-        )
-        top_acts = sorted_acts[:8]
-
-        lines = [
-            f"<b>Depth {src_depth}, Year {src_year}</b> → "
-            f"<b>Depth {tgt_depth}, Year {tgt_year}</b>",
-            f"Total {amount_label}: {imp:.6g}",
-            "<br><b>Top contributing activities at target:</b>",
-        ]
-        if not top_acts:
-            lines.append("(none)")
-        else:
-            for act_idx, act_imp in top_acts:
-                lines.append(f"- {activity_label(act_idx)}: {act_imp:.6g}")
-
-        hovertemplate = "<br>".join(lines) + "<extra></extra>"
-
-        link_sources.append(src_idx)
-        link_targets.append(tgt_idx)
-        link_values.append(abs(imp))
-        link_colors.append(color)
-        link_hovertemplates.append(hovertemplate)
-
-    return link_sources, link_targets, link_values, link_colors, link_hovertemplates
-
-
-def plot_temporal_sankey(
-    provenance: (
-        Dict[tuple[int, int], Dict[tuple[tuple[int, int], ...], float]] | dict[str, Any]
-    ),
-    trails: Trails,
-    start_year: int,
-    start_act_idx: int,
-    node_intensity: Optional[Dict[Tuple[int, int], float]] = None,
-    top_n_paths: int | None = 30,
-    title: str = "Temporal Sankey (impact-weighted, aggregated by year)",
-    amount_label: str = "Impact score",
-    fig_width: int = 1600,
-    fig_height: int | None = None,
-    node_thickness: int = 20,
-    node_pad: int = 15,
-    font_size: int = 11,
-    filename: str | None = None,
-) -> go.Figure:
-    """Plot temporal sankey.
-
-    :param provenance: Value for `provenance`.
-    :type provenance: Dict[tuple[int, int], Dict[tuple[tuple[int, int], ...], float]] | dict[str, Any]
-    :param trails: Value for `trails`.
-    :type trails: Trails
-    :param start_year: Value for `start_year`.
-    :type start_year: int
-    :param start_act_idx: Value for `start_act_idx`.
-    :type start_act_idx: int
-    :param node_intensity: Value for `node_intensity`.
-    :type node_intensity: Optional[Dict[Tuple[int, int], float]]
-    :param top_n_paths: Value for `top_n_paths`.
-    :type top_n_paths: int | None
-    :param title: Value for `title`.
-    :type title: str
-    :param amount_label: Value for `amount_label`.
-    :type amount_label: str
-    :param fig_width: Value for `fig_width`.
-    :type fig_width: int
-    :param fig_height: Value for `fig_height`.
-    :type fig_height: int | None
-    :param node_thickness: Value for `node_thickness`.
-    :type node_thickness: int
-    :param node_pad: Value for `node_pad`.
-    :type node_pad: int
-    :param font_size: Value for `font_size`.
-    :type font_size: int
-    :param filename: Value for `filename`.
-    :type filename: str | None
-    :returns: Return value.
-    :rtype: go.Figure"""
-
-    # If given a Sankey tree (from build_temporal_sankey_tree), use the tree path.
-    if (
-        isinstance(provenance, dict)
-        and "node" in provenance
-        and "children" in provenance
-    ):
-        sankey_arrays = build_sankey_arrays_from_tree(
-            provenance,
-            trails=trails,
-            edge_weight="score",
-        )
-        sankey = go.Sankey(
-            domain=dict(x=[0.0, 1.0], y=[0.0, 1.0]),
-            arrangement="snap",
-            node=dict(
-                pad=node_pad,
-                thickness=node_thickness,
-                label=sankey_arrays["labels"],
-            ),
-            link=dict(
-                source=sankey_arrays["sources"],
-                target=sankey_arrays["targets"],
-                value=sankey_arrays["values"],
-            ),
-        )
-        fig = go.Figure(sankey)
-        fig.update_layout(
-            title=title,
-            width=fig_width,
-            height=fig_height,
-            font=dict(size=font_size),
-        )
-        if filename:
-            fig.write_html(filename)
-        return fig
-
-    full_path_amounts = _build_full_path_amounts(provenance, start_year, start_act_idx)
-    selected_paths = _select_paths(full_path_amounts, top_n_paths)
-    node_keys, depth_map = _build_depth_map(selected_paths)
-    if node_intensity is None:
-        node_intensity = _node_scores_from_trails(trails)
-
-    act_meta = _collect_activity_meta(trails)
-    activity_label = lambda act_idx: _activity_label_from_meta(act_meta, act_idx)
-
-    link_impact_agg, edge_activity_contrib = _aggregate_link_impacts(
-        selected_paths=selected_paths,
-        depth_map=depth_map,
-        node_intensity=node_intensity,
-    )
-
-    agg_nodes, node_index_agg = _build_agg_nodes(link_impact_agg)
-    node_total_impact = _compute_node_totals(link_impact_agg)
-
-    node_x, node_y, depths, years = _compute_sankey_layout(agg_nodes)
-    node_labels = _build_node_labels(agg_nodes, node_total_impact, amount_label)
-    year_to_color = _assign_year_colors(years)
-    node_colors = [year_to_color[y] for (d, y) in agg_nodes]
-
-    link_sources, link_targets, link_values, link_colors, link_hovertemplates = (
-        _build_link_arrays(
-            link_impact_agg=link_impact_agg,
-            edge_activity_contrib=edge_activity_contrib,
-            node_index_agg=node_index_agg,
-            year_to_color=year_to_color,
-            amount_label=amount_label,
-            activity_label=activity_label,
-        )
-    )
-
-    sankey = go.Sankey(
-        domain=dict(x=[0.0, 1.0], y=[0.0, 1.0]),
-        arrangement="snap",
-        node=dict(
-            pad=node_pad,
-            thickness=node_thickness,
-            label=node_labels,
-            x=node_x,
-            y=node_y,
-            color=node_colors,
-        ),
-        link=dict(
-            source=link_sources,
-            target=link_targets,
-            value=link_values,
-            color=link_colors,
-            hovertemplate=link_hovertemplates,  # list of per-link templates
-        ),
-    )
-
-    fig = go.Figure(sankey)
-    fig.update_layout(
-        title=title,
-        width=fig_width,
-        height=fig_height,
-        margin=dict(l=40, r=40, t=60, b=60),
-        font=dict(size=font_size),
-    )
-    if filename:
-        fig.write_html(filename)
-
-    return fig
-
-
-def plot_temporal_sankey_graphlike(
-    trails: Trails,
+def _adaptive_sankey_edge_rows(
+    trails_obj: Trails,
     *,
-    min_edge_amount: float = 0.0,
-    edge_weight: Literal["amount", "score"] = "amount",
-    node_scores: dict[tuple[int, int], float] | None = None,
-    title: str = "Temporal Sankey (graph-like layout)",
-    amount_label: str = "Impact score",
-    fig_width: int = 1200,
-    fig_height: int = 800,
-    node_thickness: int = 14,
-    node_pad: int = 8,
-    font_size: int = 11,
-    max_label_chars: int = 28,
-    layout_by_year_depth: bool = True,
-    year_scale: float = 300.0,
-    depth_scale: float = 2000.0,
-    auto_depth_scale: bool = True,
-    orientation: Literal["year_x_depth_y", "depth_x_year_y"] = "year_x_depth_y",
-    y_padding: float = 0.04,
-    branch_dropdown: bool = True,
-    depth_dropdown: bool = True,
-    default_depth_level: int = 1,
-    min_display_value: float | None = None,
-    year_slider: bool = True,
-    filename: str | None = None,
-) -> go.Figure:
-    """Plot temporal sankey graphlike.
-
-    :param trails: Value for `trails`.
-    :type trails: Trails
-    :param min_edge_amount: Value for `min_edge_amount`.
-    :type min_edge_amount: float
-    :param edge_weight: Value for `edge_weight`.
-    :type edge_weight: Literal['amount', 'score']
-    :param node_scores: Value for `node_scores`.
-    :type node_scores: dict[tuple[int, int], float] | None
-    :param title: Value for `title`.
-    :type title: str
-    :param amount_label: Value for `amount_label`.
-    :type amount_label: str
-    :param fig_width: Value for `fig_width`.
-    :type fig_width: int
-    :param fig_height: Value for `fig_height`.
-    :type fig_height: int
-    :param node_thickness: Value for `node_thickness`.
-    :type node_thickness: int
-    :param node_pad: Value for `node_pad`.
-    :type node_pad: int
-    :param font_size: Value for `font_size`.
-    :type font_size: int
-    :param max_label_chars: Value for `max_label_chars`.
-    :type max_label_chars: int
-    :param layout_by_year_depth: Value for `layout_by_year_depth`.
-    :type layout_by_year_depth: bool
-    :param year_scale: Value for `year_scale`.
-    :type year_scale: float
-    :param depth_scale: Value for `depth_scale`.
-    :type depth_scale: float
-    :param auto_depth_scale: Value for `auto_depth_scale`.
-    :type auto_depth_scale: bool
-    :param orientation: Value for `orientation`.
-    :type orientation: Literal['year_x_depth_y', 'depth_x_year_y']
-    :param y_padding: Value for `y_padding`.
-    :type y_padding: float
-    :param branch_dropdown: Value for `branch_dropdown`.
-    :type branch_dropdown: bool
-    :param depth_dropdown: Value for `depth_dropdown`.
-    :type depth_dropdown: bool
-    :param default_depth_level: Value for `default_depth_level`.
-    :type default_depth_level: int
-    :param min_display_value: Value for `min_display_value`.
-    :type min_display_value: float | None
-    :param year_slider: Value for `year_slider`.
-    :type year_slider: bool
-    :param filename: Value for `filename`.
-    :type filename: str | None
-    :returns: Return value.
-    :rtype: go.Figure
-    :raises RuntimeError: If an error occurs.
-    :raises ValueError: If an error occurs."""
-    G = getattr(trails, "graph", None)
-    if G is None:
+    method: str | None,
+) -> list[dict[str, Any]]:
+    graph = getattr(trails_obj, "graph", None)
+    if graph is None:
         raise RuntimeError(
             "Trails graph is missing; run trails.temporal_routing(...) first."
         )
 
-    if edge_weight == "score" and node_scores is None:
-        node_scores = _node_scores_from_trails(trails)
+    root_indices = {
+        int(data.get("act_idx", -1))
+        for _node, data in graph.nodes(data=True)
+        if int(data.get("depth", -1)) == 1
+    }
+    if not root_indices:
+        return []
+    node_root_amounts, edge_root_amounts = _adaptive_sankey_root_routed_amounts(
+        graph,
+        root_indices=root_indices,
+    )
 
-    # Prefer explicit label from caller, else try to infer from characterized inventory.
-    score_unit = amount_label
-    if amount_label == "Impact score":
-        try:
-            char = getattr(trails, "characterized_inventory", None)
-            if char is not None and "unit" in char.attrs:
-                score_unit = str(char.attrs["unit"])
-        except Exception:
-            pass
-    # Prefer explicit label from caller, else try to infer from characterized inventory.
-    score_unit = amount_label
-    if amount_label == "Impact score":
-        try:
-            char = getattr(trails, "characterized_inventory", None)
-            if char is not None and "unit" in char.attrs:
-                score_unit = str(char.attrs["unit"])
-        except Exception:
-            pass
+    score_denoms: dict[object, float] = {}
+    for node, roots in node_root_amounts.items():
+        score_denoms[node] = sum(abs(float(value)) for value in roots.values())
 
-    edges: list[tuple[tuple, tuple, float]] = []
-    for u, v, data in G.edges(data=True):
-        amt = float(data.get("amount", 0.0))
-        if abs(amt) < float(min_edge_amount):
+    rows: list[dict[str, Any]] = []
+    for u, v, data in graph.edges(data=True):
+        raw_amount = float(data.get("amount", 0.0))
+        amount_abs = abs(raw_amount)
+        if amount_abs == 0.0:
             continue
-        value = abs(amt)
-        if value == 0.0:
+        child = graph.nodes[v]
+        source = graph.nodes[u]
+        node_score = abs(float(child.get("score_potential") or 0.0))
+        if node_score == 0.0:
             continue
-        edges.append((u, v, amt))
+        denom = float(score_denoms.get(v, 0.0))
+        if denom <= 0.0:
+            continue
 
-    if not edges:
-        raise ValueError("No edges meet the filter criteria; nothing to plot.")
-
-    node_ids: dict[tuple, int] = {}
-    nodes: list[tuple] = []
-    for u, v, _ in edges:
-        if u not in node_ids:
-            node_ids[u] = len(nodes)
-            nodes.append(u)
-        if v not in node_ids:
-            node_ids[v] = len(nodes)
-            nodes.append(v)
-
-    years = [float(G.nodes[n].get("year", 0.0)) for n in nodes]
-    depths = [float(G.nodes[n].get("depth", 0.0)) for n in nodes]
-    min_year = min(years) if years else 0.0
-    max_year = max(years) if years else 0.0
-    min_depth = min(depths) if depths else 0.0
-    max_depth_val = max(depths) if depths else 0.0
-    year_mid = (min_year + max_year) / 2.0
-    depth_mid = 0.0
-
-    depth_buckets: dict[int, list[tuple[object, dict]]] = {}
-    for n in nodes:
-        d = G.nodes.get(n, {})
-        depth_buckets.setdefault(int(d.get("depth", 0)), []).append((n, d))
-
-    depth_offsets: dict[object, float] = {}
-    max_bands_per_depth = 1
-    for depth, items in depth_buckets.items():
-        band_map: dict[tuple[str, str, str], list[tuple[object, dict]]] = {}
-        for n, d in items:
-            key = (
-                str(d.get("name", "")),
-                str(d.get("reference_product", "")),
-                str(d.get("location", "")),
+        src_idx = int(source.get("act_idx", -1))
+        dst_idx = int(child.get("act_idx", -1))
+        src_meta = _adaptive_sankey_activity_metadata(trails_obj, src_idx)
+        dst_meta = _adaptive_sankey_activity_metadata(trails_obj, dst_idx)
+        for root_idx in root_indices:
+            edge_amount_abs = float(edge_root_amounts.get((u, v, root_idx), 0.0))
+            if edge_amount_abs == 0.0:
+                continue
+            edge_score = node_score * edge_amount_abs / denom
+            if edge_score == 0.0:
+                continue
+            rows.append(
+                {
+                    "method": "" if method is None else str(method),
+                    "source_node": repr(u),
+                    "target_node": repr(v),
+                    "source_year": int(source.get("year", -1)),
+                    "target_year": int(child.get("year", -1)),
+                    "source_depth": int(source.get("depth", -1)),
+                    "target_depth": int(child.get("depth", -1)),
+                    "source_activity_index": src_idx,
+                    "target_activity_index": dst_idx,
+                    "source_name": str(src_meta.get("name") or ""),
+                    "source_reference_product": str(
+                        src_meta.get("reference product") or ""
+                    ),
+                    "source_location": str(src_meta.get("location") or ""),
+                    "target_name": str(dst_meta.get("name") or ""),
+                    "target_reference_product": str(
+                        dst_meta.get("reference product") or ""
+                    ),
+                    "target_location": str(dst_meta.get("location") or ""),
+                    "target_unit": str(dst_meta.get("unit") or ""),
+                    "root_activity_index": int(root_idx),
+                    "branch": _adaptive_sankey_full_label(
+                        trails_obj,
+                        int(root_idx),
+                    ),
+                    "raw_amount": raw_amount,
+                    "raw_amount_abs": amount_abs,
+                    "root_routed_amount_abs": edge_amount_abs,
+                    "child_node_score": node_score,
+                    "child_score_allocation_amount_abs": denom,
+                    "edge_score": float(edge_score),
+                    "edge_score_abs": abs(float(edge_score)),
+                }
             )
-            band_map.setdefault(key, []).append((n, d))
-        bands = sorted(band_map.items(), key=lambda it: it[0])
-        if not bands:
+
+    rows.sort(key=lambda row: float(row["edge_score_abs"]), reverse=True)
+    total_abs = sum(float(row["edge_score_abs"]) for row in rows)
+    running = 0.0
+    for rank, row in enumerate(rows, start=1):
+        running += float(row["edge_score_abs"])
+        row["rank_abs_edge_score"] = rank
+        row["cumulative_abs_edge_score"] = running
+        row["cumulative_abs_edge_score_share"] = (
+            running / total_abs if total_abs else 0.0
+        )
+    return rows
+
+
+def _adaptive_sankey_branch_rows(
+    edge_rows: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    by_branch: dict[str, dict[str, Any]] = {}
+    for row in edge_rows:
+        branch = str(row.get("branch") or "unassigned")
+        item = by_branch.setdefault(
+            branch,
+            {
+                "branch": branch,
+                "edge_count": 0,
+                "score_sum": 0.0,
+                "score_abs_sum": 0.0,
+            },
+        )
+        item["edge_count"] += 1
+        item["score_sum"] += float(row.get("edge_score") or 0.0)
+        item["score_abs_sum"] += float(row.get("edge_score_abs") or 0.0)
+
+    rows = list(by_branch.values())
+    rows.sort(key=lambda row: abs(float(row["score_abs_sum"])), reverse=True)
+    total_abs = sum(float(row["score_abs_sum"]) for row in rows)
+    for rank, row in enumerate(rows, start=1):
+        row["rank_abs_score"] = rank
+        row["score_abs_share"] = (
+            float(row["score_abs_sum"]) / total_abs if total_abs else 0.0
+        )
+    return rows
+
+
+def _adaptive_sankey_node_potential_rows(
+    trails_obj: Trails,
+    *,
+    method: str | None,
+) -> list[dict[str, Any]]:
+    """Allocate routed node score potentials to first-level branches."""
+    graph = getattr(trails_obj, "graph", None)
+    if graph is None:
+        raise RuntimeError(
+            "Trails graph is missing; run trails.temporal_routing(...) first."
+        )
+    root_indices = {
+        int(data.get("act_idx", -1))
+        for _node, data in graph.nodes(data=True)
+        if int(data.get("depth", -1)) == 1
+    }
+    node_root_amounts, _edge_root_amounts = _adaptive_sankey_root_routed_amounts(
+        graph,
+        root_indices=root_indices,
+    )
+
+    rows: list[dict[str, Any]] = []
+    for node, data in graph.nodes(data=True):
+        depth = int(data.get("depth", -1))
+        if depth < 1:
             continue
-        max_bands_per_depth = max(max_bands_per_depth, len(bands))
-        band_step = 32.0
-        band_start = -band_step * (len(bands) - 1) / 2.0
-        for band_idx, (_key, band_items) in enumerate(bands):
-            band_offset = band_start + band_idx * band_step
-            max_offset = float(depth_scale) * 0.35
-            band_offset = max(min(band_offset, max_offset), -max_offset)
-            for n, _ in band_items:
-                depth_offsets[n] = band_offset
-    if auto_depth_scale:
-        max_band_offset = (24.0 * (max_bands_per_depth - 1)) / 2.0
-        depth_scale = max(float(depth_scale), 2.0 * max_band_offset + 200.0)
-
-    if layout_by_year_depth:
-        xs: list[float] = []
-        ys: list[float] = []
-        for n in nodes:
-            d = G.nodes.get(n, {})
-            year = float(d.get("year", 0.0))
-            depth = float(d.get("depth", 0.0))
-            if orientation == "depth_x_year_y":
-                x = (depth - depth_mid) * float(depth_scale) + float(
-                    depth_offsets.get(n, 0.0)
-                )
-                y = (year - year_mid) * float(year_scale)
-            else:
-                x = (year - year_mid) * float(year_scale)
-                y = -(depth - depth_mid) * float(depth_scale) + float(
-                    depth_offsets.get(n, 0.0)
-                )
-            xs.append(x)
-            ys.append(y)
-        min_x = min(xs) if xs else 0.0
-        max_x = max(xs) if xs else 1.0
-        min_y = min(ys) if ys else 0.0
-        max_y = max(ys) if ys else 1.0
-        x_span = max_x - min_x
-        y_span = max_y - min_y
-        node_x = [(x - min_x) / x_span if x_span else 0.5 for x in xs]
-        node_y = [(y - min_y) / y_span if y_span else 0.5 for y in ys]
-
-        # If rotated, keep early years at the top and center the root node vertically.
-        if orientation == "depth_x_year_y":
-            for idx, n in enumerate(nodes):
-                depth = int(G.nodes.get(n, {}).get("depth", 0))
-                if depth == 0:
-                    node_y[idx] = 0.5
-            # Keep nodes away from edges so labels don't flip sides as much.
-            node_x = [min(0.88, max(0.08, x)) for x in node_x]
-        # Apply padding to avoid truncation at bounds
-        effective_pad = max(float(y_padding), 0.03)
-        node_y = [min(1.0 - effective_pad, max(effective_pad, y)) for y in node_y]
-    else:
-        node_x = [0.5 for _ in nodes]
-        node_y = [0.5 for _ in nodes]
-
-    act_meta = _collect_activity_meta(trails)
-
-    def _shorten(text: str, limit: int) -> str:
-        """shorten.
-
-        :param text: Value for `text`.
-        :type text: str
-        :param limit: Value for `limit`.
-        :type limit: int
-        :returns: Return value.
-        :rtype: str"""
-        if limit <= 0 or len(text) <= limit:
-            return text
-        return text[: max(0, limit - 1)] + "…"
-
-    labels: list[str] = []
-    for node in nodes:
-        data = G.nodes.get(node, {})
-        act_idx = int(data.get("act_idx", -1))
+        node_score = abs(float(data.get("score_potential") or 0.0))
+        if node_score == 0.0:
+            continue
+        roots = {
+            int(root): abs(float(amount))
+            for root, amount in node_root_amounts.get(node, {}).items()
+            if float(amount) != 0.0
+        }
+        denom = sum(roots.values())
+        if denom <= 0.0:
+            continue
         year = int(data.get("year", -1))
-        meta = act_meta.get(act_idx, {})
-        name = (meta.get("name") or "").strip()
-        ref = (meta.get("reference product") or "").strip()
-        loc = (meta.get("location") or "").strip()
-        base = " | ".join([p for p in (name, ref, loc) if p])
-        base = _shorten(base, max_label_chars)
-        labels.append(f"{base} ({year})" if base else f"Activity {act_idx} ({year})")
+        act_idx = int(data.get("act_idx", -1))
+        activity = _adaptive_sankey_full_label(trails_obj, act_idx)
+        for root_idx, amount_abs in roots.items():
+            fraction = float(amount_abs) / float(denom)
+            allocated_score = node_score * fraction
+            if allocated_score == 0.0:
+                continue
+            rows.append(
+                {
+                    "method": "" if method is None else str(method),
+                    "node": repr(node),
+                    "year": year,
+                    "depth": depth,
+                    "activity_index": act_idx,
+                    "activity": activity,
+                    "root_activity_index": int(root_idx),
+                    "branch": _adaptive_sankey_full_label(
+                        trails_obj,
+                        int(root_idx),
+                    ),
+                    "node_score": float(allocated_score),
+                    "node_score_abs": abs(float(allocated_score)),
+                    "node_score_allocation_fraction": fraction,
+                    "node_score_allocation_amount_abs": float(denom),
+                    "node_score_source": (
+                        "routed_node_score_potential_allocated_by_branch_amount"
+                    ),
+                }
+            )
 
-    # Color edges by first-level branch (reference product), and propagate down.
-    palette = [
-        "#4c78a8",
-        "#f58518",
-        "#54a24b",
-        "#e45756",
-        "#72b7b2",
-        "#b279a2",
-        "#ff9da6",
-        "#9d755d",
-        "#bab0ac",
+    rows.sort(key=lambda row: float(row["node_score_abs"]), reverse=True)
+    total_abs = sum(float(row["node_score_abs"]) for row in rows)
+    running = 0.0
+    for rank, row in enumerate(rows, start=1):
+        running += float(row["node_score_abs"])
+        row["rank_abs_node_score"] = rank
+        row["cumulative_abs_node_score"] = running
+        row["cumulative_abs_node_score_share"] = (
+            running / total_abs if total_abs else 0.0
+        )
+    return rows
+
+
+def _adaptive_sankey_allowed_branches(
+    branch_rows: list[dict[str, Any]],
+    *,
+    cutoff: float,
+) -> set[str]:
+    allowed = {
+        str(row.get("branch") or "")
+        for row in branch_rows
+        if float(row.get("score_abs_share") or 0.0) >= float(cutoff)
+    }
+    if allowed:
+        return allowed
+    return {str(row.get("branch") or "") for row in branch_rows}
+
+
+def _adaptive_sankey_year_depth_positions(
+    *,
+    years: list[int],
+    depths: list[int],
+    labels: list[str],
+    x_min: float,
+    x_max: float,
+) -> tuple[list[float], list[float]]:
+    """Return fixed Sankey node positions with depth on x and year on y."""
+    if not years:
+        return [], []
+
+    min_year = min(years)
+    max_year = max(years)
+    max_depth = max(max(depths), 1)
+    year_span = max(max_year - min_year, 1)
+    x_span = max(float(x_max) - float(x_min), 0.01)
+    x_values = [
+        float(x_min) + (float(depth) / float(max_depth)) * x_span
+        for depth in depths
     ]
-    depth0_nodes = [n for n in nodes if int(G.nodes.get(n, {}).get("depth", 0)) == 0]
-    edge_colors: dict[tuple, str] = {}
-    node_branch_color: dict = {}
-    color_idx = 0
+    y_centers = [
+        (float(year) - float(min_year)) / float(year_span) for year in years
+    ]
 
-    def _branch_key(node: object) -> str:
-        """branch key.
+    unique_centers = sorted(set(y_centers))
+    if len(unique_centers) > 1:
+        min_spacing = min(
+            b - a for a, b in zip(unique_centers[:-1], unique_centers[1:])
+        )
+        half_band = min(0.045, max(0.0, min_spacing * 0.4))
+    else:
+        half_band = 0.35
 
-        :param node: Value for `node`.
-        :type node: object
-        :returns: Return value.
-        :rtype: str"""
-        data = G.nodes.get(node, {})
-        meta = act_meta.get(int(data.get("act_idx", -1)), {})
-        return str(meta.get("reference product") or "")
+    y_values = list(y_centers)
+    indices_by_year: dict[int, list[int]] = defaultdict(list)
+    for idx, year in enumerate(years):
+        indices_by_year[int(year)].append(idx)
 
-    key_colors: dict[str, str] = {}
-    for n in depth0_nodes:
-        for _, child in G.out_edges(n):
-            key = _branch_key(child)
-            if key in key_colors:
-                color = key_colors[key]
-            else:
-                color = palette[color_idx % len(palette)]
-                color_idx += 1
-                key_colors[key] = color
-            edge_colors[(n, child)] = color
-            node_branch_color[child] = color
-            queue = [child]
-            while queue:
-                cur = queue.pop(0)
-                for _, nxt in G.out_edges(cur):
-                    if nxt not in node_branch_color:
-                        node_branch_color[nxt] = color
-                        queue.append(nxt)
+    for year, indices in indices_by_year.items():
+        if len(indices) == 1:
+            continue
+        center = (float(year) - float(min_year)) / float(year_span)
+        ordered = sorted(indices, key=lambda idx: (depths[idx], labels[idx]))
+        if half_band <= 0.0:
+            continue
+        step = (2.0 * half_band) / float(max(len(ordered) - 1, 1))
+        start = center - half_band
+        for offset, idx in enumerate(ordered):
+            y_values[idx] = start + float(offset) * step
 
-    def _edge_color(u: object, v: object) -> str:
-        """edge color.
+    x_values = [min(float(x_max), max(float(x_min), value)) for value in x_values]
+    y_values = [min(0.98, max(0.02, value)) for value in y_values]
+    return x_values, y_values
 
-        :param u: Value for `u`.
-        :type u: object
-        :param v: Value for `v`.
-        :type v: object
-        :returns: Return value.
-        :rtype: str"""
-        src_depth = int(G.nodes.get(u, {}).get("depth", 0))
-        if src_depth == 0:
-            return edge_colors.get((u, v), "#999999")
-        return node_branch_color.get(u, "#999999")
 
-    # Compute edge scores (if available) and base values for scaling.
-    incoming_abs: dict[object, float] = defaultdict(float)
-    for u, v, raw_amt in edges:
-        incoming_abs[v] += abs(float(raw_amt))
+def _adaptive_sankey_year_label_step(min_year: int, max_year: int) -> int:
+    span = max(int(max_year) - int(min_year), 1)
+    if span > 80:
+        return 10
+    if span > 35:
+        return 5
+    if span > 15:
+        return 2
+    return 1
 
-    edge_scores: list[float] = []
-    base_values: list[float] = []
-    for u, v, raw_amt in edges:
-        amt_abs = abs(float(raw_amt))
-        if edge_weight == "score":
-            vdata = G.nodes.get(v, {})
-            year = int(vdata.get("year", -1))
-            act = int(vdata.get("act_idx", -1))
-            child_score = float((node_scores or {}).get((year, act), 0.0))
-            denom = float(incoming_abs.get(v, 0.0))
-            score_val = child_score * (amt_abs / denom) if denom > 0.0 else 0.0
-            base_values.append(score_val)
-            edge_scores.append(score_val)
-        else:
-            base_values.append(amt_abs)
-            # still compute score for hover if we can
-            vdata = G.nodes.get(v, {})
-            year = int(vdata.get("year", -1))
-            act = int(vdata.get("act_idx", -1))
-            child_score = float((node_scores or {}).get((year, act), 0.0))
-            denom = float(incoming_abs.get(v, 0.0))
-            score_val = child_score * (amt_abs / denom) if denom > 0.0 else 0.0
-            edge_scores.append(score_val)
 
-    # Enforce flow conservation so node heights do not exceed incoming links.
-    incoming_sum: dict[object, float] = defaultdict(float)
-    outgoing_sum: dict[object, float] = defaultdict(float)
-    for (u, v, _), val in zip(edges, base_values):
-        incoming_sum[v] += float(val)
-        outgoing_sum[u] += float(val)
+def _adaptive_sankey_grid_elements(
+    *,
+    max_depth: int,
+    min_year: int,
+    max_year: int,
+    x_min: float,
+    x_max: float,
+    horizontal_x_max: float | None = None,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    max_depth = max(int(max_depth), 1)
+    min_year = int(min_year)
+    max_year = int(max_year)
+    year_span = max(max_year - min_year, 1)
+    year_step = _adaptive_sankey_year_label_step(min_year, max_year)
+    horizontal_x_max = float(
+        horizontal_x_max if horizontal_x_max is not None else x_max
+    )
+    shapes: list[dict[str, Any]] = []
+    annotations: list[dict[str, Any]] = []
 
-    adjusted_edges: list[tuple[object, object, float, float, float]] = []
-    for (u, v, raw_amt), val, score in zip(edges, base_values, edge_scores):
-        depth_u = int(G.nodes.get(u, {}).get("depth", 0))
-        scale = 1.0
-        if depth_u > 0:
-            inc = float(incoming_sum.get(u, 0.0))
-            out = float(outgoing_sum.get(u, 0.0))
-            if out > 0.0 and inc > 0.0:
-                scale = inc / out
-        adjusted_edges.append(
-            (u, v, float(val) * scale, abs(float(raw_amt)), float(score))
+    def depth_x(depth: int) -> float:
+        x_span = max(float(x_max) - float(x_min), 0.01)
+        value = float(x_min) + (float(depth) / float(max_depth)) * x_span
+        return min(float(x_max), max(float(x_min), value))
+
+    def year_y(year: int) -> float:
+        sankey_y = (float(year) - float(min_year)) / float(year_span)
+        sankey_y = min(0.98, max(0.02, sankey_y))
+        return 1.0 - sankey_y
+
+    for depth in range(max_depth + 1):
+        x_pos = depth_x(depth)
+        is_major = depth == 0 or depth == max_depth or depth % 5 == 0
+        shapes.append(
+            {
+                "type": "line",
+                "xref": "paper",
+                "yref": "paper",
+                "x0": x_pos,
+                "x1": x_pos,
+                "y0": 0.02,
+                "y1": 0.98,
+                "layer": "below",
+                "line": {
+                    "color": (
+                        "rgba(107,114,128,0.34)"
+                        if is_major
+                        else "rgba(148,163,184,0.20)"
+                    ),
+                    "width": 1.0 if is_major else 0.7,
+                },
+            }
+        )
+        annotations.append(
+            {
+                "xref": "paper",
+                "yref": "paper",
+                "x": x_pos,
+                "y": 1.025,
+                "text": f"d{depth}",
+                "showarrow": False,
+                "xanchor": "center",
+                "yanchor": "bottom",
+                "font": {"size": 10, "color": "#4b5563"},
+            }
         )
 
-    link_sources = [node_ids[u] for u, _, _, _, _ in adjusted_edges]
-    link_targets = [node_ids[v] for _, v, _, _, _ in adjusted_edges]
-    link_values = [val for _, _, val, _, _ in adjusted_edges]
-    if min_display_value is not None:
-        floor = float(min_display_value)
-        if floor > 0.0:
-            link_values = [max(v, floor) for v in link_values]
-    link_colors = [_edge_color(u, v) for u, v, _, _, _ in adjusted_edges]
-
-    # Node color = color of dominant incoming edge (or branch color).
-    incoming_color: dict[object, str] = {}
-    incoming_value: dict[object, float] = defaultdict(float)
-    for u, v, val, _, _ in adjusted_edges:
-        color = _edge_color(u, v)
-        if val > incoming_value.get(v, 0.0):
-            incoming_value[v] = val
-            incoming_color[v] = color
-    node_colors = []
-    for n in nodes:
-        depth = int(G.nodes.get(n, {}).get("depth", 0))
-        if depth == 0:
-            node_colors.append("#cccccc")
-        else:
-            node_colors.append(
-                incoming_color.get(n, node_branch_color.get(n, "#cccccc"))
+    for year in range(min_year, max_year + 1):
+        y_pos = year_y(year)
+        is_major = (
+            year == min_year
+            or year == max_year
+            or year % year_step == 0
+        )
+        if not is_major and year_span > 40:
+            continue
+        shapes.append(
+            {
+                "type": "line",
+                "xref": "paper",
+                "yref": "paper",
+                "x0": x_min,
+                "x1": horizontal_x_max,
+                "y0": y_pos,
+                "y1": y_pos,
+                "layer": "below",
+                "line": {
+                    "color": (
+                        "rgba(107,114,128,0.26)"
+                        if is_major
+                        else "rgba(148,163,184,0.10)"
+                    ),
+                    "width": 0.9 if is_major else 0.5,
+                },
+            }
+        )
+        if is_major:
+            annotations.append(
+                {
+                    "xref": "paper",
+                    "yref": "paper",
+                    "x": float(x_min) - 0.02,
+                    "y": y_pos,
+                    "text": str(year),
+                    "showarrow": False,
+                    "xanchor": "right",
+                    "yanchor": "middle",
+                    "font": {"size": 10, "color": "#4b5563"},
+                }
             )
 
-    def _with_alpha(color: str, alpha: float) -> str:
-        """with alpha.
+    annotations.extend(
+        [
+            {
+                "xref": "paper",
+                "yref": "paper",
+                "x": (float(x_min) + float(x_max)) / 2.0,
+                "y": 1.065,
+                "text": "depth",
+                "showarrow": False,
+                "xanchor": "center",
+                "yanchor": "bottom",
+                "font": {"size": 11, "color": "#374151"},
+            },
+            {
+                "xref": "paper",
+                "yref": "paper",
+                "x": -0.055,
+                "y": 0.5,
+                "text": "year",
+                "textangle": -90,
+                "showarrow": False,
+                "xanchor": "center",
+                "yanchor": "middle",
+                "font": {"size": 11, "color": "#374151"},
+            },
+        ]
+    )
+    return shapes, annotations
 
-        :param color: Value for `color`.
-        :type color: str
-        :param alpha: Value for `alpha`.
-        :type alpha: float
-        :returns: Return value.
-        :rtype: str"""
-        if color.startswith("rgba"):
-            parts = color.strip("rgba()").split(",")
-            if len(parts) >= 3:
-                return f"rgba({parts[0]},{parts[1]},{parts[2]},{alpha})"
-        if color.startswith("#") and len(color) == 7:
-            r = int(color[1:3], 16)
-            g = int(color[3:5], 16)
-            b = int(color[5:7], 16)
-            return f"rgba({r},{g},{b},{alpha})"
-        return color
 
-    customdata = []
-    for u, v, _, amt, score in adjusted_edges:
-        udata = G.nodes.get(u, {})
-        vdata = G.nodes.get(v, {})
-        u_act = int(udata.get("act_idx", -1))
-        v_act = int(vdata.get("act_idx", -1))
-        u_year = int(udata.get("year", -1))
-        v_year = int(vdata.get("year", -1))
-        u_meta = act_meta.get(u_act, {})
-        v_meta = act_meta.get(v_act, {})
-        u_name = (u_meta.get("name") or "").strip()
-        u_ref = (u_meta.get("reference product") or "").strip()
-        u_loc = (u_meta.get("location") or "").strip()
-        v_name = (v_meta.get("name") or "").strip()
-        v_ref = (v_meta.get("reference product") or "").strip()
-        v_loc = (v_meta.get("location") or "").strip()
-        u_label = " | ".join([p for p in (u_name, u_ref, u_loc) if p])
-        v_label = " | ".join([p for p in (v_name, v_ref, v_loc) if p])
-        v_unit = (v_meta.get("unit") or "").strip()
-        customdata.append(
-            [
-                u_label,
-                u_year,
-                v_label,
-                v_year,
-                float(amt),
-                float(score),
-                v_unit,
-            ]
+def _adaptive_sankey_time_density_elements(
+    rows: list[dict[str, Any]],
+    *,
+    branches: list[str],
+    color_map: dict[str, str],
+    min_year: int,
+    max_year: int,
+    label: str,
+    scale_max: float | None,
+    x0: float,
+    x1: float,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    min_year = int(min_year)
+    max_year = int(max_year)
+    year_span = max(max_year - min_year, 1)
+    panel_width = max(float(x1) - float(x0), 0.01)
+    branch_year_scores: dict[str, dict[int, float]] = defaultdict(
+        lambda: defaultdict(float)
+    )
+    for row in rows:
+        branch = str(row.get("branch") or "")
+        if branch not in branches:
+            continue
+        year = int(row.get("target_year"))
+        if year < min_year or year > max_year:
+            continue
+        branch_year_scores[branch][year] += float(row.get("edge_score_abs") or 0.0)
+
+    if scale_max is None:
+        global_max = max(
+            (
+                float(value)
+                for year_scores in branch_year_scores.values()
+                for value in year_scores.values()
+            ),
+            default=0.0,
+        )
+    else:
+        global_max = float(scale_max)
+
+    shapes: list[dict[str, Any]] = [
+        {
+            "type": "rect",
+            "xref": "paper",
+            "yref": "paper",
+            "x0": x0,
+            "x1": x1,
+            "y0": 0.02,
+            "y1": 0.98,
+            "layer": "below",
+            "fillcolor": "rgba(255,255,255,0.00)",
+            "line": {"color": "rgba(107,114,128,0.32)", "width": 0.8},
+        },
+        {
+            "type": "line",
+            "xref": "paper",
+            "yref": "paper",
+            "x0": x0,
+            "x1": x0,
+            "y0": 0.02,
+            "y1": 0.98,
+            "layer": "above",
+            "line": {"color": "rgba(55,65,81,0.55)", "width": 0.8},
+        },
+    ]
+    annotations: list[dict[str, Any]] = [
+        {
+            "xref": "paper",
+            "yref": "paper",
+            "x": (float(x0) + float(x1)) / 2.0,
+            "y": 0.965,
+            "text": label,
+            "showarrow": False,
+            "xanchor": "center",
+            "yanchor": "top",
+            "font": {"size": 10, "color": "#374151"},
+        }
+    ]
+
+    def year_y(year: int) -> float:
+        sankey_y = (float(year) - float(min_year)) / float(year_span)
+        sankey_y = min(0.98, max(0.02, sankey_y))
+        return 1.0 - sankey_y
+
+    years_all = list(range(min_year, max_year + 1))
+    for branch in branches:
+        year_scores = branch_year_scores.get(branch, {})
+        if not year_scores or global_max <= 0.0:
+            continue
+        points: list[tuple[float, float]] = []
+        for year in years_all:
+            value = float(year_scores.get(year, 0.0))
+            x_pos = float(x0) + panel_width * (value / global_max)
+            points.append((x_pos, year_y(year)))
+        first_y = points[0][1]
+        last_y = points[-1][1]
+        path_parts = [f"M {float(x0):.5f},{first_y:.5f}"]
+        path_parts.extend(f"L {x:.5f},{y:.5f}" for x, y in points)
+        path_parts.append(f"L {float(x0):.5f},{last_y:.5f}")
+        path_parts.append("Z")
+        shapes.append(
+            {
+                "type": "path",
+                "xref": "paper",
+                "yref": "paper",
+                "path": " ".join(path_parts),
+                "layer": "above",
+                "fillcolor": _adaptive_sankey_rgba_color(branch, color_map, 0.16),
+                "line": {
+                    "color": _adaptive_sankey_rgba_color(branch, color_map, 0.78),
+                    "width": 0.9,
+                },
+            }
+        )
+    return shapes, annotations
+
+
+def _adaptive_sankey_depth_density_elements(
+    rows: list[dict[str, Any]],
+    *,
+    branches: list[str],
+    color_map: dict[str, str],
+    max_depth: int,
+    label: str,
+    scale_max: float | None,
+    x_min: float,
+    x_max: float,
+    y0: float = -0.155,
+    y1: float = -0.045,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    max_depth = max(int(max_depth), 1)
+    panel_height = max(float(y1) - float(y0), 0.01)
+    x_span = max(float(x_max) - float(x_min), 0.01)
+    branch_depth_scores: dict[str, dict[int, float]] = defaultdict(
+        lambda: defaultdict(float)
+    )
+    for row in rows:
+        branch = str(row.get("branch") or "")
+        if branch not in branches:
+            continue
+        depth = int(row.get("depth", -1))
+        if depth < 0 or depth > max_depth:
+            continue
+        branch_depth_scores[branch][depth] += float(
+            row.get("node_score_abs") or 0.0
         )
 
-    # Node-level amount (incoming) for hover, plus root amount from routing params
-    node_amounts: dict[object, float] = defaultdict(float)
-    for u, v, _raw_amt in edges:
-        node_amounts[v] += abs(float(_raw_amt))
+    if scale_max is None:
+        global_max = max(
+            (
+                float(value)
+                for depth_scores in branch_depth_scores.values()
+                for value in depth_scores.values()
+            ),
+            default=0.0,
+        )
+    else:
+        global_max = float(scale_max)
+
+    shapes: list[dict[str, Any]] = [
+        {
+            "type": "rect",
+            "xref": "paper",
+            "yref": "paper",
+            "x0": x_min,
+            "x1": x_max,
+            "y0": y0,
+            "y1": y1,
+            "layer": "below",
+            "fillcolor": "rgba(255,255,255,0.00)",
+            "line": {"color": "rgba(107,114,128,0.32)", "width": 0.8},
+        }
+    ]
+    annotations: list[dict[str, Any]] = [
+        {
+            "xref": "paper",
+            "yref": "paper",
+            "x": (float(x_min) + float(x_max)) / 2.0,
+            "y": float(y1) - 0.008,
+            "text": label,
+            "showarrow": False,
+            "xanchor": "center",
+            "yanchor": "top",
+            "font": {"size": 10, "color": "#374151"},
+        }
+    ]
+
+    def depth_x(depth: int) -> float:
+        return float(x_min) + (float(depth) / float(max_depth)) * x_span
+
+    for depth in range(max_depth + 1):
+        x_pos = depth_x(depth)
+        is_major = depth == 0 or depth == max_depth or depth % 5 == 0
+        shapes.append(
+            {
+                "type": "line",
+                "xref": "paper",
+                "yref": "paper",
+                "x0": x_pos,
+                "x1": x_pos,
+                "y0": y0,
+                "y1": y1,
+                "layer": "below",
+                "line": {
+                    "color": (
+                        "rgba(107,114,128,0.28)"
+                        if is_major
+                        else "rgba(148,163,184,0.16)"
+                    ),
+                    "width": 0.8 if is_major else 0.5,
+                },
+            }
+        )
+
+    depths_all = list(range(max_depth + 1))
+    for branch in branches:
+        depth_scores = branch_depth_scores.get(branch, {})
+        if not depth_scores or global_max <= 0.0:
+            continue
+        points: list[tuple[float, float]] = []
+        for depth in depths_all:
+            value = float(depth_scores.get(depth, 0.0))
+            y_pos = float(y0) + panel_height * (value / global_max)
+            points.append((depth_x(depth), y_pos))
+        first_x = points[0][0]
+        last_x = points[-1][0]
+        path_parts = [f"M {first_x:.5f},{float(y0):.5f}"]
+        path_parts.extend(f"L {x:.5f},{y:.5f}" for x, y in points)
+        path_parts.append(f"L {last_x:.5f},{float(y0):.5f}")
+        path_parts.append("Z")
+        shapes.append(
+            {
+                "type": "path",
+                "xref": "paper",
+                "yref": "paper",
+                "path": " ".join(path_parts),
+                "layer": "above",
+                "fillcolor": _adaptive_sankey_rgba_color(branch, color_map, 0.16),
+                "line": {
+                    "color": _adaptive_sankey_rgba_color(branch, color_map, 0.78),
+                    "width": 0.9,
+                },
+            }
+        )
+    return shapes, annotations
+
+
+def _adaptive_sankey_legend_elements(
+    entries: list[tuple[str, str]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    if not entries:
+        return [], []
+
+    x0 = 0.665
+    x1 = 0.985
+    y1 = 1.245
+    row_height = 0.022
+    header_height = 0.044
+    pad = 0.010
+    y0 = y1 - header_height - row_height * len(entries) - pad
+    shapes: list[dict[str, Any]] = [
+        {
+            "type": "rect",
+            "xref": "paper",
+            "yref": "paper",
+            "x0": x0,
+            "x1": x1,
+            "y0": y0,
+            "y1": y1,
+            "layer": "above",
+            "fillcolor": "rgba(255,255,255,0.90)",
+            "line": {"color": "rgba(107,114,128,0.55)", "width": 0.8},
+        }
+    ]
+    annotations: list[dict[str, Any]] = [
+        {
+            "xref": "paper",
+            "yref": "paper",
+            "x": x0 + 0.014,
+            "y": y1 - 0.014,
+            "text": "Displayed root activities",
+            "showarrow": False,
+            "xanchor": "left",
+            "yanchor": "top",
+            "font": {"size": 11, "color": "#111827"},
+        }
+    ]
+
+    for idx, (branch, color) in enumerate(entries):
+        row_y = y1 - header_height - row_height * idx - 0.016
+        square_y = row_y - 0.011
+        activity_name = str(branch).split(" | ", maxsplit=1)[0]
+        shapes.append(
+            {
+                "type": "rect",
+                "xref": "paper",
+                "yref": "paper",
+                "x0": x0 + 0.014,
+                "x1": x0 + 0.028,
+                "y0": square_y,
+                "y1": square_y + 0.014,
+                "layer": "above",
+                "fillcolor": color,
+                "line": {"color": "rgba(31,41,55,0.55)", "width": 0.5},
+            }
+        )
+        annotations.append(
+            {
+                "xref": "paper",
+                "yref": "paper",
+                "x": x0 + 0.036,
+                "y": row_y,
+                "text": _shorten_text(
+                    activity_name,
+                    width=46,
+                    placeholder="...",
+                ),
+                "showarrow": False,
+                "xanchor": "left",
+                "yanchor": "middle",
+                "font": {"size": 10, "color": "#1f2937"},
+            }
+        )
+
+    return shapes, annotations
+
+
+def plot_adaptive_sankey(
+    trails: Trails,
+    *,
+    method: str | None = None,
+    title: str | None = None,
+    adaptive_relative_score_cutoff: float | None = None,
+    branch_visual_cutoff: float = 0.001,
+    max_sankey_links: int = 0,
+    display_score_coverage: float = 1.0,
+    width: int = 2100,
+    height: int = 1100,
+    show_time_density: bool = True,
+    show_depth_density: bool = True,
+    node_score_rows: list[dict[str, Any]] | None = None,
+    time_density_label: str = "score-potential density<br>over time",
+    depth_density_label: str = "score-potential density over depths",
+    output_path: str | os.PathLike[str] | None = None,
+    png_path: str | os.PathLike[str] | None = None,
+    png_scale: int = 3,
+) -> go.Figure:
+    """Plot explicit routed graph edges from adaptive temporal routing.
+
+    The diagram uses only the explicit routed graph stored on ``trails.graph``.
+    Nodes are placed horizontally by routing depth and vertically by calendar
+    year. Link width is the child node's adaptive routing score potential,
+    allocated to first-level root branches by routed absolute amount. Node
+    labels are hidden in the plot body and shown in hover text.
+
+    :param trails: Trails object with an existing routed graph.
+    :type trails: Trails
+    :param method: Optional method label to show in the title and metadata.
+    :type method: str | None
+    :param title: Optional figure title. If omitted, a routing summary title is
+        generated from ``trails._routing_params``.
+    :type title: str | None
+    :param adaptive_relative_score_cutoff: Optional cutoff label. If omitted,
+        the value stored in ``trails._routing_params`` is used when available.
+    :type adaptive_relative_score_cutoff: float | None
+    :param branch_visual_cutoff: Minimum branch share of total explicit edge
+        score potential to display.
+    :type branch_visual_cutoff: float
+    :param max_sankey_links: Maximum links to draw. Use ``0`` for no hard cap.
+    :type max_sankey_links: int
+    :param display_score_coverage: Stop selecting links after this fraction of
+        candidate explicit edge score potential is covered.
+    :type display_score_coverage: float
+    :param width: Figure width in pixels.
+    :type width: int
+    :param height: Figure height in pixels.
+    :type height: int
+    :param show_time_density: Include the right-side year density panel.
+    :type show_time_density: bool
+    :param show_depth_density: Include the bottom depth density panel.
+    :type show_depth_density: bool
+    :param node_score_rows: Optional rows with ``branch``, ``depth``, and
+        ``node_score_abs`` keys for the bottom panel. If omitted, routed node
+        score potentials are used.
+    :type node_score_rows: list[dict[str, Any]] | None
+    :param time_density_label: Label for the right-side density panel.
+    :type time_density_label: str
+    :param depth_density_label: Label for the bottom density panel.
+    :type depth_density_label: str
+    :param output_path: Optional HTML path to write.
+    :type output_path: str | os.PathLike[str] | None
+    :param png_path: Optional PNG path to write using Kaleido.
+    :type png_path: str | os.PathLike[str] | None
+    :param png_scale: PNG scale factor.
+    :type png_scale: int
+    :returns: Plotly figure.
+    :rtype: go.Figure
+    :raises RuntimeError: If the routed graph is missing.
+    :raises ValueError: If no score-potential graph edges can be plotted."""
+    graph = getattr(trails, "graph", None)
+    if graph is None:
+        raise RuntimeError(
+            "Trails graph is missing; run trails.temporal_routing(...) first."
+        )
+
     routing_params = getattr(trails, "_routing_params", {}) or {}
-    if routing_params:
-        root_year = int(routing_params.get("start_year", -1))
-        root_act = int(routing_params.get("start_act_idx", -1))
-        root_amt = abs(float(routing_params.get("amount", 0.0)))
-        for n in nodes:
-            data = G.nodes.get(n, {})
-            if (
-                int(data.get("year", -1)) == root_year
-                and int(data.get("act_idx", -1)) == root_act
-            ):
-                node_amounts[n] = root_amt
+    if adaptive_relative_score_cutoff is None:
+        stored_cutoff = routing_params.get("adaptive_relative_score_cutoff")
+        adaptive_relative_score_cutoff = (
+            None if stored_cutoff is None else float(stored_cutoff)
+        )
 
-    node_customdata = []
-    for n in nodes:
-        data = G.nodes.get(n, {})
+    sankey_x_min = 0.02
+    sankey_x_max = 0.80 if show_time_density else 0.96
+    density_x_min = 0.875
+    density_x_max = 0.985
+
+    all_edge_rows = _adaptive_sankey_edge_rows(trails, method=method)
+    if not all_edge_rows:
+        raise ValueError("No routed graph score-potential edges to plot.")
+    branch_rows = _adaptive_sankey_branch_rows(all_edge_rows)
+    if node_score_rows is None:
+        node_score_rows = _adaptive_sankey_node_potential_rows(
+            trails,
+            method=method,
+        )
+
+    node_lookup = {repr(node): node for node in graph.nodes}
+    allowed_branches = _adaptive_sankey_allowed_branches(
+        branch_rows,
+        cutoff=float(branch_visual_cutoff),
+    )
+    candidate_rows = [
+        row
+        for row in all_edge_rows
+        if str(row.get("branch") or "") in allowed_branches
+    ]
+    candidate_rows.sort(key=lambda row: float(row["edge_score_abs"]), reverse=True)
+    if not candidate_rows:
+        raise ValueError("No routed graph score-potential edges pass filters.")
+
+    total_abs = sum(float(row["edge_score_abs"]) for row in candidate_rows)
+    target = min(max(float(display_score_coverage), 0.0), 1.0)
+    max_links = (
+        None if int(max_sankey_links) <= 0 else max(1, int(max_sankey_links))
+    )
+
+    def select_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        selected: list[dict[str, Any]] = []
+        running = 0.0
+        row_total = sum(float(row["edge_score_abs"]) for row in rows)
+        for row in rows:
+            selected.append(row)
+            running += float(row["edge_score_abs"])
+            if max_links is not None and len(selected) >= max_links:
+                break
+            if row_total and target < 1.0 and running / row_total >= target:
+                break
+        return selected
+
+    selected_rows = select_rows(candidate_rows)
+
+    connected_nodes: set[object] = set()
+    for row in selected_rows:
+        source = node_lookup.get(str(row["source_node"]))
+        target_node = node_lookup.get(str(row["target_node"]))
+        if source is None or target_node is None or source == target_node:
+            continue
+        connected_nodes.add(source)
+        connected_nodes.add(target_node)
+    if not connected_nodes:
+        raise ValueError("No non-self routed graph edges to plot.")
+
+    ordered_graph_nodes = sorted(
+        connected_nodes,
+        key=lambda node: (
+            int(graph.nodes[node].get("depth", 0)),
+            int(graph.nodes[node].get("year", 0)),
+            _adaptive_sankey_reference_product(
+                trails,
+                int(graph.nodes[node].get("act_idx", -1)),
+            ),
+            repr(node),
+        ),
+    )
+    node_ids = {node: idx for idx, node in enumerate(ordered_graph_nodes)}
+    labels: list[str] = []
+    years: list[int] = []
+    depths: list[int] = []
+    node_customdata: list[list[Any]] = []
+    for node in ordered_graph_nodes:
+        data = graph.nodes[node]
         act_idx = int(data.get("act_idx", -1))
+        meta = _adaptive_sankey_activity_metadata(trails, act_idx)
+        reference_product = str(meta.get("reference product") or "")
+        name = str(meta.get("name") or "")
+        location = str(meta.get("location") or "")
         year = int(data.get("year", -1))
-        meta = act_meta.get(act_idx, {})
-        name = (meta.get("name") or "").strip()
-        ref = (meta.get("reference product") or "").strip()
-        loc = (meta.get("location") or "").strip()
-        unit = (meta.get("unit") or "").strip()
-        label = " | ".join([p for p in (name, ref, loc) if p])
-        score_val = float((node_scores or {}).get((year, act_idx), 0.0))
-        node_customdata.append(
-            [label, year, unit, float(node_amounts.get(n, 0.0)), score_val]
+        depth = int(data.get("depth", -1))
+        full_label = " | ".join(
+            part for part in (name, reference_product, location) if part
         )
-
-    sankey = go.Sankey(
-        arrangement="snap",
-        node=dict(
-            pad=node_pad,
-            thickness=node_thickness,
-            label=["" for _ in labels],
-            x=node_x,
-            y=node_y,
-            color=node_colors,
-            customdata=node_customdata,
-            hovertemplate=(
-                "%{customdata[0]} (%{customdata[1]})"
-                "<br>amount=%{customdata[3]:.2e} %{customdata[2]}"
-                f"<br>score=%{{customdata[4]:.2e}} {score_unit}"
-                "<extra></extra>"
-            ),
-        ),
-        link=dict(
-            source=link_sources,
-            target=link_targets,
-            value=link_values,
-            color=link_colors,
-            customdata=customdata,
-            hovertemplate=(
-                "source=%{customdata[0]} (%{customdata[1]})"
-                "<br>target=%{customdata[2]} (%{customdata[3]})"
-                "<br>amount=%{customdata[4]:.2e} %{customdata[6]} | "
-                f"score=%{{customdata[5]:.2e}} {score_unit}"
-                "<extra></extra>"
-            ),
-            hoverinfo="all",
-        ),
-    )
-    # Auto height if not provided
-    if fig_height is None:
-        if orientation == "depth_x_year_y":
-            year_count = len({int(y) for y in years})
-            fig_height = max(1200, min(3200, int(year_count * 3.5)))
-        else:
-            # Fall back to node count-based heuristic
-            fig_height = max(900, min(2000, int(len(nodes) * 6)))
-
-    fig = go.Figure(sankey)
-    fig.update_layout(
-        title=title,
-        width=fig_width,
-        height=int(fig_height),
-        margin=dict(l=40, r=40, t=60, b=140),
-        font=dict(size=font_size),
-    )
-    if depth_dropdown:
-        max_depth = (
-            max(int(G.nodes.get(n, {}).get("depth", 0)) for n in nodes) if nodes else 0
-        )
-        max_depth = max(max_depth, 0)
-
-        def _depth_mask(level: int) -> tuple[list[str], list[str]]:
-            """depth mask.
-
-            :param level: Value for `level`.
-            :type level: int
-            :returns: Return value.
-            :rtype: tuple[list[str], list[str]]"""
-            node_colors_sel = []
-            for n, c in zip(nodes, node_colors):
-                depth = int(G.nodes.get(n, {}).get("depth", 0))
-                if depth <= level:
-                    node_colors_sel.append(c)
-                else:
-                    node_colors_sel.append(_with_alpha(c, 0.05))
-            link_colors_sel = []
-            for (u, v, _, _, _), c in zip(adjusted_edges, link_colors):
-                depth_u = int(G.nodes.get(u, {}).get("depth", 0))
-                depth_v = int(G.nodes.get(v, {}).get("depth", 0))
-                if depth_u <= level and depth_v <= level:
-                    link_colors_sel.append(c)
-                else:
-                    link_colors_sel.append(_with_alpha(c, 0.05))
-            return node_colors_sel, link_colors_sel
-
-        depth_buttons = []
-        for level in range(1, max_depth + 1):
-            node_colors_sel, link_colors_sel = _depth_mask(level)
-            depth_buttons.append(
-                dict(
-                    label=f"Depth ≤ {level}",
-                    method="update",
-                    args=[
-                        {
-                            "node.color": [node_colors_sel],
-                            "link.color": [link_colors_sel],
-                        }
-                    ],
-                )
+        labels.append(
+            _shorten_text(
+                reference_product or name or "Activity",
+                width=42,
+                placeholder="...",
             )
-
-        # Apply default depth level on init
-        default_level = min(max(default_depth_level, 1), max_depth)
-        init_node_colors, init_link_colors = _depth_mask(default_level)
-        fig.update_traces(
-            node=dict(color=init_node_colors), link=dict(color=init_link_colors)
         )
-
-        fig.update_layout(
-            updatemenus=[
-                dict(
-                    type="dropdown",
-                    direction="down",
-                    x=0.0,
-                    y=1.0,
-                    xanchor="left",
-                    yanchor="top",
-                    showactive=True,
-                    buttons=depth_buttons,
-                )
+        years.append(year)
+        depths.append(depth)
+        node_customdata.append(
+            [
+                full_label or repr(node),
+                year,
+                depth,
+                str(meta.get("unit") or ""),
+                "explicit routed graph node",
+                float(data.get("score_potential") or 0.0),
+                float(data.get("amount") or 0.0),
+                float(data.get("frontier_amount") or 0.0),
             ]
         )
-    if branch_dropdown:
-        # Build branch groups from depth-1 nodes (by name only)
-        depth0 = [n for n in nodes if int(G.nodes.get(n, {}).get("depth", 0)) == 0]
-        depth1_children = []
-        for n in depth0:
-            depth1_children.extend([v for _, v in G.out_edges(n)])
-        branch_map: dict[str, list[object]] = {}
-        for child in depth1_children:
-            meta = act_meta.get(int(G.nodes.get(child, {}).get("act_idx", -1)), {})
-            name = str(meta.get("name") or "").strip()
-            if not name:
-                name = f"Activity {int(G.nodes.get(child, {}).get('act_idx', -1))}"
-            branch_map.setdefault(name, []).append(child)
 
-        # Precompute descendants per branch
-        descendants: dict[str, set[object]] = {}
-        for name, roots in branch_map.items():
-            seen = set()
-            queue = list(roots)
-            while queue:
-                cur = queue.pop(0)
-                if cur in seen:
-                    continue
-                seen.add(cur)
-                for _, nxt in G.out_edges(cur):
-                    if nxt not in seen:
-                        queue.append(nxt)
-            descendants[name] = seen
-
-        base_node_colors = node_colors[:]
-        base_link_colors = link_colors[:]
-
-        buttons = []
-        buttons.append(
-            dict(
-                label="All",
-                method="update",
-                args=[
-                    {
-                        "node.color": [base_node_colors],
-                        "link.color": [base_link_colors],
-                    }
-                ],
-            )
-        )
-
-        for name, nodes_in_branch in sorted(descendants.items()):
-            node_colors_sel = []
-            for n, c in zip(nodes, base_node_colors):
-                if n in nodes_in_branch or int(G.nodes.get(n, {}).get("depth", 0)) == 0:
-                    node_colors_sel.append(c)
-                else:
-                    node_colors_sel.append(_with_alpha(c, 0.05))
-
-            link_colors_sel = []
-            for (u, v, _, _, _), c in zip(adjusted_edges, base_link_colors):
-                if u in nodes_in_branch or v in nodes_in_branch:
-                    link_colors_sel.append(c)
-                else:
-                    link_colors_sel.append(_with_alpha(c, 0.05))
-
-            buttons.append(
-                dict(
-                    label=name,
-                    method="update",
-                    args=[
-                        {
-                            "node.color": [node_colors_sel],
-                            "link.color": [link_colors_sel],
-                        }
-                    ],
-                )
-            )
-
-        existing_menus = list(fig.layout.updatemenus) if fig.layout.updatemenus else []
-        existing_menus.append(
-            dict(
-                type="dropdown",
-                direction="down",
-                x=1.02,
-                y=1.0,
-                xanchor="left",
-                yanchor="top",
-                showactive=True,
-                buttons=buttons,
-            )
-        )
-        fig.update_layout(updatemenus=existing_menus)
-    if filename:
-        if year_slider:
-            _write_sankey_html_with_year_slider(
-                fig=fig,
-                filename=filename,
-                div_id="trails-sankey-graphlike",
-            )
-        else:
-            fig.write_html(filename)
-    return fig
-
-
-def _write_sankey_html_with_year_slider(
-    *,
-    fig: go.Figure,
-    filename: str,
-    div_id: str,
-) -> None:
-    """write sankey html with year slider.
-
-    :param fig: Value for `fig`.
-    :type fig: go.Figure
-    :param filename: Value for `filename`.
-    :type filename: str
-    :param div_id: Value for `div_id`.
-    :type div_id: str"""
-    html = pio.to_html(
-        fig,
-        full_html=True,
-        include_plotlyjs="cdn",
-        div_id=div_id,
-    )
-    slider_html = """
-<div id="trails-year-slider-wrap" style="max-width:1200px;margin:0 auto 6px;display:flex;flex-direction:column;align-items:center;">
-  <div id="trails-year-slider" style="width:70%;"></div>
-  <div id="trails-year-range" style="font-size:12px;margin-top:6px;"></div>
-</div>
-"""
-    script = f"""
-<script src="https://cdn.jsdelivr.net/npm/nouislider@15.7.1/dist/nouislider.min.js"></script>
-<link href="https://cdn.jsdelivr.net/npm/nouislider@15.7.1/dist/nouislider.min.css" rel="stylesheet">
-<script>
-(function() {{
-  var gd = document.getElementById("{div_id}");
-  if (!gd || !gd.data || !gd.data.length) return;
-  var link = gd.data[0].link || {{}};
-  var custom = link.customdata || [];
-  var years = custom.map(function(cd) {{ return Number(cd[3]); }}).filter(function(v) {{ return !isNaN(v); }});
-  if (!years.length) return;
-  var minY = Math.min.apply(null, years);
-  var maxY = Math.max.apply(null, years);
-  var slider = document.getElementById("trails-year-slider");
-  var origValues = (link.value || []).slice();
-  var origColors = (link.color || []).slice();
-
-  function withAlpha(color, a) {{
-    if (!color) return color;
-    if (color.startsWith("rgba")) {{
-      var parts = color.replace("rgba(", "").replace(")", "").split(",");
-      if (parts.length >= 3) {{
-        return "rgba(" + parts[0] + "," + parts[1] + "," + parts[2] + "," + a + ")";
-      }}
-    }}
-    if (color.startsWith("#") && color.length === 7) {{
-      var r = parseInt(color.slice(1,3), 16);
-      var g = parseInt(color.slice(3,5), 16);
-      var b = parseInt(color.slice(5,7), 16);
-      return "rgba(" + r + "," + g + "," + b + "," + a + ")";
-    }}
-    return color;
-  }}
-
-  noUiSlider.create(slider, {{
-    start: [minY, maxY],
-    connect: true,
-    step: 1,
-    range: {{ min: minY, max: maxY }},
-    tooltips: [true, true],
-    format: {{
-      to: function(v) {{ return String(Math.round(v)); }},
-      from: function(v) {{ return Number(v); }}
-    }}
-  }});
-
-  // Fallback range display under the slider
-  var rangeEl = document.getElementById("trails-year-range");
-  function updateRange(values) {{
-    if (rangeEl) {{
-      rangeEl.textContent = "Selected years: " + values[0] + " – " + values[1];
-    }}
-  }}
-  updateRange(slider.noUiSlider.get());
-
-  slider.noUiSlider.on("update", function(values) {{
-    var lo = Number(values[0]);
-    var hi = Number(values[1]);
-    updateRange(values);
-    var newValues = [];
-    var newColors = [];
-    for (var i = 0; i < custom.length; i++) {{
-      var y = Number(custom[i][3]);
-      if (y >= lo && y <= hi) {{
-        newValues.push(origValues[i]);
-        newColors.push(origColors[i]);
-      }} else {{
-        newValues.push(0);
-        newColors.push(withAlpha(origColors[i], 0.02));
-      }}
-    }}
-    Plotly.restyle(gd, {{
-      "link.value": [newValues],
-      "link.color": [newColors]
-    }});
-  }});
-}})();
-</script>
-"""
-    marker = f'<div id="{div_id}"'
-    if marker in html:
-        html = html.replace(marker, slider_html + marker)
-    html = html.replace("</body>", script + "</body>")
-    with open(filename, "w", encoding="utf-8") as f:
-        f.write(html)
-
-
-def build_sankey_arrays_from_tree(
-    tree: dict[str, Any],
-    *,
-    label_fn: Callable[[dict[str, Any]], str] | None = None,
-    edge_weight: Literal["amount", "score"] = "score",
-    node_scores: dict[tuple[int, int], float] | None = None,
-    trails: Trails | None = None,
-    score_years: list[int] | None = None,
-) -> dict[str, list]:
-    """Build sankey arrays from tree.
-
-    :param tree: Value for `tree`.
-    :type tree: dict[str, Any]
-    :param label_fn: Value for `label_fn`.
-    :type label_fn: Callable[[dict[str, Any]], str] | None
-    :param edge_weight: Value for `edge_weight`.
-    :type edge_weight: Literal['amount', 'score']
-    :param node_scores: Value for `node_scores`.
-    :type node_scores: dict[tuple[int, int], float] | None
-    :param trails: Value for `trails`.
-    :type trails: Trails | None
-    :param score_years: Value for `score_years`.
-    :type score_years: list[int] | None
-    :returns: Return value.
-    :rtype: dict[str, list]
-    :raises ValueError: If an error occurs."""
-    if not tree or "node" not in tree:
-        raise ValueError("Tree is empty or missing 'node' key.")
-
-    def _default_label(node: dict[str, Any]) -> str:
-        """default label.
-
-        :param node: Value for `node`.
-        :type node: dict[str, Any]
-        :returns: Return value.
-        :rtype: str"""
-        name = node.get("name") or f"Activity {node.get('act_idx')}"
-        rp = node.get("reference_product") or ""
-        loc = node.get("location") or ""
-        label = name
-        if rp:
-            label += f" | {rp}"
-        if loc:
-            label += f" ({loc})"
-        return label
-
-    label_fn = label_fn or _default_label
-
-    node_index: dict[Any, int] = {}
-    node_meta: list[dict[str, Any]] = []
-    labels: list[str] = []
     sources: list[int] = []
     targets: list[int] = []
     values: list[float] = []
-    edge_scores: list[float] = []
+    colors: list[str] = []
+    link_customdata: list[list[Any]] = []
+    color_map: dict[str, str] = {}
+    for row in selected_rows:
+        source = node_lookup.get(str(row["source_node"]))
+        target_node = node_lookup.get(str(row["target_node"]))
+        if source is None or target_node is None or source == target_node:
+            continue
+        value = float(row["edge_score_abs"])
+        if value <= 0.0:
+            continue
+        branch = str(row["branch"])
+        source_data = graph.nodes[source]
+        target_data = graph.nodes[target_node]
+        sources.append(node_ids[source])
+        targets.append(node_ids[target_node])
+        values.append(value)
+        colors.append(_adaptive_sankey_edge_color(branch, color_map))
+        link_customdata.append(
+            [
+                _adaptive_sankey_full_label(
+                    trails,
+                    int(source_data.get("act_idx", -1)),
+                ),
+                int(source_data.get("year", -1)),
+                int(source_data.get("depth", -1)),
+                _adaptive_sankey_full_label(
+                    trails,
+                    int(target_data.get("act_idx", -1)),
+                ),
+                int(target_data.get("year", -1)),
+                int(target_data.get("depth", -1)),
+                branch,
+                float(row.get("raw_amount_abs") or 0.0),
+                float(row.get("root_routed_amount_abs") or 0.0),
+                value,
+                float(row.get("child_node_score") or 0.0),
+                "explicit routed graph edge",
+            ]
+        )
 
-    def _node_key(node_payload: dict[str, Any]) -> Any:
-        """node key.
+    if not values:
+        raise ValueError("No non-self routed graph links to plot.")
 
-        :param node_payload: Value for `node_payload`.
-        :type node_payload: dict[str, Any]
-        :returns: Return value.
-        :rtype: Any"""
-        key = node_payload.get("key")
-        if key is None:
-            return (
-                node_payload.get("year"),
-                node_payload.get("depth"),
-                node_payload.get("act_idx"),
+    x_values, y_values = _adaptive_sankey_year_depth_positions(
+        years=years,
+        depths=depths,
+        labels=labels,
+        x_min=sankey_x_min,
+        x_max=sankey_x_max,
+    )
+    min_year = min(years)
+    max_year = max(years)
+    max_depth = max(max(depths), 1)
+    grid_shapes, grid_annotations = _adaptive_sankey_grid_elements(
+        max_depth=max_depth,
+        min_year=min_year,
+        max_year=max_year,
+        x_min=sankey_x_min,
+        x_max=sankey_x_max,
+        horizontal_x_max=sankey_x_max,
+    )
+    legend_entries = [
+        (branch, _adaptive_sankey_edge_color(branch, color_map))
+        for branch in sorted(
+            color_map,
+            key=lambda item: next(
+                (
+                    float(row["score_abs_share"])
+                    for row in branch_rows
+                    if str(row["branch"]) == item
+                ),
+                0.0,
+            ),
+            reverse=True,
+        )
+    ]
+    legend_shapes, legend_annotations = _adaptive_sankey_legend_elements(
+        legend_entries
+    )
+    displayed_branches = [branch for branch, _color in legend_entries]
+
+    time_density_scale = max(
+        (
+            sum(
+                float(row.get("edge_score_abs") or 0.0)
+                for row in selected_rows
+                if str(row.get("branch") or "") == branch
+                and int(row.get("target_year")) == year
             )
-        return key
+            for branch in displayed_branches
+            for year in range(min_year, max_year + 1)
+        ),
+        default=0.0,
+    )
+    depth_density_scale = max(
+        (
+            float(row.get("node_score_abs") or 0.0)
+            for row in node_score_rows
+            if str(row.get("branch") or "") in displayed_branches
+        ),
+        default=0.0,
+    )
 
-    if edge_weight == "score":
-        if node_scores is None:
-            if trails is None:
-                raise ValueError(
-                    "edge_weight='score' requires node_scores or a Trails instance."
+    density_shapes: list[dict[str, Any]] = []
+    density_annotations: list[dict[str, Any]] = []
+    if show_time_density:
+        density_shapes, density_annotations = (
+            _adaptive_sankey_time_density_elements(
+                selected_rows,
+                branches=displayed_branches,
+                color_map=color_map,
+                min_year=min_year,
+                max_year=max_year,
+                label=time_density_label,
+                scale_max=time_density_scale,
+                x0=density_x_min,
+                x1=density_x_max,
+            )
+        )
+
+    depth_density_shapes: list[dict[str, Any]] = []
+    depth_density_annotations: list[dict[str, Any]] = []
+    if show_depth_density:
+        depth_density_shapes, depth_density_annotations = (
+            _adaptive_sankey_depth_density_elements(
+                node_score_rows,
+                branches=displayed_branches,
+                color_map=color_map,
+                max_depth=max_depth,
+                label=depth_density_label,
+                scale_max=depth_density_scale,
+                x_min=sankey_x_min,
+                x_max=sankey_x_max,
+            )
+        )
+
+    display_abs = sum(values)
+    display_share = display_abs / total_abs if total_abs else 0.0
+    cutoff_label = (
+        "disabled"
+        if adaptive_relative_score_cutoff is None
+        else f"{float(adaptive_relative_score_cutoff):.0e}"
+    )
+    if title is None:
+        method_part = f"<br>{method}" if method else ""
+        title = (
+            "Adaptive-routing Sankey"
+            f"{method_part}<br>"
+            "explicit graph edges only; "
+            "width=adaptive routing score potential; "
+            f"adaptive cutoff={cutoff_label}; "
+            f"displayed potential share={display_share:.1%}"
+        )
+
+    node_hovertemplate = (
+        "%{customdata[0]}<br>"
+        "year=%{customdata[1]} | depth=%{customdata[2]}<br>"
+        "node score potential=%{customdata[5]:.3e}<br>"
+        "amount=%{customdata[6]:.3e}; "
+        "frontier amount=%{customdata[7]:.3e}<br>"
+        "%{customdata[4]}<extra></extra>"
+    )
+    link_hovertemplate = (
+        "source=%{customdata[0]} "
+        "(%{customdata[1]}, d%{customdata[2]})<br>"
+        "target=%{customdata[3]} "
+        "(%{customdata[4]}, d%{customdata[5]})<br>"
+        "root branch=%{customdata[6]}<br>"
+        "%{customdata[11]}<br>"
+        "edge score potential=%{customdata[9]:.3e}<br>"
+        "target node potential=%{customdata[10]:.3e}<br>"
+        "edge amount=%{customdata[7]:.3e}; "
+        "root-routed amount=%{customdata[8]:.3e}"
+        "<extra></extra>"
+    )
+
+    all_trace = go.Sankey(
+        arrangement="fixed",
+        name="All branches",
+        visible=True,
+        node=dict(
+            label=[""] * len(labels),
+            x=x_values,
+            y=y_values,
+            pad=10,
+            thickness=12,
+            color="#d1d5db",
+            customdata=node_customdata,
+            hovertemplate=node_hovertemplate,
+        ),
+        link=dict(
+            source=sources,
+            target=targets,
+            value=values,
+            color=colors,
+            customdata=link_customdata,
+            hovertemplate=link_hovertemplate,
+        ),
+    )
+
+    def build_branch_trace(
+        branch: str,
+        rows: list[dict[str, Any]],
+    ) -> go.Sankey | None:
+        branch_nodes: set[object] = set()
+        valid_rows: list[dict[str, Any]] = []
+        for row in rows:
+            source = node_lookup.get(str(row["source_node"]))
+            target_node = node_lookup.get(str(row["target_node"]))
+            if source is None or target_node is None or source == target_node:
+                continue
+            valid_rows.append(row)
+            branch_nodes.add(source)
+            branch_nodes.add(target_node)
+        if not valid_rows or not branch_nodes:
+            return None
+
+        ordered_nodes = sorted(
+            branch_nodes,
+            key=lambda node: (
+                int(graph.nodes[node].get("depth", 0)),
+                int(graph.nodes[node].get("year", 0)),
+                _adaptive_sankey_reference_product(
+                    trails,
+                    int(graph.nodes[node].get("act_idx", -1)),
+                ),
+                repr(node),
+            ),
+        )
+        branch_node_ids = {node: idx for idx, node in enumerate(ordered_nodes)}
+        branch_labels: list[str] = []
+        branch_years: list[int] = []
+        branch_depths: list[int] = []
+        branch_node_customdata: list[list[Any]] = []
+        for node in ordered_nodes:
+            data = graph.nodes[node]
+            act_idx = int(data.get("act_idx", -1))
+            meta = _adaptive_sankey_activity_metadata(trails, act_idx)
+            reference_product = str(meta.get("reference product") or "")
+            name = str(meta.get("name") or "")
+            location = str(meta.get("location") or "")
+            year = int(data.get("year", -1))
+            depth = int(data.get("depth", -1))
+            full_label = " | ".join(
+                part for part in (name, reference_product, location) if part
+            )
+            branch_labels.append(
+                _shorten_text(
+                    reference_product or name or "Activity",
+                    width=42,
+                    placeholder="...",
                 )
-            node_scores = _node_scores_from_trails(trails)
-        node_scores = node_scores or {}
+            )
+            branch_years.append(year)
+            branch_depths.append(depth)
+            branch_node_customdata.append(
+                [
+                    full_label or repr(node),
+                    year,
+                    depth,
+                    str(meta.get("unit") or ""),
+                    "explicit routed graph node",
+                    float(data.get("score_potential") or 0.0),
+                    float(data.get("amount") or 0.0),
+                    float(data.get("frontier_amount") or 0.0),
+                ]
+            )
 
-        # Determine if node_scores uses graph node keys or (year, act_idx)
-        uses_node_keys = False
-        if node_scores:
-            first_key = next(iter(node_scores.keys()))
-            if isinstance(first_key, tuple) and len(first_key) >= 4:
-                uses_node_keys = True
+        branch_sources: list[int] = []
+        branch_targets: list[int] = []
+        branch_values: list[float] = []
+        branch_colors: list[str] = []
+        branch_link_customdata: list[list[Any]] = []
+        for row in valid_rows:
+            source = node_lookup.get(str(row["source_node"]))
+            target_node = node_lookup.get(str(row["target_node"]))
+            if source is None or target_node is None or source == target_node:
+                continue
+            value = float(row["edge_score_abs"])
+            if value <= 0.0:
+                continue
+            source_data = graph.nodes[source]
+            target_data = graph.nodes[target_node]
+            branch_sources.append(branch_node_ids[source])
+            branch_targets.append(branch_node_ids[target_node])
+            branch_values.append(value)
+            branch_colors.append(_adaptive_sankey_edge_color(branch, color_map))
+            branch_link_customdata.append(
+                [
+                    _adaptive_sankey_full_label(
+                        trails,
+                        int(source_data.get("act_idx", -1)),
+                    ),
+                    int(source_data.get("year", -1)),
+                    int(source_data.get("depth", -1)),
+                    _adaptive_sankey_full_label(
+                        trails,
+                        int(target_data.get("act_idx", -1)),
+                    ),
+                    int(target_data.get("year", -1)),
+                    int(target_data.get("depth", -1)),
+                    branch,
+                    float(row.get("raw_amount_abs") or 0.0),
+                    float(row.get("root_routed_amount_abs") or 0.0),
+                    value,
+                    float(row.get("child_node_score") or 0.0),
+                    "explicit routed graph edge",
+                ]
+            )
 
-        if not uses_node_keys:
-            if score_years is None:
-                if trails is None:
-                    raise ValueError(
-                        "score_years is required when trails is not provided."
-                    )
-                score_years = _score_years_from_trails(trails)
-            score_years = [int(y) for y in score_years]
-            score_years.sort()
+        if not branch_values:
+            return None
+        branch_x, branch_y = _adaptive_sankey_year_depth_positions(
+            years=branch_years,
+            depths=branch_depths,
+            labels=branch_labels,
+            x_min=sankey_x_min,
+            x_max=sankey_x_max,
+        )
+        return go.Sankey(
+            arrangement="fixed",
+            name=_shorten_text(branch, width=80, placeholder="..."),
+            visible=False,
+            node=dict(
+                label=[""] * len(branch_labels),
+                x=branch_x,
+                y=branch_y,
+                pad=10,
+                thickness=12,
+                color="#d1d5db",
+                customdata=branch_node_customdata,
+                hovertemplate=node_hovertemplate,
+            ),
+            link=dict(
+                source=branch_sources,
+                target=branch_targets,
+                value=branch_values,
+                color=branch_colors,
+                customdata=branch_link_customdata,
+                hovertemplate=link_hovertemplate,
+            ),
+        )
 
-    incoming_abs: dict[Any, float] = defaultdict(float)
-    year_map: dict[int, int] = {}
+    traces: list[Any] = [all_trace]
+    trace_labels = ["All branches"]
+    rows_by_branch: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    node_rows_by_branch: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    panel_shapes_by_trace: list[list[dict[str, Any]]] = [
+        density_shapes + depth_density_shapes
+    ]
+    for row in candidate_rows:
+        rows_by_branch[str(row["branch"])].append(row)
+    for row in node_score_rows:
+        node_rows_by_branch[str(row["branch"])].append(row)
+    for branch, _color in legend_entries:
+        rows = select_rows(rows_by_branch.get(branch, []))
+        trace = build_branch_trace(branch, rows)
+        if trace is None:
+            continue
+        traces.append(trace)
+        trace_labels.append(_shorten_text(branch, width=80, placeholder="..."))
+        branch_panel_shapes: list[dict[str, Any]] = []
+        if show_time_density:
+            branch_density_shapes, _branch_density_annotations = (
+                _adaptive_sankey_time_density_elements(
+                    rows,
+                    branches=[branch],
+                    color_map=color_map,
+                    min_year=min_year,
+                    max_year=max_year,
+                    label=time_density_label,
+                    scale_max=time_density_scale,
+                    x0=density_x_min,
+                    x1=density_x_max,
+                )
+            )
+            branch_panel_shapes.extend(branch_density_shapes)
+        if show_depth_density:
+            branch_depth_shapes, _branch_depth_annotations = (
+                _adaptive_sankey_depth_density_elements(
+                    node_rows_by_branch.get(branch, []),
+                    branches=[branch],
+                    color_map=color_map,
+                    max_depth=max_depth,
+                    label=depth_density_label,
+                    scale_max=depth_density_scale,
+                    x_min=sankey_x_min,
+                    x_max=sankey_x_max,
+                )
+            )
+            branch_panel_shapes.extend(branch_depth_shapes)
+        panel_shapes_by_trace.append(branch_panel_shapes)
 
-    def _precompute_incoming(subtree: dict[str, Any]) -> None:
-        """precompute incoming.
+    fig = go.Figure(data=traces)
+    base_shapes = grid_shapes + legend_shapes
+    base_annotations = (
+        grid_annotations
+        + legend_annotations
+        + density_annotations
+        + depth_density_annotations
+    )
+    if len(traces) > 1:
+        buttons = []
+        for idx, label in enumerate(trace_labels):
+            visible = [False] * len(traces)
+            visible[idx] = True
+            buttons.append(
+                {
+                    "label": label,
+                    "method": "update",
+                    "args": [
+                        {"visible": visible},
+                        {"shapes": base_shapes + panel_shapes_by_trace[idx]},
+                    ],
+                }
+            )
+        fig.update_layout(
+            updatemenus=[
+                {
+                    "active": 0,
+                    "buttons": buttons,
+                    "direction": "down",
+                    "showactive": True,
+                    "x": 0.01,
+                    "xanchor": "left",
+                    "y": 1.24,
+                    "yanchor": "top",
+                }
+            ]
+        )
 
-        :param subtree: Value for `subtree`.
-        :type subtree: dict[str, Any]"""
-        for child in subtree.get("children", []):
-            edge_amt = float(child.get("edge_amount") or 0.0)
-            child_payload = child.get("node") or {}
-            key = _node_key(child_payload)
-            incoming_abs[key] += abs(edge_amt)
-            _precompute_incoming(child)
-
-    if edge_weight == "score":
-        _precompute_incoming(tree)
-        if score_years:
-            for node in _iter_tree_nodes(tree):
-                y = int(node.get("year"))
-                if y in year_map:
-                    continue
-                year_map[y] = _nearest_year(score_years, y)
-
-    def _get_node_id(node_payload: dict[str, Any]) -> int:
-        """get node id.
-
-        :param node_payload: Value for `node_payload`.
-        :type node_payload: dict[str, Any]
-        :returns: Return value.
-        :rtype: int"""
-        key = _node_key(node_payload)
-        if key in node_index:
-            return node_index[key]
-        idx = len(node_index)
-        node_index[key] = idx
-        node_meta.append(node_payload)
-        labels.append(label_fn(node_payload))
-        return idx
-
-    def _walk(subtree: dict[str, Any]) -> None:
-        """walk.
-
-        :param subtree: Value for `subtree`.
-        :type subtree: dict[str, Any]"""
-        parent_payload = subtree["node"]
-        parent_id = _get_node_id(parent_payload)
-        for child in subtree.get("children", []):
-            edge_amt = float(child.get("edge_amount") or 0.0)
-            child_payload = child.get("node") or {}
-            child_id = _get_node_id(child_payload)
-            sources.append(parent_id)
-            targets.append(child_id)
-            if edge_weight == "score":
-                year = int(child_payload.get("year"))
-                act_idx = int(child_payload.get("act_idx"))
-                node_key = child_payload.get("key")
-                if node_key in node_scores:
-                    child_score = float(node_scores.get(node_key, 0.0))
-                else:
-                    year_lookup = year_map.get(year, year)
-                    child_score = float(node_scores.get((year_lookup, act_idx), 0.0))
-                denom = float(incoming_abs.get(_node_key(child_payload), 0.0))
-                if denom > 0.0:
-                    edge_score = child_score * (abs(edge_amt) / denom)
-                else:
-                    edge_score = 0.0
-                edge_scores.append(edge_score)
-                values.append(abs(edge_score))
-            else:
-                values.append(abs(edge_amt))
-                edge_scores.append(float(edge_amt))
-            _walk(child)
-
-    _walk(tree)
-
-    return {
-        "labels": labels,
-        "sources": sources,
-        "targets": targets,
-        "values": values,
-        "node_meta": node_meta,
-        "edge_scores": edge_scores,
+    stats = {
+        "sankey_display_links": int(len(values)),
+        "sankey_display_nodes": int(len(labels)),
+        "sankey_display_abs_score": float(display_abs),
+        "sankey_total_abs_edge_score": float(total_abs),
+        "sankey_display_abs_score_share": float(display_share),
+        "sankey_display_min_abs_edge_score": float(min(values) if values else 0.0),
+        "sankey_original_edge_count": int(len(candidate_rows)),
+        "sankey_selected_seed_edges": int(len(selected_rows)),
+        "sankey_aggregation": "explicit_routed_graph_edges",
+        "sankey_score_basis": "adaptive_routing_score_potential",
+        "graph_nodes": int(graph.number_of_nodes()),
+        "graph_edges": int(graph.number_of_edges()),
+        "graph_max_depth": int(
+            max(
+                (
+                    int(data.get("depth", 0))
+                    for _node, data in graph.nodes(data=True)
+                ),
+                default=0,
+            )
+        ),
     }
+    fig.update_layout(
+        title=dict(
+            text=title,
+            x=0.01,
+            xanchor="left",
+            y=0.955,
+            yanchor="top",
+        ),
+        width=int(width),
+        height=int(height),
+        margin=dict(l=85, r=30, t=260, b=140 if show_depth_density else 30),
+        shapes=base_shapes + density_shapes + depth_density_shapes,
+        annotations=base_annotations,
+        font=dict(size=11),
+        meta=stats,
+    )
 
-
-def _iter_tree_nodes(tree: dict[str, Any]) -> list[dict[str, Any]]:
-    """iter tree nodes.
-
-    :param tree: Value for `tree`.
-    :type tree: dict[str, Any]
-    :returns: Return value.
-    :rtype: list[dict[str, Any]]"""
-    nodes: list[dict[str, Any]] = []
-
-    def _walk(subtree: dict[str, Any]) -> None:
-        """walk.
-
-        :param subtree: Value for `subtree`.
-        :type subtree: dict[str, Any]"""
-        nodes.append(subtree["node"])
-        for child in subtree.get("children", []):
-            _walk(child)
-
-    _walk(tree)
-    return nodes
-
-
-def _nearest_year(years_sorted: list[int], target: int) -> int:
-    """nearest year.
-
-    :param years_sorted: Value for `years_sorted`.
-    :type years_sorted: list[int]
-    :param target: Value for `target`.
-    :type target: int
-    :returns: Return value.
-    :rtype: int"""
-    if not years_sorted:
-        return int(target)
-    i = bisect.bisect_left(years_sorted, target)
-    if i <= 0:
-        return years_sorted[0]
-    if i >= len(years_sorted):
-        return years_sorted[-1]
-    before = years_sorted[i - 1]
-    after = years_sorted[i]
-    if abs(target - before) <= abs(after - target):
-        return before
-    return after
-
-
-def _score_years_from_trails(trails: Trails) -> list[int]:
-    """score years from trails.
-
-    :param trails: Value for `trails`.
-    :type trails: Trails
-    :returns: Return value.
-    :rtype: list[int]"""
-    scores = getattr(trails, "scores", None)
-    if scores is not None and "year" in scores.coords:
-        return [int(y) for y in scores.coords["year"].values.tolist()]
-    characterized = getattr(trails, "characterized_inventory", None)
-    if characterized is not None and "year" in characterized.coords:
-        return [int(y) for y in characterized.coords["year"].values.tolist()]
-    return []
+    if output_path is not None:
+        html_target = Path(output_path)
+        html_target.parent.mkdir(parents=True, exist_ok=True)
+        fig.write_html(str(html_target))
+    if png_path is not None:
+        png_target = Path(png_path)
+        png_target.parent.mkdir(parents=True, exist_ok=True)
+        png_fig = go.Figure(data=[fig.data[0]], layout=fig.layout)
+        png_fig.layout.updatemenus = ()
+        png_fig.write_image(
+            str(png_target),
+            format="png",
+            scale=int(png_scale),
+        )
+    return fig
 
 
 def _node_scores_from_trails(trails: Trails) -> dict[tuple[int, int], float]:
