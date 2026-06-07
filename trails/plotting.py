@@ -2984,12 +2984,9 @@ def _adaptive_sankey_year_depth_positions(
     year_span = max(max_year - min_year, 1)
     x_span = max(float(x_max) - float(x_min), 0.01)
     x_values = [
-        float(x_min) + (float(depth) / float(max_depth)) * x_span
-        for depth in depths
+        float(x_min) + (float(depth) / float(max_depth)) * x_span for depth in depths
     ]
-    y_centers = [
-        (float(year) - float(min_year)) / float(year_span) for year in years
-    ]
+    y_centers = [(float(year) - float(min_year)) / float(year_span) for year in years]
 
     unique_centers = sorted(set(y_centers))
     if len(unique_centers) > 1:
@@ -3102,11 +3099,7 @@ def _adaptive_sankey_grid_elements(
 
     for year in range(min_year, max_year + 1):
         y_pos = year_y(year)
-        is_major = (
-            year == min_year
-            or year == max_year
-            or year % year_step == 0
-        )
+        is_major = year == min_year or year == max_year or year % year_step == 0
         if not is_major and year_span > 40:
             continue
         shapes.append(
@@ -3317,9 +3310,7 @@ def _adaptive_sankey_depth_density_elements(
         depth = int(row.get("depth", -1))
         if depth < 0 or depth > max_depth:
             continue
-        branch_depth_scores[branch][depth] += float(
-            row.get("node_score_abs") or 0.0
-        )
+        branch_depth_scores[branch][depth] += float(row.get("node_score_abs") or 0.0)
 
     if scale_max is None:
         global_max = max(
@@ -3607,9 +3598,7 @@ def plot_adaptive_sankey(
         cutoff=float(branch_visual_cutoff),
     )
     candidate_rows = [
-        row
-        for row in all_edge_rows
-        if str(row.get("branch") or "") in allowed_branches
+        row for row in all_edge_rows if str(row.get("branch") or "") in allowed_branches
     ]
     candidate_rows.sort(key=lambda row: float(row["edge_score_abs"]), reverse=True)
     if not candidate_rows:
@@ -3617,9 +3606,7 @@ def plot_adaptive_sankey(
 
     total_abs = sum(float(row["edge_score_abs"]) for row in candidate_rows)
     target = min(max(float(display_score_coverage), 0.0), 1.0)
-    max_links = (
-        None if int(max_sankey_links) <= 0 else max(1, int(max_sankey_links))
-    )
+    max_links = None if int(max_sankey_links) <= 0 else max(1, int(max_sankey_links))
 
     def select_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         selected: list[dict[str, Any]] = []
@@ -3778,9 +3765,7 @@ def plot_adaptive_sankey(
             reverse=True,
         )
     ]
-    legend_shapes, legend_annotations = _adaptive_sankey_legend_elements(
-        legend_entries
-    )
+    legend_shapes, legend_annotations = _adaptive_sankey_legend_elements(legend_entries)
     displayed_branches = [branch for branch, _color in legend_entries]
 
     time_density_scale = max(
@@ -3808,18 +3793,16 @@ def plot_adaptive_sankey(
     density_shapes: list[dict[str, Any]] = []
     density_annotations: list[dict[str, Any]] = []
     if show_time_density:
-        density_shapes, density_annotations = (
-            _adaptive_sankey_time_density_elements(
-                selected_rows,
-                branches=displayed_branches,
-                color_map=color_map,
-                min_year=min_year,
-                max_year=max_year,
-                label=time_density_label,
-                scale_max=time_density_scale,
-                x0=density_x_min,
-                x1=density_x_max,
-            )
+        density_shapes, density_annotations = _adaptive_sankey_time_density_elements(
+            selected_rows,
+            branches=displayed_branches,
+            color_map=color_map,
+            min_year=min_year,
+            max_year=max_year,
+            label=time_density_label,
+            scale_max=time_density_scale,
+            x0=density_x_min,
+            x1=density_x_max,
         )
 
     depth_density_shapes: list[dict[str, Any]] = []
@@ -4148,10 +4131,7 @@ def plot_adaptive_sankey(
         "graph_edges": int(graph.number_of_edges()),
         "graph_max_depth": int(
             max(
-                (
-                    int(data.get("depth", 0))
-                    for _node, data in graph.nodes(data=True)
-                ),
+                (int(data.get("depth", 0)) for _node, data in graph.nodes(data=True)),
                 default=0,
             )
         ),

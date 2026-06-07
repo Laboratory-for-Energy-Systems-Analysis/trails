@@ -1678,9 +1678,7 @@ def test_adaptive_sankey_plots_explicit_routed_graph(tmp_path: Path) -> None:
     assert out.exists()
     assert len(fig.data) == 2
     assert list(fig.data[0].node.label) == ["", "", ""]
-    assert fig.layout.meta["sankey_score_basis"] == (
-        "adaptive_routing_score_potential"
-    )
+    assert fig.layout.meta["sankey_score_basis"] == ("adaptive_routing_score_potential")
     assert fig.layout.meta["sankey_display_links"] == 2
     assert fig.layout.updatemenus
 

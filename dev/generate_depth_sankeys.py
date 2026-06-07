@@ -245,9 +245,7 @@ def main() -> None:
                     "method": method,
                     "depth": int(depth),
                     "routing_min_amount": ROUTING_MIN_AMOUNT,
-                    "adaptive_relative_score_cutoff": (
-                        ADAPTIVE_RELATIVE_SCORE_CUTOFF
-                    ),
+                    "adaptive_relative_score_cutoff": (ADAPTIVE_RELATIVE_SCORE_CUTOFF),
                     "branch_visual_cutoff": BRANCH_VISUAL_CUTOFF,
                     "routing_seconds": routing_seconds,
                     "plot_seconds": plot_seconds,
