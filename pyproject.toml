@@ -10,7 +10,7 @@ authors = [
 maintainers = [
   { name="Romain Sacchi", email="romain.sacchi@psi.ch" }
 ]
-description = "Country-specific characterization factors for the Brightway LCA framework"
+description = "Temporal routing and aggregation of impacts across life-cycle systems"
 readme = "README.md"
 dynamic = ["dependencies", "version"]
 classifiers = [
