@@ -1,6 +1,6 @@
 package:
   name: trails
-  version: {{ environ['VERSION'] }}
+  version: {{ environ.get('VERSION', '1.0.0') }}
 
 source:
   path: ..
@@ -18,8 +18,6 @@ requirements:
     - python >=3.10, <3.12
     - pip
     - setuptools
-    - bw2calc
-    - bw2data
 
   run:
     - python >=3.10, <3.12
@@ -27,15 +25,19 @@ requirements:
     - pandas
     - scipy >=1.10,<1.16
     - pyyaml
-    - country_converter>=1.3.1
-    - constructive_geometries>=1.0.0
-    - prettytable
     - sparse >=0.13.0,<0.18
-    - plotly
-    - highspy
-    - packaging
+    - datapackage
     - bw2calc
-    - bw2data
+    - bw2io
+    - bw_processing
+    - plotly
+    - tqdm
+    - xarray
+    - networkx
+    - prettytable
+    - fair
+    - platformdirs
+    - pyvis
 
 
 test:
@@ -45,5 +47,6 @@ test:
 about:
   home: https://github.com/Laboratory-for-Energy-Systems-Analysis/trails
   license: MIT License
-  summary: 'Edge-specific characterization factors for the LCA framework Brightway2'
-license_family: MIT
+  license_family: MIT
+  license_file: LICENSE.md
+  summary: 'Temporal routing and aggregation of impacts across life-cycle systems'

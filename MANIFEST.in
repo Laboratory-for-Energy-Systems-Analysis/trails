@@ -1,7 +1,2 @@
-include trails/data/*.txt
-include trails/data/*.csv
-include trails/data/*.json
-include trails/data/*.yml
-include trails/data/*.yaml
-include trails/data/metadata/*.yaml
-
+include LICENSE.md
+recursive-include trails/data *.csv *.json *.yaml

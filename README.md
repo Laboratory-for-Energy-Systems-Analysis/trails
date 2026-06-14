@@ -139,7 +139,9 @@ the resulting GWP, radiative forcing, and temperature anomaly time series.
 Tutorial notebooks are available under `examples/`:
 
 - `examples/1. simple numerical example.ipynb`
-- `examples/2. premise and imported lci example.ipynb`
+- `examples/2.1. generate Trails data package.ipynb`
+- `examples/2.2. premise and imported lci example.ipynb`
+- `examples/2.3. fixed depth vs adaptive routing imported lci.ipynb`
 
 These walk through a full workflow (data loading, routing, LCA, plotting, and
 [FaIR](https://github.com/OMS-NetZero/FAIR)-based climate metrics).

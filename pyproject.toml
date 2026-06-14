@@ -15,7 +15,7 @@ readme = "README.md"
 dynamic = ["dependencies", "version"]
 classifiers = [
     "Intended Audience :: Science/Research",
-    "License :: OSI Approved :: BSD License",
+    "License :: OSI Approved :: MIT License",
     "Natural Language :: English",
     "Programming Language :: Python :: 3",
     "Operating System :: OS Independent",
@@ -43,9 +43,12 @@ umfpack = [
 ]
 
 [tool.setuptools]
-license-files = ["LICENSE"]
+license-files = ["LICENSE.md"]
 include-package-data = true
-packages = ["trails"]
+
+[tool.setuptools.packages.find]
+include = ["trails*"]
+namespaces = true
 
 [tool.setuptools.package-data]
 trails = ["data/**/*"]
@@ -58,6 +61,7 @@ version = {attr = "trails.__version__"}
 markers = [
     # marks tests that require ecoinvent (to be disabled on Travis)
     "ecoinvent",
+    "forked",
     "serial"
 ]
 norecursedirs = [
