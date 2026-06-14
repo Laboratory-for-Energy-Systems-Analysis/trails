@@ -178,13 +178,13 @@ jobs:
         run: |
           PKG_NAME=trails
           USER=romainsacchi
-          conda install anaconda-client
-          conda install conda-build
+          conda install -y anaconda-client conda-build
+          conda-build --version
           mkdir ~/conda-bld
           conda config --set anaconda_upload no
           export CONDA_BLD_PATH=~/conda-bld
           export VERSION=`date +%Y.%m.%d`
-          conda build conda/ --old-build-string
+          conda-build conda/ --old-build-string
           BUILT_PACKAGES=$(find $CONDA_BLD_PATH -type f \( -name "*.tar.bz2" -o -name "*.conda" \))
           echo "Built packages:"
           echo $BUILT_PACKAGES

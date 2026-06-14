@@ -1,0 +1,18 @@
+name;reference product;unit;location;index
+battery electric vehicle, production;battery electric vehicle;unit;GLO;0
+electricity, medium voltage;electricity;kWh;RER;1
+transport, passenger car, BEV;transport, passenger car, BEV;vkm;GLO;2
+battery electric vehicle, end-of-life;treatment of BEV, EoL;unit;GLO;3
+hydropower plant construction;hydropower plant;unit;RER;4
+natural gas electricity;electricity;kWh;RER;5
+natural gas plant construction;natural gas plant;unit;RER;6
+hydro electricity;electricity;kWh;RER;7
+wind turbine construction;wind turbine;unit;RER;8
+wind electricity;electricity;kWh;RER;9
+gasoline vehicle, production;gasoline vehicle;unit;GLO;10
+gasoline production;gasoline;kilogram;GLO;11
+gasoline vehicle, end-of-life;treatment of ICEV, EoL;unit;GLO;12
+transport, passenger car, ICEV;transport, passenger car, ICE;vkm;GLO;13
+oil refinery plant;oil refinery plant;unit;GLO;14
+biofuel plant;biofuel plant;unit;GLO;15
+biofuel production;biofuel;kilogram;GLO;16

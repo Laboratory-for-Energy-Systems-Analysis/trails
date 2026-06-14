@@ -9,6 +9,11 @@ scenario inputs under `trails/data/scenarios/`).
 `docs/` holds Sphinx documentation sources.
 `examples/` and `dev/` include usage examples and local development utilities.
 
+## Manuscript Location
+The manuscript working files are stored outside the repository at
+`/Users/romain/Library/CloudStorage/OneDrive-PaulScherrerInstitut/trails/manuscript`.
+Check this folder when asked to inspect or edit the manuscript.
+
 ## Module Map (Key Files)
 - `trails/lca.py` main LCA workflow entry points.
 - `trails/lcia.py` LCIA data handling and characterization logic.

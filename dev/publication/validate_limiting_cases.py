@@ -22,6 +22,7 @@ from datapackage import Package
 REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
+PUBLICATION_DIR = Path(__file__).resolve().parent
 
 from trails import Trails  # noqa: E402
 from trails.temporal_distributions import (  # noqa: E402
@@ -29,7 +30,7 @@ from trails.temporal_distributions import (  # noqa: E402
     TemporalExchange,
 )
 
-PACKAGE_PATH = REPO_ROOT / "examples" / "example data package" / "datapackage.json"
+PACKAGE_PATH = PUBLICATION_DIR / "LCIs" / "example data package" / "datapackage.json"
 ROOT_ACTIVITY = 13  # transport, passenger car, ICEV
 TOY_CHILD_ACTIVITY = 11  # gasoline production
 START_YEAR = 2050

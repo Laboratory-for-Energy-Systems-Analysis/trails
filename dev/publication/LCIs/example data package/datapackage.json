@@ -1,0 +1,37 @@
+{
+  "profile": "tabular-data-package",
+  "name": "minimal-temporal-lca-model",
+  "title": "Minimal temporal LCA datapackage",
+  "resources": [
+    {
+      "name": "classifications",
+      "path": "classifications/classifications.csv"
+    },
+
+    { "name": "A", "path": "inventories/some model/some pathway/2005/A_matrix.csv", "dialect": {"delimiter": ";"} },
+    { "name": "B", "path": "inventories/some model/some pathway/2005/B_matrix.csv", "dialect": {"delimiter": ";"} },
+    { "name": "A_indices", "path": "inventories/some model/some pathway/2005/A_matrix_index.csv", "dialect": {"delimiter": ";"} },
+    { "name": "B_indices", "path": "inventories/some model/some pathway/2005/B_matrix_index.csv", "dialect": {"delimiter": ";"} },
+
+    { "name": "A", "path": "inventories/some model/some pathway/2020/A_matrix.csv", "dialect": {"delimiter": ";"} },
+    { "name": "B", "path": "inventories/some model/some pathway/2020/B_matrix.csv", "dialect": {"delimiter": ";"} },
+    { "name": "A_indices", "path": "inventories/some model/some pathway/2020/A_matrix_index.csv", "dialect": {"delimiter": ";"} },
+    { "name": "B_indices", "path": "inventories/some model/some pathway/2020/B_matrix_index.csv", "dialect": {"delimiter": ";"} },
+
+
+    { "name": "A", "path": "inventories/some model/some pathway/2050/A_matrix.csv", "dialect": {"delimiter": ";"} },
+    { "name": "B", "path": "inventories/some model/some pathway/2050/B_matrix.csv", "dialect": {"delimiter": ";"} },
+    { "name": "A_indices", "path": "inventories/some model/some pathway/2050/A_matrix_index.csv", "dialect": {"delimiter": ";"} },
+    { "name": "B_indices", "path": "inventories/some model/some pathway/2050/B_matrix_index.csv", "dialect": {"delimiter": ";"} },
+
+    { "name": "A", "path": "inventories/some model/some pathway/2100/A_matrix.csv", "dialect": {"delimiter": ";"} },
+    { "name": "B", "path": "inventories/some model/some pathway/2100/B_matrix.csv", "dialect": {"delimiter": ";"} },
+    { "name": "A_indices", "path": "inventories/some model/some pathway/2100/A_matrix_index.csv", "dialect": {"delimiter": ";"} },
+    { "name": "B_indices", "path": "inventories/some model/some pathway/2100/B_matrix_index.csv", "dialect": {"delimiter": ";"} }
+  ],
+
+  "custom": {
+    "time_slices": [2005, 2020, 2050, 2100],
+    "classification_resource": "classifications"
+  }
+}
