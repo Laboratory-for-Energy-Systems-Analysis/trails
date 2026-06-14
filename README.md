@@ -5,8 +5,8 @@
   <img src="assets/permanent/trails_logo_grey_on_white.png" width="320"/>
 </p>
 
-[![PyPI version](https://badge.fury.io/py/trails.svg)](https://badge.fury.io/py/trails)
-[![Conda version](https://anaconda.org/romainsacchi/trails/badges/version.svg)](https://anaconda.org/romainsacchi/trails)
+[![PyPI version](https://badge.fury.io/py/trails-lca.svg)](https://badge.fury.io/py/trails-lca)
+[![Conda version](https://anaconda.org/romainsacchi/trails-lca/badges/version.svg)](https://anaconda.org/romainsacchi/trails-lca)
 [![License](https://img.shields.io/github/license/Laboratory-for-Energy-Systems-Analysis/trails)](LICENSE.md)
 [![Tests](https://github.com/Laboratory-for-Energy-Systems-Analysis/trails/actions/workflows/main.yml/badge.svg)](https://github.com/Laboratory-for-Energy-Systems-Analysis/trails/actions/workflows/main.yml)
 
@@ -534,8 +534,17 @@ available. Remember to run `trails.temporal_routing(...)` before `lca()`.
 ## Installation
 
 ```bash
-pip install trails
+pip install trails-lca
 ```
+
+or:
+
+```bash
+conda install -c conda-forge -c romainsacchi trails-lca
+```
+
+The PyPI and conda distributions are named `trails-lca`; the Python import package remains
+`trails`.
 
 ---
 

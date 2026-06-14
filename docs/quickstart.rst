@@ -9,13 +9,16 @@ Install
 
 .. code-block:: bash
 
-    pip install trails
+    pip install trails-lca
+
+The PyPI and conda distributions are named ``trails-lca``; the Python import
+package remains ``trails``.
 
 You can also install from conda:
 
 .. code-block:: bash
 
-    conda install romainsacchi::trails
+    conda install -c conda-forge -c romainsacchi trails-lca
 
 Solver note: TRAILS relies on fast sparse solvers for large LCAs. Install the
 recommended solver for your platform (see the README) to avoid slow SciPy
