@@ -47,53 +47,44 @@ deeply-temporalized, technosphere representation.
 
 ```mermaid
 flowchart TD
-  subgraph R["temporal_routing()"]
-    A[Functional unit<br/>start_year, activity, product demand] --> B[Map start year to scenario year<br/>convert product demand to activity amount]
-    B --> C{Adaptive routing enabled?}
-    C -->|Yes| D[Load static activity scores<br/>effective cutoff = relative cutoff x FU score potential]
-    C -->|No| E[Use fixed max_depth]
-    D --> F[Initialize graph, queue,<br/>frontier buckets, direct-bio buckets]
-    E --> F
-    F --> G{Queue empty?}
-    G -->|No| H[Pop node<br/>map year to scenario year<br/>add amount to node]
-    H --> I{Current node reached max_depth?}
-    I -->|Yes| J[Record node frontier<br/>reason: max_depth]
-    I -->|No| K[Read technosphere row<br/>skip production exchange]
-    K --> K1[No temporal exchange:<br/>same-year child demand]
-    K --> K2[Ported temporal exchange:<br/>split anchor-year demand by offsets and weights]
-    K --> K3[Matrix temporal exchange:<br/>read A in each pulse scenario year, then weight]
-    K1 --> L[Aggregate child demands by year and activity]
-    K2 --> L
-    K3 --> L
-    L --> M{Any child demands?}
-    M -->|No| N[Record node frontier<br/>reason: leaf]
-    M -->|Yes| O[For expanded non-root nodes,<br/>store direct-bio supply amount for LCA]
-    O --> P[Create child nodes and graph edges]
-    P --> Q{Stop child branch?}
-    Q -->|child reaches max_depth| R1[Record child frontier<br/>reason: max_depth]
-    Q -->|abs amount below min_amount| R2[Record child frontier<br/>reason: min_amount]
-    Q -->|adaptive cutoff after adaptive_min_depth| R3[Record child frontier<br/>reason: adaptive cutoff]
-    Q -->|No| R4[Enqueue child<br/>carry first-level root attribution]
-    J --> G
-    N --> G
-    R1 --> G
-    R2 --> G
-    R3 --> G
-    R4 --> G
-    G -->|Yes| S[Flush frontier, root, and score attributes<br/>build NetworkX graph and routing params]
-  end
-
-  subgraph LCA["lca() after routing"]
-    S --> T[Read graph frontier amounts<br/>and direct-bio marks]
-    T --> U[Convert frontier amounts to demand vectors<br/>by solve year]
-    U --> V{Root attribution enabled?}
-    V -->|Yes| W[Build one RHS per root<br/>and reuse factorization per year]
-    V -->|No| X[Build one RHS per year<br/>and solve year-specific technosphere]
-    W --> Y[Accumulate temporalized biosphere<br/>inventory and scores from solved supplies]
-    X --> Y
-    T --> Z[Inject FU supply and direct-bio supplies<br/>then temporalize biosphere during LCA]
-    Z --> Y
-  end
+  A["Functional unit: start year, activity, product demand"] --> B["Map year and convert product demand to activity amount"]
+  B --> C{"Adaptive routing enabled?"}
+  C -->|Yes| D["Load static activity scores and compute effective cutoff"]
+  C -->|No| E["Use fixed max depth"]
+  D --> F["Initialize graph, queue, frontier buckets, and direct-bio buckets"]
+  E --> F
+  F --> G{"Queue empty?"}
+  G -->|No| H["Pop node, map year to scenario year, and add amount to node"]
+  H --> I{"Current node reached max depth?"}
+  I -->|Yes| J["Record node frontier: max depth"]
+  I -->|No| K["Read technosphere row and skip production exchange"]
+  K --> L["Create child demands from non-temporal, ported temporal, or matrix temporal exchanges"]
+  L --> M{"Any child demands?"}
+  M -->|No| N["Record node frontier: leaf"]
+  M -->|Yes| O["For expanded non-root nodes, store direct-bio supply amount for LCA"]
+  O --> P["Create child nodes and graph edges"]
+  P --> Q{"Stop child branch?"}
+  Q -->|max depth| R1["Record child frontier: max depth"]
+  Q -->|below min amount| R2["Record child frontier: min amount"]
+  Q -->|adaptive cutoff| R3["Record child frontier: adaptive cutoff"]
+  Q -->|No| R4["Enqueue child and carry first-level root attribution"]
+  J --> G
+  N --> G
+  R1 --> G
+  R2 --> G
+  R3 --> G
+  R4 --> G
+  G -->|Yes| S["Build NetworkX routing graph with frontier, root, and score attributes"]
+  S --> T["LCA reads graph frontier amounts and direct-bio marks"]
+  T --> U["Convert frontier amounts to demand vectors by solve year"]
+  U --> V{"Root attribution enabled?"}
+  V -->|Yes| W["Build one RHS per root and reuse factorization per year"]
+  V -->|No| X["Build one RHS per year and solve year-specific technosphere"]
+  W --> Y["Accumulate temporalized biosphere inventory and scores from solved supplies"]
+  X --> Y
+  T --> Z["Inject functional-unit supply and direct-bio supplies"]
+  Z --> AA["Apply biosphere temporal distributions during LCA"]
+  AA --> Y
 ```
 
 **Caption:** Temporal technosphere distributions first produce raw pulse years
