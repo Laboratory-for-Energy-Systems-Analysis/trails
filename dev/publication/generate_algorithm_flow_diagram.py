@@ -7,7 +7,6 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 from matplotlib.patches import FancyArrowPatch, Polygon, Rectangle
 
-
 OUTPUT = Path(__file__).resolve().with_name("algorithm_flow_diagram")
 
 

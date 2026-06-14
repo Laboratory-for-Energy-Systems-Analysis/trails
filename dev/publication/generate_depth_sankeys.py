@@ -155,7 +155,9 @@ def _interpolate_trails_after_import(
     interpolation_start_year_offset: int,
     interpolation_end_year_offset: int,
 ) -> None:
-    print("Interpolating foreground-augmented matrices to annual resolution", flush=True)
+    print(
+        "Interpolating foreground-augmented matrices to annual resolution", flush=True
+    )
     trails.A, trails.B, trails.scenario_labels, trails.scenario_index = (
         interpolate_to_annual(
             trails.A,
