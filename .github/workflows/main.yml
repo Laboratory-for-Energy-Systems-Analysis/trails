@@ -151,7 +151,55 @@ jobs:
             echo "PyPI distribution name must be trails-lca, got $DIST_NAME"
             exit 1
           fi
-          ls dist/trails_lca-${GITHUB_REF_NAME#v}-py3-none-any.whl dist/trails-lca-${GITHUB_REF_NAME#v}.tar.gz
+          VERSION="${GITHUB_REF_NAME#v}" python - <<'PY'
+          import email.parser
+          import os
+          import tarfile
+          import zipfile
+          from pathlib import Path
+
+          expected_name = "trails-lca"
+          expected_version = os.environ["VERSION"]
+          dist = Path("dist")
+          wheels = sorted(dist.glob("*.whl"))
+          sdists = sorted(dist.glob("*.tar.gz"))
+          if len(wheels) != 1 or len(sdists) != 1:
+              raise SystemExit(
+                  f"Expected one wheel and one sdist, got wheels={wheels}, sdists={sdists}"
+              )
+
+          with zipfile.ZipFile(wheels[0]) as zf:
+              metadata_name = next(
+                  name for name in zf.namelist() if name.endswith(".dist-info/METADATA")
+              )
+              wheel_metadata = email.parser.Parser().parsestr(
+                  zf.read(metadata_name).decode()
+              )
+
+          with tarfile.open(sdists[0]) as tf:
+              pkg_info_name = next(
+                  name for name in tf.getnames() if name.endswith("/PKG-INFO")
+              )
+              pkg_info = tf.extractfile(pkg_info_name)
+              assert pkg_info is not None
+              sdist_metadata = email.parser.Parser().parsestr(
+                  pkg_info.read().decode()
+              )
+
+          for label, metadata in (
+              ("wheel", wheel_metadata),
+              ("sdist", sdist_metadata),
+          ):
+              name = metadata["Name"]
+              version = metadata["Version"]
+              if name != expected_name or version != expected_version:
+                  raise SystemExit(
+                      f"{label} metadata is {name} {version}, "
+                      f"expected {expected_name} {expected_version}"
+                  )
+
+          print(f"Verified {wheels[0].name} and {sdists[0].name}")
+          PY
       - name: Publish distribution 📦 to PyPI if Release
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
