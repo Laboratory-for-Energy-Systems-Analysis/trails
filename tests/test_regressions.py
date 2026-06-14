@@ -18,7 +18,10 @@ from trails.fair_io import DEFAULT_MAPPING_YAML, load_species_mapping
 from trails.cache_interpolation import cache_dir_for_package
 from trails.fair_rf import _sanitize_emissions_year_values, run_fair_delta_rf
 from trails.lca import lca_static
-from trails.plotting import plot_temporal_sankey_graphlike, plot_temporal_scores
+from trails.plotting import (
+    plot_adaptive_sankey,
+    plot_temporal_scores,
+)
 
 
 def test_run_fair_emissions_serializes_fair_runs(
@@ -198,9 +201,32 @@ class DummyTrailsSankey:
 
         self.graph = nx.DiGraph()
         # Nodes: (year, act_idx) with depth
-        self.graph.add_node((2050, 0), year=2050, depth=0, act_idx=0)
-        self.graph.add_node((2051, 1), year=2051, depth=1, act_idx=1)
+        self.graph.add_node(
+            (2050, 0),
+            year=2050,
+            depth=0,
+            act_idx=0,
+            amount=1.0,
+            score_potential=3.0,
+        )
+        self.graph.add_node(
+            (2051, 1),
+            year=2051,
+            depth=1,
+            act_idx=1,
+            amount=1.0,
+            score_potential=2.0,
+        )
+        self.graph.add_node(
+            (2052, 2),
+            year=2052,
+            depth=2,
+            act_idx=2,
+            amount=0.5,
+            score_potential=1.0,
+        )
         self.graph.add_edge((2050, 0), (2051, 1), amount=1.0)
+        self.graph.add_edge((2051, 1), (2052, 2), amount=0.5)
 
         self.activity_indices = {
             "2050": {
@@ -214,9 +240,15 @@ class DummyTrailsSankey:
                     "reference product": "Child product",
                     "location": "GLO",
                 },
+                2: {
+                    "name": "Grandchild",
+                    "reference product": "Grandchild product",
+                    "location": "GLO",
+                },
             }
         }
         self.characterized_inventory = None
+        self._routing_params = {"adaptive_relative_score_cutoff": 1e-4}
 
 
 class DummyTrailsScores:
@@ -1631,22 +1663,24 @@ def test_fair_quantiles_suppress_all_nan_warning(
     assert not any("All-NaN slice encountered" in str(w.message) for w in caught)
 
 
-def test_sankey_graphlike_writes_html(tmp_path: Path) -> None:
+def test_adaptive_sankey_plots_explicit_routed_graph(tmp_path: Path) -> None:
     trails = DummyTrailsSankey()
-    out = tmp_path / "sankey.html"
+    out = tmp_path / "adaptive_sankey.html"
 
-    fig = plot_temporal_sankey_graphlike(
+    fig = plot_adaptive_sankey(
         trails,
-        edge_weight="amount",
-        orientation="depth_x_year_y",
-        y_padding=0.03,
-        filename=str(out),
+        method="m1",
+        output_path=out,
+        show_time_density=True,
+        show_depth_density=True,
     )
 
-    assert fig is not None
     assert out.exists()
-    html = out.read_text()
-    assert "nouislider" in html.lower()
+    assert len(fig.data) == 2
+    assert list(fig.data[0].node.label) == ["", "", ""]
+    assert fig.layout.meta["sankey_score_basis"] == ("adaptive_routing_score_potential")
+    assert fig.layout.meta["sankey_display_links"] == 2
+    assert fig.layout.updatemenus
 
 
 def test_plot_temporal_scores_auto_trims_year_window() -> None:
