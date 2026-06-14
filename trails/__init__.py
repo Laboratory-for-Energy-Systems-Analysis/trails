@@ -15,7 +15,7 @@ __all__ = (
     "search_activity",
 )
 
-__version__ = "1.0.0"
+__version__ = "1.0.1"
 
 from .trails import Trails
 from .lca import lca
