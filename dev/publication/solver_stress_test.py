@@ -756,8 +756,6 @@ def _solve_sequential_umfpack(
     )
 
 
-
-
 def _blank_row(run_id: str, phase: str, status: str) -> dict[str, Any]:
     return {key: "" for key in FIELDNAMES} | {
         "run_id": run_id,
@@ -1186,8 +1184,7 @@ def _run_full_trails(
     )
     if status == "ok":
         print(
-            f"  full TRAILS routing={routing_seconds:.3f}s, "
-            f"lca={lca_seconds:.3f}s",
+            f"  full TRAILS routing={routing_seconds:.3f}s, " f"lca={lca_seconds:.3f}s",
             flush=True,
         )
     else:

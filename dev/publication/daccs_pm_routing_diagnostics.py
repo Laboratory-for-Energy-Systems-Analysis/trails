@@ -160,7 +160,9 @@ def _interpolate_trails_after_import(
     interpolation_start_year_offset: int,
     interpolation_end_year_offset: int,
 ) -> None:
-    print("Interpolating foreground-augmented matrices to annual resolution", flush=True)
+    print(
+        "Interpolating foreground-augmented matrices to annual resolution", flush=True
+    )
     trails.A, trails.B, trails.scenario_labels, trails.scenario_index = (
         interpolate_to_annual(
             trails.A,
@@ -275,7 +277,6 @@ DEFAULT_REFERENCE_YEAR = 2025
 DEFAULT_AMOUNT = 20_000_000_000.0
 DEFAULT_DEPTHS = [1, 2, 3, 4, 5, 6]
 DEFAULT_ROUTING_MIN_AMOUNT = 1e-3
-
 
 
 def _validate_paths(datapackage: Path, inventory_paths: list[Path]) -> None:
@@ -589,9 +590,7 @@ def run_depth_sweep(args: argparse.Namespace) -> int:
             f"{DEFAULT_ACTIVITY}"
         )
     activity_index = int(activity_maps[DEFAULT_ACTIVITY])
-    activity_label = _activity_label(
-        trails, activity_index, int(args.reference_year)
-    )
+    activity_label = _activity_label(trails, activity_index, int(args.reference_year))
     print(f"Activity: {activity_label} (idx={activity_index})", flush=True)
 
     unit = _method_unit(args.method, str(args.ei_version))
@@ -2125,9 +2124,7 @@ def run_adaptive(args: argparse.Namespace) -> int:
     )
     load_seconds = time.perf_counter() - load_start
 
-    activity_maps = _match_activity_indices(
-        trails, [depth_runner.DEFAULT_ACTIVITY]
-    )
+    activity_maps = _match_activity_indices(trails, [depth_runner.DEFAULT_ACTIVITY])
     if depth_runner.DEFAULT_ACTIVITY not in activity_maps:
         raise RuntimeError(
             f"Could not match DACCS activity: {depth_runner.DEFAULT_ACTIVITY}"
@@ -2519,8 +2516,6 @@ def parse_adaptive_args() -> argparse.Namespace:
     parser.add_argument("--append", action="store_true")
     parser.add_argument("--force", action="store_true")
     return parser.parse_args()
-
-
 
 
 def main(argv: list[str] | None = None) -> int:
