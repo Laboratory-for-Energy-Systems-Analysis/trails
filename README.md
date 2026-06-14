@@ -47,41 +47,66 @@ deeply-temporalized, technosphere representation.
 
 ```mermaid
 flowchart TD
-  A[Start with a functional unit<br>year, activity, amount] --> B[Create a routing graph and frontier buckets]
-  B --> C{Should this node be expanded?}
-  C -->|Yes: depth limit and min amount allow it| D[Read exchanges for this node-year]
-  C -->|No| E[Stop expanding and record a frontier demand]
-  D --> F[Apply temporal distributions<br>shift exchange years with offsets]
-  F --> G[Create child nodes in their target years]
-  G --> H[Accumulate frontier amounts and optional root attribution]
-  D --> I[Check direct biosphere exchanges for this node-year<br>Are they temporally distributed?]
-  I -->|Yes| J[Apply temporal distribution to direct biosphere exchanges<br>and route them across years]
-  I -->|No| K[Assign direct biosphere exchanges at the node-year]
-  K --> G
-  G --> C
-  E --> K[Routing complete<br>frontier demands + direct emissions]
+  subgraph R["temporal_routing()"]
+    A[Functional unit<br/>start_year, activity, product demand] --> B[Map start year to scenario year<br/>convert product demand to activity amount]
+    B --> C{Adaptive routing enabled?}
+    C -->|Yes| D[Load static activity scores<br/>effective cutoff = relative cutoff x FU score potential]
+    C -->|No| E[Use fixed max_depth]
+    D --> F[Initialize graph, queue,<br/>frontier buckets, direct-bio buckets]
+    E --> F
+    F --> G{Queue empty?}
+    G -->|No| H[Pop node<br/>map year to scenario year<br/>add amount to node]
+    H --> I{Current node reached max_depth?}
+    I -->|Yes| J[Record node frontier<br/>reason: max_depth]
+    I -->|No| K[Read technosphere row<br/>skip production exchange]
+    K --> K1[No temporal exchange:<br/>same-year child demand]
+    K --> K2[Ported temporal exchange:<br/>split anchor-year demand by offsets and weights]
+    K --> K3[Matrix temporal exchange:<br/>read A in each pulse scenario year, then weight]
+    K1 --> L[Aggregate child demands by year and activity]
+    K2 --> L
+    K3 --> L
+    L --> M{Any child demands?}
+    M -->|No| N[Record node frontier<br/>reason: leaf]
+    M -->|Yes| O[For expanded non-root nodes,<br/>store direct-bio supply amount for LCA]
+    O --> P[Create child nodes and graph edges]
+    P --> Q{Stop child branch?}
+    Q -->|child reaches max_depth| R1[Record child frontier<br/>reason: max_depth]
+    Q -->|abs amount below min_amount| R2[Record child frontier<br/>reason: min_amount]
+    Q -->|adaptive cutoff after adaptive_min_depth| R3[Record child frontier<br/>reason: adaptive cutoff]
+    Q -->|No| R4[Enqueue child<br/>carry first-level root attribution]
+    J --> G
+    N --> G
+    R1 --> G
+    R2 --> G
+    R3 --> G
+    R4 --> G
+    G -->|Yes| S[Flush frontier, root, and score attributes<br/>build NetworkX graph and routing params]
+  end
 
-  K --> L[For each frontier year, build a demand vector]
-  L --> M[Build the year-specific technosphere]
-  M --> N{Root attribution enabled?}
-  N -->|Yes| O[Assemble one RHS per root activity]
-  N -->|No| P[Use a single RHS vector]
-  O --> Q[Solve the linear system<br>reusing factorization per year]
-  P --> Q
-  Q --> R[Get supply arrays per root or total]
-  R --> S[Accumulate inventory<br>and add direct emissions]
-  S --> T{Compute impact scores?}
-  T -->|Yes| U[Apply CFs and aggregate by year and root]
-  T -->|No| V[Return inventory only]
-  U --> W[Results stored on the Trails instance]
-  V --> W
+  subgraph LCA["lca() after routing"]
+    S --> T[Read graph frontier amounts<br/>and direct-bio marks]
+    T --> U[Convert frontier amounts to demand vectors<br/>by solve year]
+    U --> V{Root attribution enabled?}
+    V -->|Yes| W[Build one RHS per root<br/>and reuse factorization per year]
+    V -->|No| X[Build one RHS per year<br/>and solve year-specific technosphere]
+    W --> Y[Accumulate temporalized biosphere<br/>inventory and scores from solved supplies]
+    X --> Y
+    T --> Z[Inject FU supply and direct-bio supplies<br/>then temporalize biosphere during LCA]
+    Z --> Y
+  end
 ```
 
-**Caption:** Temporal distributions shift the **anchor year** by integer offsets to produce
-target years (e.g., `year + offset`). Offsets are clamped to available scenario years when
-needed. The field `temporal_amount_source` controls how amounts are applied over time:
-**`port`** uses the exchange amount directly (ported value), while **`matrix`** uses
-the values stored in the year-specific matrices for the target years.
+**Caption:** Temporal technosphere distributions first produce raw pulse years
+(`year + offset`). Routing maps those years to available scenario years by clipping
+to the model horizon and, on non-annual grids, snapping to the nearest scenario year.
+The field `temporal_amount_source` controls how amounts are applied over time:
+**`port`** splits the anchor-year exchange amount across pulse weights, while
+**`matrix`** rereads the exchange coefficient from each pulse scenario year before
+applying the weight. Branches stopped by `max_depth`, `min_amount`, leaf status, or
+the adaptive score-potential cutoff remain frontier demand and are still solved by
+`lca()`. Routing does not temporalize direct biosphere exchanges itself; it records
+direct-bio supply amounts for expanded non-root nodes, and `lca()` applies
+biosphere temporal distributions while accumulating inventories and scores.
 
 ---
 
