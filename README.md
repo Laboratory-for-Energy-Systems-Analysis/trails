@@ -17,6 +17,9 @@ how impacts evolve over time, attribute them to responsible activities, and comp
 
 Online documentation: [https://trails.readthedocs.io/en/latest/](https://trails.readthedocs.io/en/latest/)
 
+For questions or issues around using `TRAILS`, join the discussion group:
+[https://premise.groups.io/g/trailse](https://premise.groups.io/g/trailse)
+
 At a high level, `TRAILS`:
 
 * Effortlessly handles **deep temporalization** — temporal distributions can occur
