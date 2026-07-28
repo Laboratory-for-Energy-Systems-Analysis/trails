@@ -69,8 +69,11 @@ def test_build_edges_matrices_suppresses_edges_stdout(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
+    seen = {}
+
     class FakeEdgeLCIA:
         def __init__(self, *args, **kwargs):
+            self.lca = kwargs["lca"]
             self.raw_cfs_data = [{"supplier": {"matrix": "biosphere"}}]
             self.characterization_matrix = None
 
@@ -89,18 +92,29 @@ def test_build_edges_matrices_suppresses_edges_stdout(
                 }
             )
 
+        def evaluate_cfs(self, scenario_idx):
+            seen["year"] = scenario_idx
+            matrix = sp.lil_matrix(self.lca.inventory.shape)
+            for cf in self.cfs_mapping:
+                for supplier, consumer in cf["positions"]:
+                    matrix[int(supplier), int(consumer)] = cf["value"]
+            self.characterization_matrix = matrix.tocsr()
+
     monkeypatch.setattr(
         "trails.edges_matrix._ensure_edges_available",
         lambda: FakeEdgeLCIA,
     )
 
+    trails = DummyMatrixTrails()
+    trails._get_scenario_context = lambda year: (2000, "2000", 0)
     matrices = _build_edges_characterization_matrices_for_year(
-        DummyMatrixTrails(),
+        trails,
         ["edge-method"],
-        year=2000,
+        year=2001,
     )
 
     assert np.asarray(matrices[0].todense()).tolist() == [[4.0]]
+    assert seen["year"] == 2001
     assert capsys.readouterr().out == ""
 
 
@@ -129,6 +143,7 @@ def test_build_edges_matrices_restricts_edges_and_metadata(
             return None
 
         def evaluate_cfs(self, scenario_idx):
+            seen["year"] = scenario_idx
             self.characterization_matrix = sp.csr_matrix(self.lca.inventory.shape)
 
     monkeypatch.setattr(
@@ -147,9 +162,133 @@ def test_build_edges_matrices_restricts_edges_and_metadata(
     assert seen["biosphere_positions"] == [1, 3]
     assert seen["activity_positions"] == [0, 2]
     assert seen["inventory_shape"] == (4, 3)
+    assert seen["year"] == 2000
+
+
+def test_build_edges_matrices_uses_real_edges_year_expression() -> None:
+    pytest.importorskip("edges")
+    trails = DummyMatrixTrails()
+    trails._get_scenario_context = lambda year: (2000, "2000", 0)
+    trails.activity_indices = {
+        "2000": {
+            0: {
+                "name": "activity",
+                "reference product": "product",
+                "location": "CH",
+            }
+        }
+    }
+    trails.biosphere_indices = {"2000": {0: {"name": "water flow", "unit": "m3"}}}
+    method = {
+        "name": "year-aware integration test",
+        "unit": "test unit",
+        "interpolation": {
+            "axis": "scenario_idx",
+            "axis_type": "year",
+            "method": "linear",
+            "extrapolation": "nearest",
+        },
+        "strategies": ["map_exchanges"],
+        "parameters": {"SSP126": {"cf_ch": {"2000": 2.0, "2001": 3.0}}},
+        "exchanges": [
+            {
+                "supplier": {"name": "water flow", "matrix": "biosphere"},
+                "consumer": {"location": "CH", "matrix": "technosphere"},
+                "value": 2.0,
+                "value_expression": "cf_ch",
+            }
+        ],
+    }
+
+    matrices = _build_edges_characterization_matrices_for_year(
+        trails,
+        [method],
+        year=2001,
+        biosphere_edges={(0, 0)},
+    )
+
+    assert matrices[0][0, 0] == pytest.approx(3.0)
 
 
 def test_score_inventory_with_edges_reuses_cached_mappings_for_next_year(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    inventory = xr.DataArray(
+        sparse.COO(
+            coords=np.array(
+                [
+                    [0, 0, 1],
+                    [0, 0, 1],
+                    [0, 1, 1],
+                ],
+                dtype=np.int64,
+            ),
+            data=np.array([5.0, 6.0, 7.0]),
+            shape=(2, 2, 2),
+        ),
+        dims=("activity", "flow", "year"),
+        coords={"activity": [0, 1], "flow": [0, 1], "year": [2000, 2001]},
+    )
+    trails = DummyScoringTrails(inventory)
+    mapped_edge_sets = []
+    evaluated_expressions = []
+
+    class FakeEdgeLCIA:
+        def __init__(self, *args, **kwargs):
+            self.lca = kwargs["lca"]
+            self.raw_cfs_data = [{"supplier": {"matrix": "biosphere"}}]
+            self.cfs_mapping = []
+            self.characterization_matrix = None
+
+        def _preprocess_lookups(self, **kwargs):
+            return None
+
+        def apply_strategies(self, strategies):
+            mapped_edge_sets.append(set(self.biosphere_edges))
+            for edge in sorted(self.biosphere_edges):
+                self.cfs_mapping.append(
+                    {
+                        "supplier": {"matrix": "biosphere"},
+                        "consumer": {"matrix": "technosphere"},
+                        "positions": (edge,),
+                        "direction": "biosphere-technosphere",
+                        "value": 1.0,
+                        "value_expression": "year_specific_cf",
+                    }
+                )
+
+        def evaluate_cfs(self, scenario_idx):
+            evaluated_expressions.append(
+                [cf.get("value_expression") for cf in self.cfs_mapping]
+            )
+            matrix = sp.lil_matrix(self.lca.inventory.shape)
+            value_multiplier = float(int(scenario_idx) - 1999)
+            for cf in self.cfs_mapping:
+                for supplier, consumer in cf["positions"]:
+                    matrix[int(supplier), int(consumer)] = (
+                        float(cf["value"]) * value_multiplier
+                    )
+            self.characterization_matrix = matrix.tocsr()
+
+    monkeypatch.setattr(
+        "trails.edges_matrix._ensure_edges_available",
+        lambda: FakeEdgeLCIA,
+    )
+
+    scores = score_inventory_with_edges(trails, ["edge-method"], show_progress=False)
+
+    assert mapped_edge_sets == [{(0, 0)}, {(1, 1)}]
+    assert evaluated_expressions == [
+        ["year_specific_cf"],
+        ["year_specific_cf", "year_specific_cf"],
+    ]
+    assert np.asarray(scores.data.todense()).tolist() == [
+        [5.0, 12.0],
+        [0.0, 14.0],
+    ]
+
+
+def test_score_inventory_with_edges_can_disable_cross_year_cache(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     inventory = xr.DataArray(
@@ -196,87 +335,13 @@ def test_score_inventory_with_edges_reuses_cached_mappings_for_next_year(
 
         def evaluate_cfs(self, scenario_idx):
             matrix = sp.lil_matrix(self.lca.inventory.shape)
-            value = float(int(scenario_idx) - 1999)
+            value_multiplier = float(int(scenario_idx) - 1999)
             for cf in self.cfs_mapping:
                 for supplier, consumer in cf["positions"]:
-                    matrix[int(supplier), int(consumer)] = value
+                    matrix[int(supplier), int(consumer)] = (
+                        float(cf["value"]) * value_multiplier
+                    )
             self.characterization_matrix = matrix.tocsr()
-
-        def _evaluate_cf_numeric_value(
-            self,
-            raw_value,
-            *,
-            resolved_params,
-            scenario_idx,
-        ):
-            return float(raw_value) * float(int(scenario_idx) - 1999)
-
-    monkeypatch.setattr(
-        "trails.edges_matrix._ensure_edges_available",
-        lambda: FakeEdgeLCIA,
-    )
-
-    scores = score_inventory_with_edges(trails, ["edge-method"], show_progress=False)
-
-    assert mapped_edge_sets == [{(0, 0)}, {(1, 1)}]
-    assert np.asarray(scores.data.todense()).tolist() == [
-        [5.0, 12.0],
-        [0.0, 14.0],
-    ]
-
-
-def test_score_inventory_with_edges_can_disable_cross_year_cache(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    inventory = xr.DataArray(
-        sparse.COO(
-            coords=np.array(
-                [
-                    [0, 0, 1],
-                    [0, 0, 1],
-                    [0, 1, 1],
-                ],
-                dtype=np.int64,
-            ),
-            data=np.array([5.0, 6.0, 7.0]),
-            shape=(2, 2, 2),
-        ),
-        dims=("activity", "flow", "year"),
-        coords={"activity": [0, 1], "flow": [0, 1], "year": [2000, 2001]},
-    )
-    trails = DummyScoringTrails(inventory)
-    mapped_edge_sets = []
-
-    class FakeEdgeLCIA:
-        def __init__(self, *args, **kwargs):
-            self.lca = kwargs["lca"]
-            self.raw_cfs_data = [{"supplier": {"matrix": "biosphere"}}]
-            self.cfs_mapping = []
-
-        def _preprocess_lookups(self, **kwargs):
-            return None
-
-        def apply_strategies(self, strategies):
-            mapped_edge_sets.append(set(self.biosphere_edges))
-            for edge in sorted(self.biosphere_edges):
-                self.cfs_mapping.append(
-                    {
-                        "supplier": {"matrix": "biosphere"},
-                        "consumer": {"matrix": "technosphere"},
-                        "positions": (edge,),
-                        "direction": "biosphere-technosphere",
-                        "value": 1.0,
-                    }
-                )
-
-        def _evaluate_cf_numeric_value(
-            self,
-            raw_value,
-            *,
-            resolved_params,
-            scenario_idx,
-        ):
-            return float(raw_value) * float(int(scenario_idx) - 1999)
 
     monkeypatch.setattr(
         "trails.edges_matrix._ensure_edges_available",
@@ -346,10 +411,12 @@ def test_score_inventory_with_edges_uses_activity_specific_cfs(
         [70.0, 22.0],
     ]
     assert trails.scores is scores
-    assert len(calls) == 1
+    assert len(calls) == 2
     assert calls[0][1] == ["edge-method"]
     assert calls[0][2] == 2000
-    assert calls[0][3]["biosphere_edges"] == {(1, 0), (1, 1), (0, 1)}
+    assert calls[0][3]["biosphere_edges"] == {(1, 0), (1, 1)}
+    assert calls[1][2] == 2001
+    assert calls[1][3]["biosphere_edges"] == {(0, 1)}
 
 
 def test_score_inventory_with_edges_keeps_method_and_root_dimensions(

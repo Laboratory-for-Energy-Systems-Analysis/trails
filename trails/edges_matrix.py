@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from contextlib import nullcontext, redirect_stdout
 from io import StringIO
 from types import SimpleNamespace
@@ -255,126 +256,58 @@ def _cache_cf_entries_by_signature(
     technosphere_lookup: Mapping[int, Mapping[str, Any]],
 ) -> set[tuple[int, int]]:
     entries_by_signature = cache.setdefault("entries_by_signature", {})
+    templates_by_edge: dict[tuple[int, int], list[dict[str, Any]]] = {}
     processed: set[tuple[int, int]] = set()
     for entry in entries:
         if entry.get("direction") != "biosphere-technosphere":
             continue
+        template = deepcopy(dict(entry))
+        template.pop("positions", None)
         for supplier, consumer in entry.get("positions", ()):
             edge = (int(supplier), int(consumer))
-            signature = _edge_signature(edge, biosphere_lookup, technosphere_lookup)
-            entries_by_signature[signature] = [
-                {
-                    "direction": entry.get("direction"),
-                    "value": entry.get("value"),
-                }
-            ]
+            templates_by_edge.setdefault(edge, []).append(template)
             processed.add(edge)
+
+    for edge, templates in templates_by_edge.items():
+        signature = _edge_signature(edge, biosphere_lookup, technosphere_lookup)
+        entries_by_signature[signature] = templates
     return processed
 
 
-def _resolve_edges_parameters(edge_lca: Any, scenario_year: int) -> dict[str, Any]:
-    scenario_name = getattr(edge_lca, "scenario", None)
-    if scenario_name is None and isinstance(
-        getattr(edge_lca, "parameters", None),
-        dict,
-    ):
-        parameters = getattr(edge_lca, "parameters")
-        if parameters:
-            scenario_name = next(iter(parameters))
-
-    resolver = getattr(edge_lca, "_resolve_parameters_for_scenario", None)
-    if callable(resolver):
-        return resolver(scenario_year, scenario_name)
-    return {}
-
-
-def _evaluate_cf_value(
-    edge_lca: Any,
-    raw_value: Any,
-    *,
-    resolved_params: Mapping[str, Any],
-    scenario_year: int,
-    cache: dict[Any, float],
-) -> float:
-    key = _hashable_metadata(raw_value)
-    try:
-        hash(key)
-    except TypeError:
-        key = repr(raw_value)
-    if key in cache:
-        return cache[key]
-
-    evaluator = getattr(edge_lca, "_evaluate_cf_numeric_value", None)
-    if callable(evaluator):
-        value = evaluator(
-            raw_value,
-            resolved_params=resolved_params,
-            scenario_idx=scenario_year,
-        )
-    else:
-        try:
-            value = float(raw_value)
-        except Exception:
-            value = 0.0
-
-    cache[key] = float(value)
-    return cache[key]
-
-
-def _build_biosphere_matrix_from_edges_mapping(
+def _evaluate_edges_mapping_for_year(
     edge_lca: Any,
     *,
-    scenario_year: int,
+    year: int,
     shape: tuple[int, int],
     cached_entries_by_edge: Mapping[tuple[int, int], list[Mapping[str, Any]]],
     mapped_entries: list[Mapping[str, Any]],
 ) -> sp.csr_matrix:
-    resolved_params = _resolve_edges_parameters(edge_lca, scenario_year)
-    value_cache: dict[Any, float] = {}
-    rows: list[int] = []
-    cols: list[int] = []
-    values: list[float] = []
-
-    def add_positions(entry: Mapping[str, Any], positions: Any) -> None:
-        if entry.get("direction") != "biosphere-technosphere":
-            return
-        value = _evaluate_cf_value(
-            edge_lca,
-            entry.get("value"),
-            resolved_params=resolved_params,
-            scenario_year=scenario_year,
-            cache=value_cache,
-        )
-        if value == 0.0:
-            return
-        for supplier, consumer in positions or ():
-            supplier = int(supplier)
-            consumer = int(consumer)
-            if 0 <= supplier < shape[0] and 0 <= consumer < shape[1]:
-                rows.append(supplier)
-                cols.append(consumer)
-                values.append(value)
-
+    """Ask EDGES to evaluate matched CF entries for one inventory year."""
+    combined_entries: list[dict[str, Any]] = []
     for edge, entries in cached_entries_by_edge.items():
         for entry in entries:
-            add_positions(entry, (edge,))
+            restored = deepcopy(dict(entry))
+            restored["positions"] = (edge,)
+            combined_entries.append(restored)
 
-    for entry in mapped_entries:
-        add_positions(entry, entry.get("positions", ()))
+    combined_entries.extend(deepcopy(list(mapped_entries)))
+    edge_lca.cfs_mapping = combined_entries
+    edge_lca.evaluate_cfs(scenario_idx=int(year))
 
-    if not values:
+    matrix = getattr(edge_lca, "characterization_matrix", None)
+    if matrix is None:
+        matrices = getattr(edge_lca, "characterization_matrices", None) or {}
+        matrix = matrices.get("biosphere")
+    if matrix is None:
         return sp.csr_matrix(shape, dtype=float)
 
-    return sp.csr_matrix(
-        (
-            np.asarray(values, dtype=float),
-            (
-                np.asarray(rows, dtype=np.int64),
-                np.asarray(cols, dtype=np.int64),
-            ),
-        ),
-        shape=shape,
-    )
+    matrix = _to_csr_2d(matrix)
+    if matrix.shape != shape:
+        raise ValueError(
+            "EDGES characterization matrix shape "
+            f"{matrix.shape} does not match Trails biosphere inventory shape {shape}."
+        )
+    return matrix
 
 
 def _edge_sets_for_lookup(edge_lca: Any) -> tuple[set[int], set[int], set[int]]:
@@ -437,10 +370,12 @@ def _build_edges_characterization_matrices_for_year(
     progress: Any | None = None,
     suppress_edges_output: bool = True,
 ) -> list[sp.csr_matrix]:
-    """Build one EDGES CF matrix per method for a Trails scenario year.
+    """Build one EDGES CF matrix per method for a Trails inventory year.
 
     The returned matrices are shaped as EDGES biosphere inventories:
-    ``(biosphere flow, consuming activity)``.
+    ``(biosphere flow, consuming activity)``. Trails can use a mapped scenario
+    year for A/B matrices and metadata, but EDGES receives the requested
+    inventory year when evaluating dynamic CF values.
     """
     if getattr(trails, "A", None) is None or getattr(trails, "B", None) is None:
         raise ValueError(
@@ -449,9 +384,10 @@ def _build_edges_characterization_matrices_for_year(
 
     EdgeLCIA = _ensure_edges_available()
 
-    context = trails._get_scenario_context(int(year))
+    inventory_year = int(year)
+    context = trails._get_scenario_context(inventory_year)
     if context is None:
-        raise ValueError(f"Scenario year {year!r} is not available in Trails.")
+        raise ValueError(f"Inventory year {year!r} is not available in Trails.")
     scenario_year, _label, t = context
 
     b_shape = trails.B[int(t), :, :].shape
@@ -523,7 +459,7 @@ def _build_edges_characterization_matrices_for_year(
 
         if progress is not None:
             progress.set_postfix_str(
-                f"year={int(scenario_year)}, method={method_idx + 1}/{len(methods)}, "
+                f"year={inventory_year}, method={method_idx + 1}/{len(methods)}, "
                 f"edges={len(edge_pairs)}, new={len(edges_to_map)}"
             )
         edge_lca = EdgeLCIA(
@@ -579,16 +515,15 @@ def _build_edges_characterization_matrices_for_year(
                                 technosphere_lookup,
                             )
                         )
+            matrix = _evaluate_edges_mapping_for_year(
+                edge_lca,
+                year=inventory_year,
+                shape=biosphere_inventory.shape,
+                cached_entries_by_edge=cached_entries_by_edge,
+                mapped_entries=edge_lca.cfs_mapping,
+            )
         if progress is not None:
             progress.update(1)
-
-        matrix = _build_biosphere_matrix_from_edges_mapping(
-            edge_lca,
-            scenario_year=int(scenario_year),
-            shape=biosphere_inventory.shape,
-            cached_entries_by_edge=cached_entries_by_edge,
-            mapped_entries=edge_lca.cfs_mapping,
-        )
 
         if matrix.shape != biosphere_inventory.shape:
             raise ValueError(
@@ -655,9 +590,9 @@ def score_inventory_with_edges(
 ) -> xr.DataArray:
     """Score ``trails.inventory`` using EDGES edge-level CF matrices.
 
-    ``reuse_cached_cfs`` reuses EDGES matched CF templates across scenario years
-    when supplier and consumer metadata signatures are identical. Numeric CF
-    values are still evaluated for each scenario year.
+    ``reuse_cached_cfs`` reuses EDGES matched CF templates across inventory
+    years when supplier and consumer metadata signatures are identical. EDGES
+    still evaluates the CF values separately for each inventory year.
     """
     if not methods:
         raise ValueError("edges_methods must contain at least one EDGES method.")
@@ -754,29 +689,24 @@ def score_inventory_with_edges(
     year_indices = coords[2]
     roots = coords[3] if has_root else None
 
-    map_scenario = getattr(trails, "_map_year_to_scenario_year", None)
-    if not callable(map_scenario):
-        map_scenario = lambda year: int(year)
-
     output_coords: list[np.ndarray] = []
     output_data: list[np.ndarray] = []
     year_groups: dict[int, list[int]] = {}
-    edges_by_scenario_year: dict[int, set[tuple[int, int]]] = {}
+    edges_by_year: dict[int, set[tuple[int, int]]] = {}
     mapping_caches: list[dict[str, Any]] | None = (
         [{} for _method in methods] if reuse_cached_cfs else None
     )
 
     for year_idx in np.unique(year_indices):
-        raw_year = int(years[int(year_idx)])
-        scenario_year = int(map_scenario(raw_year))
-        year_groups.setdefault(scenario_year, []).append(int(year_idx))
+        inventory_year = int(years[int(year_idx)])
+        year_groups.setdefault(inventory_year, []).append(int(year_idx))
 
         mask = year_indices == year_idx
         pair_ids = np.unique(
             flows[mask].astype(np.int64, copy=False) * n_activities
             + activities[mask].astype(np.int64, copy=False)
         )
-        edges = edges_by_scenario_year.setdefault(scenario_year, set())
+        edges = edges_by_year.setdefault(inventory_year, set())
         edges.update(
             (int(pair_id // n_activities), int(pair_id % n_activities))
             for pair_id in pair_ids
@@ -794,20 +724,20 @@ def score_inventory_with_edges(
     )
 
     with progress_context as progress:
-        for scenario_year in sorted(year_groups):
+        for inventory_year in sorted(year_groups):
             matrices = _build_edges_characterization_matrices_for_year(
                 trails,
                 methods,
-                year=scenario_year,
+                year=inventory_year,
                 additional_topologies=additional_topologies,
                 strategies=strategies,
-                biosphere_edges=edges_by_scenario_year[scenario_year],
+                biosphere_edges=edges_by_year[inventory_year],
                 mapping_caches=mapping_caches,
                 progress=progress,
                 suppress_edges_output=True,
             )
 
-            for year_idx in year_groups[scenario_year]:
+            for year_idx in year_groups[inventory_year]:
                 mask = year_indices == year_idx
                 act_group = activities[mask]
                 flow_group = flows[mask]

@@ -91,13 +91,16 @@ needs regular LCIA methods, passed with ``Trails(..., methods=...)`` or
 ``temporal_routing(..., adaptive_methods=...)``.
 
 By default, ``edges_reuse_cached_cfs=True`` reuses EDGES matched CF templates
-across scenario years when the supplier and consumer metadata signatures are
-identical. The numeric CF values are still evaluated for each scenario year,
-which keeps yearly parameterized methods such as AWARE yearly factors
-year-specific while avoiding repeated exchange matching. Set
+across temporal inventory years when the supplier and consumer metadata
+signatures are identical. For every inventory year, TRAILS calls EDGES CF
+evaluation with that year as ``scenario_idx``. This keeps prospective methods
+such as ``("AWARE 2.0 prospective", "Country", "unspecified", "yearly")``
+year-specific, including EDGES interpolation between source years, while
+avoiding repeated exchange matching. The actual inventory year is passed even
+when TRAILS maps that year to a nearby database scenario year for its A/B
+matrices. Set
 ``edges_reuse_cached_cfs=False`` if an EDGES method has year-specific matching
-rules or year-specific CF definitions that should be resolved independently for
-each year.
+rules that change which CF row matches an exchange.
 
 Inspect LCIA flow factors
 -------------------------

@@ -330,11 +330,14 @@ lca(
 scoring. Constructor ``methods`` can still be used as regular LCIA proxy
 methods for adaptive routing before final EDGES scoring. With the
 default ``edges_reuse_cached_cfs=True``, TRAILS reuses EDGES matched CF
-templates across scenario years when supplier and consumer metadata signatures
-are identical, while still evaluating numeric CF values for each year. Set
+templates across temporal inventory years when supplier and consumer metadata
+signatures are identical. TRAILS passes each actual inventory year to EDGES as
+``scenario_idx``, so prospective AWARE factors and their interpolation remain
+year-specific even if the Trails A/B matrices use a nearby database scenario
+year. Set
 ``edges_reuse_cached_cfs=False`` to force EDGES matching independently for every
-year, for example if an EDGES method has year-specific matching rules or
-year-specific CF definitions.
+year, for example if an EDGES method changes which CF row matches an exchange
+based on the year.
 
 ---
 

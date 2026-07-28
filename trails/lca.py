@@ -652,9 +652,9 @@ def lca(
     :param edges_strategies: Optional explicit EDGES matching strategy sequence.
     :type edges_strategies: list[str] | None
     :param edges_reuse_cached_cfs: Reuse EDGES matched CF templates across
-        scenario years when supplier and consumer metadata signatures are the
-        same. Numeric CF values are still evaluated for each scenario year. Set
-        to ``False`` to force EDGES matching independently for every year.
+        inventory years when supplier and consumer metadata signatures are the
+        same. EDGES still evaluates CF values for each temporal inventory year.
+        Set to ``False`` to force EDGES matching independently for every year.
     :type edges_reuse_cached_cfs: bool
     :param inventory_workers: Optional worker count for no-TD inventory batching.
     :type inventory_workers: int | None
