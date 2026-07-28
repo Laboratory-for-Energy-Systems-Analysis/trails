@@ -2,12 +2,26 @@ from __future__ import annotations
 
 import hashlib
 import json
+import pickle
+import tempfile
 from pathlib import Path
 from typing import Any, Optional
 
 import platformdirs
-import pickle
 import sparse
+
+
+def _uses_ephemeral_datapackage_base(package: Any) -> bool:
+    """Return whether Frictionless unpacked the package into its temp directory."""
+    base_path = getattr(package, "base_path", None)
+    if not base_path:
+        return False
+    try:
+        resolved = Path(base_path).resolve()
+        temp_root = Path(tempfile.gettempdir()).resolve()
+    except (OSError, TypeError, ValueError):
+        return False
+    return resolved.name.endswith("-datapackage") and resolved.parent == temp_root
 
 
 def _cache_key(
@@ -32,14 +46,34 @@ def _cache_key(
     :returns: Return value.
     :rtype: str"""
     try:
-        desc = getattr(package, "descriptor", {})
+        package_desc = getattr(package, "descriptor", {})
     except Exception:
-        desc = {}
+        package_desc = {}
+    omit_resource_mtime = _uses_ephemeral_datapackage_base(package)
     file_fingerprint: dict[str, dict[str, int]] = {}
     try:
+        tracked_names = {
+            "A",
+            "B",
+            "A_indices",
+            "B_indices",
+            "A_matrix.csv",
+            "B_matrix.csv",
+            "A_matrix_index.csv",
+            "B_matrix_index.csv",
+        }
+        tracked_filenames = {
+            "A_matrix.csv",
+            "B_matrix.csv",
+            "A_matrix_index.csv",
+            "B_matrix_index.csv",
+        }
         for res in getattr(package, "resources", []):
             name = getattr(res, "name", "") or ""
-            if name not in {"A_matrix.csv", "B_matrix.csv"}:
+            resource_desc = getattr(res, "descriptor", {}) or {}
+            path_label = str(resource_desc.get("path") or "")
+            filename = Path(path_label).name
+            if name not in tracked_names and filename not in tracked_filenames:
                 continue
             try:
                 path = Path(res.source)
@@ -48,14 +82,14 @@ def _cache_key(
             if not path.exists():
                 continue
             stat = path.stat()
-            file_fingerprint[str(path)] = {
-                "size": int(stat.st_size),
-                "mtime": int(stat.st_mtime),
-            }
+            fingerprint = {"size": int(stat.st_size)}
+            if not omit_resource_mtime:
+                fingerprint["mtime_ns"] = int(stat.st_mtime_ns)
+            file_fingerprint[path_label or str(path)] = fingerprint
     except Exception:
         file_fingerprint = {}
     payload = {
-        "descriptor": desc,
+        "descriptor": package_desc,
         "file_fingerprint": file_fingerprint,
         "value_dtype": value_dtype,
         "index_dtype": index_dtype,
