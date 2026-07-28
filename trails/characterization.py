@@ -7,6 +7,7 @@ import sparse
 import xarray as xr
 
 from .lcia import get_lcia_methods
+from .chunked_inventory import is_chunked_sparse
 
 if TYPE_CHECKING:
     from .trails import Trails
@@ -193,6 +194,24 @@ def build_characterized_inventory(
     )
 
     inventory = trails.inventory
+
+    if is_chunked_sparse(inventory.data):
+        cf_da = xr.DataArray(
+            cf,
+            dims=("method", "flow"),
+            coords={
+                "method": np.asarray(methods, dtype=object),
+                "flow": inventory.coords["flow"],
+            },
+        )
+        characterized = inventory.expand_dims(
+            method=np.asarray(methods, dtype=object)
+        ) * cf_da
+        dims = ["method", "activity", "flow", "year"]
+        if "root activity" in inventory.dims:
+            dims.append("root activity")
+        trails.characterized_inventory = characterized.transpose(*dims)
+        return trails.characterized_inventory
 
     # Enforce canonical dim order for safe broadcasting
     if "root activity" in inventory.dims:

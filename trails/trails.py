@@ -32,6 +32,13 @@ from .static_activity_scores import (
     _activity_score_potential,
     _ensure_static_activity_scores,
 )
+from .chunked_inventory import (
+    ChunkedInventoryBuilder,
+    DEFAULT_INVENTORY_MEMORY_BUDGET,
+    estimate_flush_peak_bytes,
+    estimate_materialization_peak_bytes,
+    is_chunked_sparse,
+)
 
 import logging
 
@@ -362,6 +369,75 @@ class Trails:
         self._template_year_map_cache: dict[int, int] = {}
         self._static_activity_score_cache: dict[str, object] = {}
         self._static_activity_score_fingerprint: tuple[tuple, str] | None = None
+        self._inventory_backend_requested = "coo"
+        self._inventory_memory_budget = DEFAULT_INVENTORY_MEMORY_BUDGET
+        self._inventory_store: str | Path | None = None
+        self._inventory_builder: ChunkedInventoryBuilder | None = None
+        self._inventory_builders: list[ChunkedInventoryBuilder] = []
+        self.inventory_diagnostics: dict[str, object] = {}
+        self.lca_diagnostics: dict[str, object] = {}
+
+    def configure_inventory_storage(
+        self,
+        *,
+        backend: str = "auto",
+        memory_budget: int = DEFAULT_INVENTORY_MEMORY_BUDGET,
+        store: str | Path | None = None,
+    ) -> None:
+        """Configure storage used by the next ``reset_inventory`` call."""
+        if backend not in {"auto", "coo", "chunked"}:
+            raise ValueError(
+                "inventory_backend must be one of {'auto', 'coo', 'chunked'}"
+            )
+        budget = int(memory_budget)
+        if budget <= 0:
+            raise ValueError("inventory_memory_budget must be a positive integer")
+        self._inventory_backend_requested = str(backend)
+        self._inventory_memory_budget = budget
+        self._inventory_store = store
+
+    def _new_chunked_inventory_builder(self) -> ChunkedInventoryBuilder:
+        if self.A is None or self.B is None or self._inventory_years is None:
+            raise RuntimeError("Inventory dimensions are not initialized")
+        builder = ChunkedInventoryBuilder(
+            n_activities=int(self.A.shape[1]),
+            n_flows=int(self.B.shape[2]),
+            n_years=int(self._inventory_years.size),
+            has_root=bool(self._inventory_has_root),
+            value_dtype=self.value_dtype,
+            memory_budget=int(self._inventory_memory_budget),
+            store=self._inventory_store,
+        )
+        self._inventory_builders.append(builder)
+        return builder
+
+    def _promote_inventory_to_chunked(self) -> None:
+        if self._inventory_builder is not None:
+            return
+        builder = self._new_chunked_inventory_builder()
+        for keys, values in zip(self._inv_key_parts, self._inv_value_parts):
+            builder.append_linear_global(keys, values)
+        self._inv_key_parts.clear()
+        self._inv_value_parts.clear()
+        self._inventory_builder = builder
+
+    def _maybe_promote_inventory_to_chunked(self) -> None:
+        if self._inventory_builder is not None:
+            return
+        if getattr(self, "_inventory_backend_requested", "coo") != "auto":
+            return
+        entries = sum(int(part.size) for part in self._inv_key_parts)
+        ndim = 4 if bool(getattr(self, "_inventory_has_root", False)) else 3
+        predicted = max(
+            estimate_flush_peak_bytes(entries, value_dtype=self.value_dtype),
+            estimate_materialization_peak_bytes(
+                entries,
+                ndim=ndim,
+                value_dtype=self.value_dtype,
+            ),
+        )
+        if predicted > int(self._inventory_memory_budget):
+            self._promote_inventory_to_chunked()
 
     def reset_scores(
         self,
@@ -570,6 +646,9 @@ class Trails:
         # Linearized inventory builders (fast append + finalize dedup)
         self._inv_key_parts = []
         self._inv_value_parts = []
+        self._inventory_builder = None
+        if getattr(self, "_inventory_backend_requested", "coo") == "chunked":
+            self._inventory_builder = self._new_chunked_inventory_builder()
 
         # Initialize inventory chunk builders (block-based appends)
         self._inv_chunk_act = []
@@ -1025,8 +1104,18 @@ class Trails:
             years,
             root_idx=roots,
         )
-        self._inv_key_parts.append(keys)
-        self._inv_value_parts.append(vals_out)
+        if self._inventory_builder is not None:
+            self._inventory_builder.append(
+                acts,
+                flows_i64,
+                years,
+                vals_out,
+                roots=roots,
+            )
+        else:
+            self._inv_key_parts.append(keys)
+            self._inv_value_parts.append(vals_out)
+            self._maybe_promote_inventory_to_chunked()
 
     def _append_scores_bulk(
         self,
@@ -1203,10 +1292,20 @@ class Trails:
             years_out,
             root_idx=root_out,
         )
-        self._inv_key_parts.append(keys)
-        self._inv_value_parts.append(vals_out)
+        if self._inventory_builder is not None:
+            self._inventory_builder.append(
+                acts_out,
+                flows_out,
+                years_out,
+                vals_out,
+                roots=root_out,
+            )
+        else:
+            self._inv_key_parts.append(keys)
+            self._inv_value_parts.append(vals_out)
+            self._maybe_promote_inventory_to_chunked()
 
-    def finalize_inventory(self) -> xr.DataArray:
+    def finalize_inventory(self, *, show_progress: bool = False) -> xr.DataArray:
         """Finalize inventory.
 
         :returns: Return value.
@@ -1230,6 +1329,42 @@ class Trails:
         n_activities = int(self.A.shape[1])
         n_flows = int(self.B.shape[2])
         has_root = bool(getattr(self, "_inventory_has_root", False))
+
+        if self._inventory_builder is not None:
+            inv = self._inventory_builder.finalize(show_progress=show_progress)
+            self.inventory_diagnostics = self._inventory_builder.diagnostics()
+            dims = ("activity", "flow", "year")
+            coords_xr = {
+                "activity": np.arange(n_activities, dtype=int),
+                "flow": np.arange(n_flows, dtype=int),
+                "year": years,
+            }
+            if has_root:
+                dims = ("activity", "flow", "year", "root activity")
+                coords_xr["root activity"] = np.arange(n_activities, dtype=int)
+            self.inventory = xr.DataArray(inv, dims=dims, coords=coords_xr)
+            self._inv_key_parts = []
+            self._inv_value_parts = []
+            return self.inventory
+
+        eager_entries = sum(int(part.size) for part in self._inv_key_parts)
+        eager_peak = max(
+            estimate_flush_peak_bytes(eager_entries, value_dtype=self.value_dtype),
+            estimate_materialization_peak_bytes(
+                eager_entries,
+                ndim=4 if has_root else 3,
+                value_dtype=self.value_dtype,
+            ),
+        )
+        if eager_peak > int(getattr(self, "_inventory_memory_budget", 0)):
+            backend = getattr(self, "_inventory_backend_requested", "coo")
+            raise MemoryError(
+                f"Eager inventory finalization requires an estimated "
+                f"{eager_peak / 2**30:.2f} GiB, above the configured "
+                f"{self._inventory_memory_budget / 2**30:.2f} GiB budget "
+                f"for inventory_backend={backend!r}. Use backend='auto' or "
+                "'chunked', or explicitly raise the memory budget."
+            )
 
         if self._inv_key_parts:
             if len(self._inv_key_parts) != len(self._inv_value_parts):
@@ -1339,7 +1474,89 @@ class Trails:
         # Builders are no longer needed once inventory is finalized.
         self._inv_key_parts = []
         self._inv_value_parts = []
+        self.inventory_diagnostics = {
+            "backend": "coo",
+            "raw_entries": eager_entries,
+            "canonical_entries": int(inv.nnz),
+            "estimated_peak_bytes": eager_peak,
+        }
         return self.inventory
+
+    def _materialize_dataarray(
+        self,
+        value: xr.DataArray | None,
+        *,
+        memory_budget: int | None,
+        label: str,
+    ) -> xr.DataArray:
+        if value is None:
+            raise ValueError(f"Trails.{label} is empty")
+        if not is_chunked_sparse(value.data):
+            return value
+        builder = self._inventory_builder
+        if builder is None:
+            raise RuntimeError("Chunked inventory metadata is unavailable")
+        methods = int(value.sizes.get("method", 1))
+        predicted = estimate_materialization_peak_bytes(
+            int(builder.nnz) * methods,
+            ndim=int(value.ndim),
+            value_dtype=value.dtype,
+        )
+        budget = (
+            int(self._inventory_memory_budget)
+            if memory_budget is None
+            else int(memory_budget)
+        )
+        if predicted > budget:
+            raise MemoryError(
+                f"Materializing {label} requires an estimated "
+                f"{predicted / 2**30:.2f} GiB, above the "
+                f"{budget / 2**30:.2f} GiB budget."
+            )
+        data = value.data.compute(scheduler="synchronous")
+        return value.copy(data=data)
+
+    def materialize_inventory(
+        self, *, memory_budget: int | None = None
+    ) -> xr.DataArray:
+        """Safely replace a lazy inventory with one eager sparse COO."""
+        result = self._materialize_dataarray(
+            self.inventory,
+            memory_budget=memory_budget,
+            label="inventory",
+        )
+        self.inventory = result
+        return result
+
+    def materialize_characterized_inventory(
+        self, *, memory_budget: int | None = None
+    ) -> xr.DataArray:
+        """Safely replace a lazy characterized inventory with eager COO."""
+        result = self._materialize_dataarray(
+            self.characterized_inventory,
+            memory_budget=memory_budget,
+            label="characterized_inventory",
+        )
+        self.characterized_inventory = result
+        return result
+
+    def close(self) -> None:
+        """Release managed disk-backed inventory stores."""
+        for builder in getattr(self, "_inventory_builders", []):
+            builder.close()
+        self._inventory_builders = []
+
+    def __enter__(self) -> "Trails":
+        return self
+
+    def __exit__(self, exc_type: Any, exc: Any, traceback: Any) -> None:
+        self.close()
+
+    def __del__(self) -> None:
+        try:
+            self.close()
+        except Exception:
+            pass
 
     # ------------------------------------------------------------------
     # Convenience accessors

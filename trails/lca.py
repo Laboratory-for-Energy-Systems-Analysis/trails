@@ -1,5 +1,7 @@
 from __future__ import annotations
 import gc
+from pathlib import Path
+import time
 import warnings
 from typing import Any, Dict, List, Literal, TYPE_CHECKING
 
@@ -23,6 +25,7 @@ from .characterization import build_characterized_inventory
 from .characterization import get_cf_matrix
 from .characterization import get_cf_vector
 from .edges_matrix import score_inventory_with_edges
+from .chunked_inventory import DEFAULT_INVENTORY_MEMORY_BUDGET
 
 try:
     from scikits.umfpack import UmfpackContext, UmfpackWarning, UMFPACK_A
@@ -594,6 +597,9 @@ def lca(
     edges_strategies: list[str] | None = None,
     edges_reuse_cached_cfs: bool = True,
     inventory_workers: int | None = None,
+    inventory_backend: Literal["auto", "coo", "chunked"] = "auto",
+    inventory_memory_budget: int = DEFAULT_INVENTORY_MEMORY_BUDGET,
+    inventory_store: str | Path | None = None,
 ) -> None:
     """Run temporal LCA from a previously built routing graph.
 
@@ -658,6 +664,16 @@ def lca(
     :type edges_reuse_cached_cfs: bool
     :param inventory_workers: Optional worker count for no-TD inventory batching.
     :type inventory_workers: int | None
+    :param inventory_backend: Inventory storage mode. ``"auto"`` preserves an
+        eager COO for small calculations and switches to bounded disk-backed
+        sparse blocks before an unsafe eager finalization.
+    :type inventory_backend: Literal["auto", "coo", "chunked"]
+    :param inventory_memory_budget: Maximum estimated resident bytes used by
+        inventory buffering, sorting, merging, and guarded materialization.
+    :type inventory_memory_budget: int
+    :param inventory_store: Optional user-managed directory for disk-backed
+        inventory blocks. If omitted, a managed temporary directory is used.
+    :type inventory_store: str | Path | None
     :raises RuntimeError: If an error occurs.
     :raises ValueError: If an error occurs."""
     if compute_score or methods is not None or edges_methods is not None:
@@ -707,6 +723,11 @@ def lca(
         methods
         if (compute_score and not edge_mode and methods and len(methods) > 1)
         else None
+    )
+    trails.configure_inventory_storage(
+        backend=inventory_backend,
+        memory_budget=inventory_memory_budget,
+        store=inventory_store,
     )
     trails.reset_inventory(
         attribute_to_roots=attribute_to_roots,
@@ -878,7 +899,7 @@ def lca(
     if show_progress:
         pbar = tqdm(
             total=len(candidate_years),
-            desc="Temporal LCA: solve years",
+            desc="TRAILS LCA [1/5] Solve and accumulate years",
             unit="year",
             leave=True,
         )
@@ -886,6 +907,8 @@ def lca(
     direct_matrix_cache: dict[
         int, tuple[sp.csc_matrix, _IdentityProductMap, dict[int, tuple[int, float]]]
     ] = {}
+    phase_seconds: dict[str, float] = {}
+    solve_phase_started = time.perf_counter()
 
     for solve_year in candidate_years:
         root_ids = None
@@ -1186,6 +1209,21 @@ def lca(
             pbar.update(1)
     if pbar is not None:
         pbar.close()
+    phase_seconds["solve_and_accumulate"] = (
+        time.perf_counter() - solve_phase_started
+    )
+
+    injection_phase_started = time.perf_counter()
+    injection_progress = (
+        tqdm(
+            total=1,
+            desc="TRAILS LCA [2/5] Process direct biosphere inputs",
+            unit="phase",
+            leave=True,
+        )
+        if show_progress
+        else None
+    )
 
     # Injected/direct biosphere supplies should keep their raw calendar year,
     # while technosphere solving remains scenario-mapped.
@@ -1258,6 +1296,13 @@ def lca(
                         method_idx=method_idx,
                     )
 
+    if injection_progress is not None:
+        injection_progress.update(1)
+        injection_progress.close()
+    phase_seconds["direct_biosphere_inputs"] = (
+        time.perf_counter() - injection_phase_started
+    )
+
     # Large local containers are no longer needed past this point; clear them
     # before finalize_* to reduce peak RSS during inventory/scores materialization.
     frontier.clear()
@@ -1273,10 +1318,28 @@ def lca(
         injected_by_raw_year.clear()
     gc.collect()
 
+    inventory_phase_started = time.perf_counter()
     if store_inventory_effective:
-        trails.finalize_inventory()
+        if show_progress:
+            trails.finalize_inventory(show_progress=True)
+        else:
+            trails.finalize_inventory()
+    phase_seconds["finalize_inventory"] = (
+        time.perf_counter() - inventory_phase_started
+    )
 
     if compute_score:
+        score_phase_started = time.perf_counter()
+        score_progress = (
+            tqdm(
+                total=1,
+                desc="TRAILS LCA [4/5] Finalize scores",
+                unit="phase",
+                leave=True,
+            )
+            if show_progress
+            else None
+        )
         if edge_mode:
             score_inventory_with_edges(
                 trails,
@@ -1291,17 +1354,46 @@ def lca(
         else:
             trails.finalize_scores()
 
+        if score_progress is not None:
+            score_progress.update(1)
+            score_progress.close()
+
         if trails.scores is None:
             raise RuntimeError(
                 "compute_score=True but trails.scores is still None. "
                 "This indicates lca() did not finalize scores correctly."
             )
+        phase_seconds["finalize_scores"] = (
+            time.perf_counter() - score_phase_started
+        )
 
     # Characterized inventory is optional and only meaningful when scoring.
     if store_inventory_effective and compute_score and not edge_mode:
+        characterization_phase_started = time.perf_counter()
+        characterization_progress = (
+            tqdm(
+                total=1,
+                desc="TRAILS LCA [5/5] Build characterized inventory",
+                unit="phase",
+                leave=True,
+            )
+            if show_progress
+            else None
+        )
         build_characterized_inventory(
             trails=trails, methods=methods, char_cache=_CHAR_CACHE
         )
+        if characterization_progress is not None:
+            characterization_progress.update(1)
+            characterization_progress.close()
+        phase_seconds["build_characterized_inventory"] = (
+            time.perf_counter() - characterization_phase_started
+        )
+
+    trails.lca_diagnostics = {
+        "phase_seconds": phase_seconds,
+        "inventory": dict(getattr(trails, "inventory_diagnostics", {})),
+    }
 
 
 def build_temporal_sankey_tree(

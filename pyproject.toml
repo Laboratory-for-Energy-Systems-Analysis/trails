@@ -32,6 +32,7 @@ tracker = "https://github.com/Laboratory-for-Energy-Systems-Analysis/trails/issu
 testing = [
     "setuptools",
     "pytest",
+    "psutil",
 ]
 
 docs = [

@@ -14,6 +14,8 @@ import sparse
 from tqdm.auto import tqdm
 import xarray as xr
 
+from .chunked_inventory import is_chunked_sparse, iter_sparse_blocks
+
 
 class _IdentityMappedDict(dict):
     """Brightway-like matrix dictionary with a ``reversed`` lookup."""
@@ -579,6 +581,233 @@ def _method_labels(methods: list[Any]) -> np.ndarray:
     return np.asarray(labels, dtype=object)
 
 
+def _eligible_biosphere_flow_ids(
+    trails: Any, methods: list[Any]
+) -> np.ndarray | None:
+    """Return supplier-flow IDs declared by mapping-based EDGES methods."""
+    supplier_names: set[str] = set()
+    saw_mapping = False
+    for method in methods:
+        if not isinstance(method, Mapping):
+            continue
+        saw_mapping = True
+        for exchange in method.get("exchanges", []):
+            supplier = exchange.get("supplier", {})
+            if supplier.get("matrix") != "biosphere":
+                continue
+            name = supplier.get("name")
+            if name:
+                supplier_names.add(str(name))
+    if not saw_mapping or not supplier_names:
+        return None
+    flow_ids = {
+        int(flow_id)
+        for mapping in getattr(trails, "biosphere_indices", {}).values()
+        for flow_id, metadata in mapping.items()
+        if metadata.get("name") in supplier_names
+    }
+    return np.asarray(sorted(flow_ids), dtype=np.int64)
+
+
+def _score_chunked_inventory_with_edges(
+    trails: Any,
+    inv: xr.DataArray,
+    methods: list[Any],
+    *,
+    additional_topologies: dict[str, Any] | None,
+    strategies: list[str] | None,
+    reuse_cached_cfs: bool,
+    show_progress: bool,
+) -> xr.DataArray:
+    """Score disk-backed sparse inventory blocks without global materialization."""
+    data = inv.data
+    has_root = "root activity" in inv.dims
+    n_methods = len(methods)
+    n_activities = int(inv.sizes["activity"])
+    n_years = int(inv.sizes["year"])
+    n_roots = int(inv.sizes["root activity"]) if has_root else 0
+    years = np.asarray(inv.coords["year"].values, dtype=int)
+    dtype = np.dtype(getattr(trails, "value_dtype", np.float64))
+    eligible_flows = _eligible_biosphere_flow_ids(trails, methods)
+
+    year_indices_seen: set[int] = set()
+    edges_by_year: dict[int, set[tuple[int, int]]] = {}
+    for slices, block in iter_sparse_blocks(data, primary_axis=2):
+        coords = block.coords.astype(np.int64, copy=False)
+        activities = coords[0] + int(slices[0].start or 0)
+        flows = coords[1] + int(slices[1].start or 0)
+        year_indices = coords[2] + int(slices[2].start or 0)
+        if eligible_flows is not None:
+            eligible = np.isin(flows, eligible_flows)
+            if not np.any(eligible):
+                continue
+            activities = activities[eligible]
+            flows = flows[eligible]
+            year_indices = year_indices[eligible]
+        for year_idx in np.unique(year_indices):
+            year_idx_i = int(year_idx)
+            year_indices_seen.add(year_idx_i)
+            inventory_year = int(years[year_idx_i])
+            mask = year_indices == year_idx_i
+            pair_ids = np.unique(
+                flows[mask].astype(np.int64, copy=False) * n_activities
+                + activities[mask].astype(np.int64, copy=False)
+            )
+            edges = edges_by_year.setdefault(inventory_year, set())
+            edges.update(
+                (int(pair_id // n_activities), int(pair_id % n_activities))
+                for pair_id in pair_ids
+            )
+
+    output_coords: list[np.ndarray] = []
+    output_data: list[np.ndarray] = []
+    mapping_caches: list[dict[str, Any]] | None = (
+        [{} for _method in methods] if reuse_cached_cfs else None
+    )
+    progress_total = len(year_indices_seen) * n_methods
+    progress_context = (
+        tqdm(
+            total=progress_total,
+            desc="EDGES LCIA",
+            unit="method-year",
+        )
+        if show_progress and progress_total
+        else nullcontext()
+    )
+
+    current_year: int | None = None
+    matrices: list[sp.csr_matrix] | None = None
+    with progress_context as progress:
+        for slices, block in iter_sparse_blocks(data, primary_axis=2):
+            coords = block.coords.astype(np.int64, copy=False)
+            activities = coords[0] + int(slices[0].start or 0)
+            flows = coords[1] + int(slices[1].start or 0)
+            year_indices = coords[2] + int(slices[2].start or 0)
+            roots = (
+                coords[3] + int(slices[3].start or 0) if has_root else None
+            )
+            values = block.data.astype(dtype, copy=False)
+            if eligible_flows is not None:
+                eligible = np.isin(flows, eligible_flows)
+                if not np.any(eligible):
+                    continue
+                activities = activities[eligible]
+                flows = flows[eligible]
+                year_indices = year_indices[eligible]
+                values = values[eligible]
+                if roots is not None:
+                    roots = roots[eligible]
+
+            for year_idx in np.unique(year_indices):
+                year_idx_i = int(year_idx)
+                inventory_year = int(years[year_idx_i])
+                if current_year != inventory_year:
+                    matrices = _build_edges_characterization_matrices_for_year(
+                        trails,
+                        methods,
+                        year=inventory_year,
+                        additional_topologies=additional_topologies,
+                        strategies=strategies,
+                        biosphere_edges=edges_by_year[inventory_year],
+                        mapping_caches=mapping_caches,
+                        progress=progress,
+                        suppress_edges_output=True,
+                    )
+                    current_year = inventory_year
+                assert matrices is not None
+                mask = year_indices == year_idx_i
+                act_group = activities[mask]
+                flow_group = flows[mask]
+                value_group = values[mask]
+                root_group = roots[mask] if roots is not None else None
+
+                for method_idx, matrix in enumerate(matrices):
+                    cf_values = _lookup_sparse_values(matrix, flow_group, act_group)
+                    scored = value_group * cf_values.astype(
+                        value_group.dtype, copy=False
+                    )
+                    keep = scored != 0.0
+                    count = int(np.count_nonzero(keep))
+                    if not count:
+                        continue
+                    if has_root and n_methods > 1:
+                        out_coords = np.vstack(
+                            [
+                                np.full(count, method_idx, dtype=np.int64),
+                                act_group[keep],
+                                np.full(count, year_idx_i, dtype=np.int64),
+                                root_group[keep],  # type: ignore[index]
+                            ]
+                        )
+                    elif has_root:
+                        out_coords = np.vstack(
+                            [
+                                act_group[keep],
+                                np.full(count, year_idx_i, dtype=np.int64),
+                                root_group[keep],  # type: ignore[index]
+                            ]
+                        )
+                    elif n_methods > 1:
+                        out_coords = np.vstack(
+                            [
+                                np.full(count, method_idx, dtype=np.int64),
+                                act_group[keep],
+                                np.full(count, year_idx_i, dtype=np.int64),
+                            ]
+                        )
+                    else:
+                        out_coords = np.vstack(
+                            [
+                                act_group[keep],
+                                np.full(count, year_idx_i, dtype=np.int64),
+                            ]
+                        )
+                    output_coords.append(out_coords)
+                    output_data.append(scored[keep])
+
+    if has_root and n_methods > 1:
+        shape = (n_methods, n_activities, n_years, n_roots)
+        dims = ("method", "activity", "year", "root activity")
+        coords_xr = {
+            "method": _method_labels(methods),
+            "activity": inv.coords["activity"].values,
+            "year": years,
+            "root activity": inv.coords["root activity"].values,
+        }
+    elif has_root:
+        shape = (n_activities, n_years, n_roots)
+        dims = ("activity", "year", "root activity")
+        coords_xr = {
+            "activity": inv.coords["activity"].values,
+            "year": years,
+            "root activity": inv.coords["root activity"].values,
+        }
+    elif n_methods > 1:
+        shape = (n_methods, n_activities, n_years)
+        dims = ("method", "activity", "year")
+        coords_xr = {
+            "method": _method_labels(methods),
+            "activity": inv.coords["activity"].values,
+            "year": years,
+        }
+    else:
+        shape = (n_activities, n_years)
+        dims = ("activity", "year")
+        coords_xr = {"activity": inv.coords["activity"].values, "year": years}
+
+    if output_coords:
+        arr = sparse.COO(
+            np.concatenate(output_coords, axis=1),
+            np.concatenate(output_data).astype(dtype, copy=False),
+            shape=shape,
+        )
+    else:
+        arr = sparse.zeros(shape, dtype=dtype)
+    scores = xr.DataArray(arr, dims=dims, coords=coords_xr)
+    trails.scores = scores
+    return scores
+
+
 def score_inventory_with_edges(
     trails: Any,
     methods: list[Any],
@@ -614,6 +843,16 @@ def score_inventory_with_edges(
     )
     has_root = "root activity" in inv.dims
     data = inv.data
+    if is_chunked_sparse(data):
+        return _score_chunked_inventory_with_edges(
+            trails,
+            inv,
+            methods,
+            additional_topologies=additional_topologies,
+            strategies=strategies,
+            reuse_cached_cfs=reuse_cached_cfs,
+            show_progress=show_progress,
+        )
     if not isinstance(data, sparse.COO):
         data = sparse.COO.from_numpy(np.asarray(data))
 

@@ -141,6 +141,13 @@ for impact scores (when ``compute_score=True``). If you run
 with ``compute_score=True`` and ``store_inventory=True``, it also stores
 ``trails.characterized_inventory``.
 
+Stored inventories use ``inventory_backend="auto"`` by default. Small results
+remain eager sparse COO arrays; larger results become disk-backed Dask arrays of
+sparse COO blocks while preserving the same xarray dimensions and coordinates.
+The default working-memory budget is 256 MiB. Managed block files are removed by
+``trails.close()``; guarded materialization helpers raise before an eager result
+would exceed the configured budget.
+
 
 Importing Excel inventories
 ---------------------------

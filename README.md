@@ -525,6 +525,46 @@ By default `lca()` computes scores and stores them on `trails.scores`. If you se
 `compute_score=True` at the same time, `trails.characterized_inventory` is also
 available. Remember to run `trails.temporal_routing(...)` before `lca()`.
 
+Large stored inventories use a bounded, disk-backed sparse representation
+automatically. ``trails.inventory`` and ``trails.characterized_inventory`` remain
+``xarray.DataArray`` objects; their data can be a Dask array of sparse COO blocks.
+The default 256 MiB inventory working-memory budget can be changed explicitly:
+
+```python
+trails.lca(
+    store_inventory=True,
+    inventory_backend="auto",       # auto, coo, or chunked
+    inventory_memory_budget=256 * 2**20,
+    inventory_store=None,            # managed temporary store
+)
+```
+
+TRAILS processes its own FaIR, EDGES, and plotting reductions one sparse block at
+a time. Use ``materialize_inventory()`` or
+``materialize_characterized_inventory()`` only when a single eager COO is needed;
+both estimate the allocation and raise before exceeding the configured budget.
+Call ``trails.close()`` (or use ``with Trails(...) as trails``) to remove managed
+temporary blocks.
+
+For the full BrightCon DACCS case, ``dev/profile_daccs_memory.py`` reproduces the
+notebook pipeline in an isolated worker while a parent process samples runtime and
+RSS. It terminates the worker if either its RSS ceiling is crossed or system-wide
+available RAM falls below the configured reserve, and writes phase timings plus
+inventory diagnostics to JSON:
+
+```bash
+python dev/profile_daccs_memory.py \
+    --data-dir /path/to/BrightCon-2026/data \
+    --output results/daccs_memory_profile.json \
+    --rss-limit-gib 12 \
+    --min-available-gib 1.5
+```
+
+``trails.lca_diagnostics`` separates total LCA phases, while
+``trails.inventory_diagnostics`` reports append, online flush, final flush, and
+merge time. This makes bounded-storage I/O visible instead of attributing it to
+the linear-system solver alone.
+
 ## Limitations & Assumptions
 
 * Input data must follow the expected Frictionless schema; missing columns will fail fast.

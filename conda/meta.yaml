@@ -33,6 +33,7 @@ requirements:
     - plotly
     - tqdm
     - xarray
+    - dask >=2024.8,<2027
     - networkx
     - prettytable
     - fair

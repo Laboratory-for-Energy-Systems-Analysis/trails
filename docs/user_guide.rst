@@ -116,6 +116,20 @@ for impact scores (when ``compute_score=True``). If you run
 with ``compute_score=True`` and ``store_inventory=True``, it also stores
 ``trails.characterized_inventory``.
 
+For large calculations, ``inventory_backend="auto"`` switches from an eager COO
+to disk-backed sparse Dask blocks before the estimated eager allocation exceeds
+``inventory_memory_budget`` (256 MiB by default). The public results remain
+``xarray.DataArray`` objects with the same dimensions and coordinates. TRAILS'
+FaIR, EDGES, and plotting helpers process these blocks sequentially.
+
+Use ``inventory_backend="chunked"`` to force this representation or
+``inventory_backend="coo"`` to request the legacy eager form; an unsafe eager
+request raises before allocation. ``inventory_store`` selects a user-managed
+backing directory. Otherwise, call ``trails.close()`` to remove the managed
+temporary store. Guarded ``materialize_inventory()`` and
+``materialize_characterized_inventory()`` helpers are available when an eager
+COO is genuinely required.
+
 Adaptive score-potential routing
 --------------------------------
 

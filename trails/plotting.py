@@ -16,6 +16,15 @@ import xarray as xr
 
 from .trails import Trails
 from .utils import _format_path_label
+from .chunked_inventory import is_chunked_sparse
+
+
+def _compute_plot_array(value: xr.DataArray) -> np.ndarray | sparse.COO:
+    """Compute only an already-reduced plotting array, sequentially."""
+    data = value.data
+    if is_chunked_sparse(data):
+        return data.compute(scheduler="synchronous")
+    return data
 
 
 def _build_activity_label_map(trails: Trails) -> dict[int, str]:
@@ -1695,7 +1704,7 @@ def _characterized_inventory_to_results(
             raise ValueError(
                 "characterized_inventory has multiple methods; select one before plotting."
             )
-        characterized_inventory = characterized_inventory.sel(method=methods[0])
+        characterized_inventory = characterized_inventory.isel(method=0, drop=True)
     if "flow" not in characterized_inventory.dims:
         raise ValueError("characterized_inventory must include a 'flow' dimension.")
     if "activity" not in characterized_inventory.dims:
@@ -1705,15 +1714,13 @@ def _characterized_inventory_to_results(
     if "year" not in characterized_inventory.dims:
         raise ValueError("characterized_inventory must include a 'year' dimension.")
 
-    data = characterized_inventory.data
-    if not isinstance(data, sparse.COO):
-        data = sparse.COO.from_numpy(np.asarray(data))
-
     if by_flow:
-        summed = data.sum(axis=0)  # flow x year
+        summed = _compute_plot_array(
+            characterized_inventory.sum(dim="activity")
+        )
         score_key = "scores_by_flow"
     else:
-        summed = data.sum(axis=1)  # activity x year
+        summed = _compute_plot_array(characterized_inventory.sum(dim="flow"))
         score_key = "scores_by_first_level_child"
     years = characterized_inventory.coords["year"].values
 
@@ -1760,7 +1767,7 @@ def _characterized_inventory_to_root_results(
             raise ValueError(
                 "characterized_inventory has multiple methods; select one before plotting."
             )
-        characterized_inventory = characterized_inventory.sel(method=methods[0])
+        characterized_inventory = characterized_inventory.isel(method=0, drop=True)
     if "flow" not in characterized_inventory.dims:
         raise ValueError("characterized_inventory must include a 'flow' dimension.")
     if "activity" not in characterized_inventory.dims:
@@ -1774,11 +1781,9 @@ def _characterized_inventory_to_root_results(
             "characterized_inventory must include a 'root activity' dimension."
         )
 
-    data = characterized_inventory.data
-    if not isinstance(data, sparse.COO):
-        data = sparse.COO.from_numpy(np.asarray(data))
-
-    summed = data.sum(axis=(0, 1))  # year x root activity
+    summed = _compute_plot_array(
+        characterized_inventory.sum(dim=["activity", "flow"])
+    )
     years = characterized_inventory.coords["year"].values
     roots = characterized_inventory.coords["root activity"].values
     score_key = "scores_by_first_level_child"
@@ -4199,6 +4204,9 @@ def _node_scores_from_trails(trails: Trails) -> dict[tuple[int, int], float]:
     data = scores.data
     out: dict[tuple[int, int], float] = {}
 
+    if is_chunked_sparse(data):
+        data = data.compute(scheduler="synchronous")
+
     if isinstance(data, sparse.COO):
         coords = data.coords
         vals = data.data
@@ -4241,7 +4249,7 @@ def _node_scores_from_characterized_inventory(
             raise ValueError(
                 "characterized_inventory has multiple methods; select one before plotting."
             )
-        characterized_inventory = characterized_inventory.sel(method=methods[0])
+        characterized_inventory = characterized_inventory.isel(method=0, drop=True)
     if "activity" not in characterized_inventory.dims:
         raise ValueError(
             "characterized_inventory must include an 'activity' dimension."
@@ -4251,41 +4259,20 @@ def _node_scores_from_characterized_inventory(
     if "flow" not in characterized_inventory.dims:
         raise ValueError("characterized_inventory must include a 'flow' dimension.")
 
-    data = characterized_inventory.data
     years = characterized_inventory.coords["year"].values
     activities = characterized_inventory.coords["activity"].values
 
     out: dict[tuple[int, int], float] = {}
 
+    reduce_dims = ["flow"]
     if "root activity" in characterized_inventory.dims:
-        if isinstance(data, sparse.COO):
-            coords = data.coords
-            vals = data.data
-            for ai, fi, yi, ri, v in zip(
-                coords[0], coords[1], coords[2], coords[3], vals
-            ):
-                if v == 0.0:
-                    continue
-                year = int(years[int(yi)])
-                act = int(activities[int(ai)])
-                out[(year, act)] = out.get((year, act), 0.0) + float(v)
-        else:
-            dense = np.asarray(data)
-            dense = dense.sum(axis=3)
-            idxs = np.nonzero(dense)
-            for ai, fi, yi in zip(idxs[0], idxs[1], idxs[2]):
-                v = float(dense[ai, fi, yi])
-                if v == 0.0:
-                    continue
-                year = int(years[int(yi)])
-                act = int(activities[int(ai)])
-                out[(year, act)] = out.get((year, act), 0.0) + v
-        return out
-
+        reduce_dims.append("root activity")
+    reduced = characterized_inventory.sum(dim=reduce_dims).transpose(
+        "activity", "year"
+    )
+    data = _compute_plot_array(reduced)
     if isinstance(data, sparse.COO):
-        coords = data.coords
-        vals = data.data
-        for ai, fi, yi, v in zip(coords[0], coords[1], coords[2], vals):
+        for ai, yi, v in zip(data.coords[0], data.coords[1], data.data):
             if v == 0.0:
                 continue
             year = int(years[int(yi)])
@@ -4294,11 +4281,11 @@ def _node_scores_from_characterized_inventory(
         return out
 
     dense = np.asarray(data)
-    if dense.ndim != 3:
-        raise ValueError("Expected 3D characterized inventory after root aggregation.")
+    if dense.ndim != 2:
+        raise ValueError("Expected activity/year characterized inventory reduction.")
     idxs = np.nonzero(dense)
-    for ai, fi, yi in zip(idxs[0], idxs[1], idxs[2]):
-        v = float(dense[ai, fi, yi])
+    for ai, yi in zip(idxs[0], idxs[1]):
+        v = float(dense[ai, yi])
         if v == 0.0:
             continue
         year = int(years[int(yi)])

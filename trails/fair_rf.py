@@ -35,11 +35,47 @@ from .fair_io import (
     load_emissions_csv,
     load_species_mapping,
 )
+from .chunked_inventory import is_chunked_sparse, iter_sparse_blocks
 
 # FaIR ensemble runs are not reliably thread-safe with all SciPy/FaIR
 # combinations. Serialize the actual model execution so per-species threading in
 # ``run_fair_delta_rf`` cannot overlap calls into ``fair.FAIR.run``.
 _FAIR_RUN_LOCK = Lock()
+
+
+def _inventory_flow_year_root(inv: xr.DataArray) -> sparse.COO:
+    """Reduce an eager or chunked inventory to flow/year/root sequentially."""
+    canonical = inv.transpose("activity", "flow", "year", "root activity")
+    data = canonical.data
+    if not is_chunked_sparse(data):
+        if not isinstance(data, sparse.COO):
+            data = sparse.COO.from_numpy(np.asarray(data, dtype=float))
+        return data.sum(axis=0)
+
+    coords_parts: list[np.ndarray] = []
+    data_parts: list[np.ndarray] = []
+    for slices, block in iter_sparse_blocks(data, primary_axis=2):
+        reduced = block.sum(axis=0)
+        if not isinstance(reduced, sparse.COO) or not reduced.nnz:
+            continue
+        coords = reduced.coords.astype(np.int64, copy=True)
+        coords[0] += int(slices[1].start or 0)
+        coords[1] += int(slices[2].start or 0)
+        coords[2] += int(slices[3].start or 0)
+        coords_parts.append(coords)
+        data_parts.append(reduced.data)
+    shape = (
+        int(canonical.sizes["flow"]),
+        int(canonical.sizes["year"]),
+        int(canonical.sizes["root activity"]),
+    )
+    if not coords_parts:
+        return sparse.zeros(shape, dtype=canonical.dtype)
+    return sparse.COO(
+        np.concatenate(coords_parts, axis=1),
+        np.concatenate(data_parts),
+        shape=shape,
+    )
 
 
 def _sanitize_emissions_year_values(df: pd.DataFrame) -> pd.DataFrame:
@@ -984,28 +1020,7 @@ def _inventory_delta_by_fair_species_for_trails(
     dims = list(inv.dims)
     if "activity" not in dims or "flow" not in dims or "year" not in dims:
         raise ValueError("Trails.inventory must include activity/flow/year dimensions.")
-    activity_axis = dims.index("activity")
-    flow_axis = dims.index("flow")
-    year_axis = dims.index("year")
-    root_axis = dims.index("root activity")
-
-    inv_raw = inv.data
-    if isinstance(inv_raw, sparse.COO):
-        coo_full = inv_raw
-    else:
-        coo_full = sparse.COO.from_numpy(np.asarray(inv_raw, dtype=float))
-
-    inv_data = coo_full.sum(axis=activity_axis)
-    remaining_axes = [i for i in range(coo_full.ndim) if i != activity_axis]
-    flow_new_axis = remaining_axes.index(flow_axis)
-    year_new_axis = remaining_axes.index(year_axis)
-    root_new_axis = remaining_axes.index(root_axis)
-    if inv_data.ndim != 3:
-        raise ValueError(
-            "Unexpected inventory shape after aggregation to flow/year/root."
-        )
-    if (flow_new_axis, year_new_axis, root_new_axis) != (0, 1, 2):
-        inv_data = inv_data.transpose((flow_new_axis, year_new_axis, root_new_axis))
+    inv_data = _inventory_flow_year_root(inv)
 
     flow_coord = inv.coords["flow"].values
     coord_value_to_pos = {int(v): i for i, v in enumerate(flow_coord)}
@@ -1484,30 +1499,8 @@ def run_fair_delta_rf(
     dims = list(inv.dims)
     if "activity" not in dims or "flow" not in dims or "year" not in dims:
         raise ValueError("Trails.inventory must include activity/flow/year dimensions.")
-    activity_axis = dims.index("activity")
-    flow_axis = dims.index("flow")
-    year_axis = dims.index("year")
-    root_axis = dims.index("root activity")
-
-    inv_raw = inv.data
-    if isinstance(inv_raw, sparse.COO):
-        coo_full = inv_raw
-    else:
-        coo_full = sparse.COO.from_numpy(np.asarray(inv_raw, dtype=float))
-
-    # Reduce once over activity and reuse this COO for both species deltas and
-    # per-flow/root allocations to avoid duplicate sparse reductions.
-    inv_data = coo_full.sum(axis=activity_axis)
-    remaining_axes = [i for i in range(coo_full.ndim) if i != activity_axis]
-    flow_new_axis = remaining_axes.index(flow_axis)
-    year_new_axis = remaining_axes.index(year_axis)
-    root_new_axis = remaining_axes.index(root_axis)
-    if inv_data.ndim != 3:
-        raise ValueError(
-            "Unexpected inventory shape after aggregation to flow/year/root."
-        )
-    if (flow_new_axis, year_new_axis, root_new_axis) != (0, 1, 2):
-        inv_data = inv_data.transpose((flow_new_axis, year_new_axis, root_new_axis))
+    # Reduce once and reuse this COO for species deltas and allocations.
+    inv_data = _inventory_flow_year_root(inv)
 
     n_flow = int(inv.sizes["flow"])
     n_root = int(inv.sizes["root activity"])
