@@ -529,8 +529,10 @@ exist in the package, the nearest available scenario year is used.
 for regular methods, exposes a lazy or sparse ``trails.characterized_inventory``.
 Repeated ``lcia()`` calls reuse the same inventory.
 
-Large stored inventories use a bounded, disk-backed sparse representation
-automatically. ``trails.inventory`` and ``trails.characterized_inventory`` remain
+Large root-attributed direct or iterative inventories automatically use the
+factorized backend when their predicted eager allocation exceeds the memory
+budget. Other large inventories use bounded, disk-backed sparse storage.
+``trails.inventory`` and ``trails.characterized_inventory`` remain
 ``xarray.DataArray`` objects; their data can be a Dask array of sparse COO blocks.
 Buffered partitions are written into a fixed set of binary shard buckets, which
 are compacted independently as they grow. Adjacent inventory years share both

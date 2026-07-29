@@ -25,7 +25,11 @@ from .characterization import build_characterized_inventory
 from .characterization import get_cf_matrix
 from .characterization import get_cf_vector
 from .edges_matrix import score_inventory_with_edges
-from .chunked_inventory import DEFAULT_INVENTORY_MEMORY_BUDGET
+from .chunked_inventory import (
+    DEFAULT_INVENTORY_MEMORY_BUDGET,
+    estimate_flush_peak_bytes,
+    estimate_materialization_peak_bytes,
+)
 
 try:
     from scikits.umfpack import UmfpackContext, UmfpackWarning, UMFPACK_A
@@ -63,6 +67,108 @@ if UmfpackWarning is not None:
     warnings.filterwarnings("ignore", module="scikits")
 
 _CHAR_CACHE: dict = {}
+
+
+def _select_auto_inventory_backend(
+    trails: Trails,
+    *,
+    requested_backend: str,
+    store_inventory: bool,
+    attribute_to_roots: bool,
+    solver_mode: str,
+    root_demands_by_year: dict[int, dict[int, dict[int, float]]],
+    inventory_memory_budget: int,
+) -> tuple[str, dict[str, Any]]:
+    """Resolve ``auto`` to factorized storage for large eligible inventories."""
+    selection: dict[str, Any] = {
+        "requested": str(requested_backend),
+        "selected": str(requested_backend),
+        "reason": "explicit_backend",
+    }
+    if requested_backend != "auto":
+        return str(requested_backend), selection
+
+    selection["reason"] = "small_or_dynamic_auto_inventory"
+    if not store_inventory:
+        selection["reason"] = "inventory_not_stored"
+        return "auto", selection
+    if not attribute_to_roots:
+        selection["reason"] = "root_attribution_disabled"
+        return "auto", selection
+    if solver_mode not in {"direct", "iterative"}:
+        selection["reason"] = "solver_not_factorizable"
+        return "auto", selection
+
+    biosphere = getattr(trails, "B", None)
+    if biosphere is None or not getattr(biosphere, "shape", None):
+        selection["reason"] = "biosphere_matrix_unavailable"
+        return "auto", selection
+    scenario_count = max(1, int(biosphere.shape[0]))
+    average_biosphere_rows = int(
+        np.ceil(int(getattr(biosphere, "nnz", 0)) / scenario_count)
+    )
+    temporal_expansion_by_template: dict[str, int] = {}
+    for key, exchange in getattr(trails, "temporal_biosphere_exchanges", {}).items():
+        if len(key) < 3:
+            continue
+        explicit_offsets = getattr(exchange, "offsets", None) or ()
+        if explicit_offsets:
+            pulse_count = len(
+                {int(round(float(offset))) for offset in explicit_offsets}
+            )
+        else:
+            offset_min = int(getattr(exchange, "offset_min", 0))
+            offset_max = int(getattr(exchange, "offset_max", offset_min))
+            pulse_count = max(1, offset_max - offset_min + 1)
+        template = str(key[0])
+        temporal_expansion_by_template[template] = temporal_expansion_by_template.get(
+            template, 0
+        ) + max(0, pulse_count - 1)
+    average_temporal_expansion_rows = (
+        int(
+            np.ceil(
+                sum(temporal_expansion_by_template.values())
+                / len(temporal_expansion_by_template)
+            )
+        )
+        if temporal_expansion_by_template
+        else 0
+    )
+    effective_biosphere_rows = int(
+        average_biosphere_rows + average_temporal_expansion_rows
+    )
+    root_year_columns = int(
+        sum(len(root_demands) for root_demands in root_demands_by_year.values())
+    )
+    estimated_raw_entries = int(effective_biosphere_rows * root_year_columns)
+    estimated_peak_bytes = max(
+        estimate_flush_peak_bytes(
+            estimated_raw_entries,
+            value_dtype=trails.value_dtype,
+        ),
+        estimate_materialization_peak_bytes(
+            estimated_raw_entries,
+            ndim=4,
+            value_dtype=trails.value_dtype,
+        ),
+    )
+    selection.update(
+        {
+            "average_biosphere_rows": average_biosphere_rows,
+            "average_temporal_expansion_rows": (average_temporal_expansion_rows),
+            "effective_biosphere_rows": effective_biosphere_rows,
+            "root_year_columns": root_year_columns,
+            "estimated_raw_entries": estimated_raw_entries,
+            "estimated_peak_bytes": int(estimated_peak_bytes),
+            "memory_budget": int(inventory_memory_budget),
+        }
+    )
+    if estimated_peak_bytes > int(inventory_memory_budget):
+        selection["selected"] = "factorized"
+        selection["reason"] = "estimated_inventory_exceeds_memory_budget"
+        return "factorized", selection
+    selection["selected"] = "auto"
+    return "auto", selection
 
 
 def _default_ei_version(trails: Trails, ei_version: str | None) -> str:
@@ -612,9 +718,7 @@ def lca(
     edges_strategies: list[str] | None = None,
     edges_reuse_cached_cfs: bool = True,
     inventory_workers: int | None = None,
-    inventory_backend: Literal[
-        "auto", "coo", "chunked", "factorized"
-    ] = "auto",
+    inventory_backend: Literal["auto", "coo", "chunked", "factorized"] = "auto",
     inventory_memory_budget: int = DEFAULT_INVENTORY_MEMORY_BUDGET,
     inventory_store: str | Path | None = None,
 ) -> None:
@@ -683,9 +787,10 @@ def lca(
     :type edges_reuse_cached_cfs: bool
     :param inventory_workers: Optional worker count for no-TD inventory batching.
     :type inventory_workers: int | None
-    :param inventory_backend: Inventory storage mode. ``"auto"`` preserves an
-        eager COO for small calculations and switches to bounded disk-backed
-        sparse blocks before an unsafe eager finalization.
+    :param inventory_backend: Inventory storage mode. ``"auto"`` selects the
+        factorized backend when a root-attributed direct or iterative inventory
+        is predicted to exceed the memory budget. Smaller calculations remain
+        eager COO and dynamically promote to bounded chunked storage if needed.
     :type inventory_backend: Literal["auto", "coo", "chunked", "factorized"]
     :param inventory_memory_budget: Maximum estimated resident bytes used by
         inventory buffering, sorting, merging, and guarded materialization.
@@ -754,15 +859,6 @@ def lca(
         if (compute_score and not edge_mode and methods and len(methods) > 1)
         else None
     )
-    trails.configure_inventory_storage(
-        backend=inventory_backend,
-        memory_budget=inventory_memory_budget,
-        store=inventory_store,
-    )
-    trails.reset_inventory(
-        attribute_to_roots=attribute_to_roots,
-        score_methods=score_methods,
-    )
 
     umfpack_cache: dict | None = (
         {} if (attribute_to_roots and SOLVER == "umfpack") else None
@@ -781,21 +877,6 @@ def lca(
             ei_version=ei_version,
         )
         cf_vectors = [cf_matrix[i, :] for i in range(cf_matrix.shape[0])]
-
-    # Ensure inventory builders are ready when we intend to store inventory data.
-    if store_inventory_effective:
-        required = (
-            hasattr(trails, "_inventory_years")
-            and trails._inventory_years is not None
-            and hasattr(trails, "_inv_chunk_flows")
-            and hasattr(trails, "_inv_chunk_values")
-            and hasattr(trails, "_inv_chunk_len")
-        )
-        if not required:
-            raise RuntimeError(
-                "BUG: inventory storage is enabled but reset_inventory() did not "
-                "initialize chunk-based inventory builders."
-            )
 
     if routing_attr_to_roots is not None and routing_attr_to_roots != bool(
         attribute_to_roots
@@ -925,6 +1006,41 @@ def lca(
                 root_bucket = year_bucket.setdefault(int(root), {})
                 root_bucket[int(a)] = root_bucket.get(int(a), 0.0) + float(amt)
 
+    selected_inventory_backend, backend_selection = _select_auto_inventory_backend(
+        trails,
+        requested_backend=inventory_backend,
+        store_inventory=store_inventory_effective,
+        attribute_to_roots=bool(attribute_to_roots),
+        solver_mode=solver_mode,
+        root_demands_by_year=root_demands_by_year,
+        inventory_memory_budget=inventory_memory_budget,
+    )
+    trails.inventory_backend_selection = backend_selection
+    trails.configure_inventory_storage(
+        backend=selected_inventory_backend,
+        memory_budget=inventory_memory_budget,
+        store=inventory_store,
+    )
+    trails.reset_inventory(
+        attribute_to_roots=attribute_to_roots,
+        score_methods=score_methods,
+    )
+
+    # Ensure inventory builders are ready when we intend to store inventory data.
+    if store_inventory_effective:
+        required = (
+            hasattr(trails, "_inventory_years")
+            and trails._inventory_years is not None
+            and hasattr(trails, "_inv_chunk_flows")
+            and hasattr(trails, "_inv_chunk_values")
+            and hasattr(trails, "_inv_chunk_len")
+        )
+        if not required:
+            raise RuntimeError(
+                "BUG: inventory storage is enabled but reset_inventory() did not "
+                "initialize chunk-based inventory builders."
+            )
+
     pbar = None
     if show_progress:
         pbar = tqdm(
@@ -1004,9 +1120,7 @@ def lca(
         )
         need_supply_dicts = bool(
             store_inventory_effective and not use_matrix_inventory
-        ) or (
-            bool(compute_score) and not edge_mode and not bool(attribute_to_roots)
-        )
+        ) or (bool(compute_score) and not edge_mode and not bool(attribute_to_roots))
 
         if use_direct_solver:
             A_csc, product_dict, ref_prod_cache = _build_direct_technosphere_for_year(
@@ -1417,6 +1531,7 @@ def lca(
             trails.finalize_inventory(show_progress=True)
         else:
             trails.finalize_inventory()
+        trails.inventory_diagnostics["backend_selection"] = dict(backend_selection)
     phase_seconds["finalize_inventory"] = time.perf_counter() - inventory_phase_started
 
     if compute_score:
@@ -1507,9 +1622,7 @@ def lci(
     iterative_ilu_drop_tol: float = 1e-4,
     iterative_ilu_fill_factor: float = 10.0,
     inventory_workers: int | None = None,
-    inventory_backend: Literal[
-        "auto", "coo", "chunked", "factorized"
-    ] = "auto",
+    inventory_backend: Literal["auto", "coo", "chunked", "factorized"] = "auto",
     inventory_memory_budget: int = DEFAULT_INVENTORY_MEMORY_BUDGET,
     inventory_store: str | Path | None = None,
 ) -> xr.DataArray:

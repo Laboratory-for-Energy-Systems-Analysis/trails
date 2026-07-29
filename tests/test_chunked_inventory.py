@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib
 from pathlib import Path
 
 import dask.array as da
@@ -24,6 +25,8 @@ from trails.lcia import get_lcia_method_names
 from trails.edges_matrix import score_inventory_with_edges
 from trails.fair_rf import _inventory_flow_year_root
 from trails.plotting import _characterized_inventory_to_root_results
+
+lca_module = importlib.import_module("trails.lca")
 
 
 def test_memory_estimators_scale_with_entries_and_dimensions() -> None:
@@ -398,7 +401,12 @@ def test_selective_activity_reduction_streams_and_caches_selected_flows() -> Non
         builder.close()
 
 
-def _run_example_lca(package_path: Path, *, backend: str) -> Trails:
+def _run_example_lca(
+    package_path: Path,
+    *,
+    backend: str,
+    memory_budget: int = 2**20,
+) -> Trails:
     trails = Trails(Package(str(package_path)), interpolate_annual=False)
     activity_indices = next(iter(trails.activity_indices.values()))
     start_act_idx = next(iter(activity_indices.keys()))
@@ -419,7 +427,7 @@ def _run_example_lca(package_path: Path, *, backend: str) -> Trails:
         attribute_to_roots=True,
         solver_mode="direct",
         inventory_backend=backend,
-        inventory_memory_budget=2**20,
+        inventory_memory_budget=memory_budget,
     )
     return trails
 
@@ -492,6 +500,32 @@ def test_factorized_lca_preserves_inventory_and_characterization() -> None:
     finally:
         eager.close()
         factorized.close()
+
+
+def test_auto_lca_selects_factorized_when_estimate_exceeds_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    package_path = (
+        Path(__file__).resolve().parents[1]
+        / "examples"
+        / "example data package"
+        / "datapackage.json"
+    )
+    monkeypatch.setattr(
+        lca_module,
+        "estimate_materialization_peak_bytes",
+        lambda *args, **kwargs: 2**21,
+    )
+    automatic = _run_example_lca(package_path, backend="auto")
+    try:
+        diagnostics = automatic.inventory_diagnostics
+        assert diagnostics["backend"] == "factorized"
+        selection = diagnostics["backend_selection"]
+        assert selection["requested"] == "auto"
+        assert selection["selected"] == "factorized"
+        assert selection["estimated_peak_bytes"] > selection["memory_budget"]
+    finally:
+        automatic.close()
 
 
 def test_coo_backend_raises_before_unsafe_finalize(example_trails: Trails) -> None:

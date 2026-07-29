@@ -838,7 +838,9 @@ def test_lca_root_direct_solver_uses_matrix_inventory_path(
             solver_mode="direct",
         )
         assert calls
-        assert all(matrix_shape[1] == root_shape[0] for matrix_shape, root_shape in calls)
+        assert all(
+            matrix_shape[1] == root_shape[0] for matrix_shape, root_shape in calls
+        )
     finally:
         trails.close()
 
@@ -869,8 +871,7 @@ def test_lca_iterative_nonconvergence_falls_back_to_direct(
     def fail_iterative_solver(*args: object, **kwargs: object) -> np.ndarray:
         calls["iterative"] += 1
         raise RuntimeError(
-            "GMRES failed to converge "
-            "(rhs_col=0, info=1, rtol=0.001, maxiter=300)"
+            "GMRES failed to converge " "(rhs_col=0, info=1, rtol=0.001, maxiter=300)"
         )
 
     def spy_direct_solver(*args: object, **kwargs: object) -> np.ndarray:
@@ -961,3 +962,64 @@ def test_direct_technosphere_cache_is_explicit(example_trails: Trails) -> None:
     assert cache[2005][0] is cached
     assert reused is cached
     assert uncached is not cached
+
+
+def test_auto_inventory_backend_selects_factorized_for_large_root_inventory(
+    example_trails: Trails,
+) -> None:
+    selected, diagnostics = lca_module._select_auto_inventory_backend(
+        example_trails,
+        requested_backend="auto",
+        store_inventory=True,
+        attribute_to_roots=True,
+        solver_mode="iterative",
+        root_demands_by_year={2005: {0: {0: 1.0}}},
+        inventory_memory_budget=1,
+    )
+    assert selected == "factorized"
+    assert diagnostics["selected"] == "factorized"
+    assert diagnostics["estimated_peak_bytes"] > diagnostics["memory_budget"]
+    assert (
+        diagnostics["effective_biosphere_rows"] >= diagnostics["average_biosphere_rows"]
+    )
+    assert diagnostics["reason"] == "estimated_inventory_exceeds_memory_budget"
+
+
+def test_auto_inventory_backend_keeps_small_or_ineligible_workflows(
+    example_trails: Trails,
+) -> None:
+    selected_small, small_diagnostics = lca_module._select_auto_inventory_backend(
+        example_trails,
+        requested_backend="auto",
+        store_inventory=True,
+        attribute_to_roots=True,
+        solver_mode="direct",
+        root_demands_by_year={2005: {0: {0: 1.0}}},
+        inventory_memory_budget=2**50,
+    )
+    assert selected_small == "auto"
+    assert small_diagnostics["reason"] == "small_or_dynamic_auto_inventory"
+
+    selected_nonroot, nonroot_diagnostics = lca_module._select_auto_inventory_backend(
+        example_trails,
+        requested_backend="auto",
+        store_inventory=True,
+        attribute_to_roots=False,
+        solver_mode="iterative",
+        root_demands_by_year={2005: {0: {0: 1.0}}},
+        inventory_memory_budget=1,
+    )
+    assert selected_nonroot == "auto"
+    assert nonroot_diagnostics["reason"] == "root_attribution_disabled"
+
+    selected_explicit, explicit_diagnostics = lca_module._select_auto_inventory_backend(
+        example_trails,
+        requested_backend="chunked",
+        store_inventory=True,
+        attribute_to_roots=True,
+        solver_mode="iterative",
+        root_demands_by_year={2005: {0: {0: 1.0}}},
+        inventory_memory_budget=1,
+    )
+    assert selected_explicit == "chunked"
+    assert explicit_diagnostics["reason"] == "explicit_backend"

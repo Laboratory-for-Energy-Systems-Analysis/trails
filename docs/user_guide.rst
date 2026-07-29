@@ -108,11 +108,13 @@ Constructor ``methods`` are optional defaults for ``lcia()``. Call-level
 methods override them. Adaptive routing methods are configured independently
 with ``adaptive_methods``.
 
-For large calculations, ``inventory_backend="auto"`` switches from an eager COO
-to disk-backed sparse Dask blocks before the estimated eager allocation exceeds
-``inventory_memory_budget`` (256 MiB by default). The public results remain
+For large root-attributed direct or iterative calculations,
+``inventory_backend="auto"`` selects factorized storage when the predicted
+eager allocation exceeds ``inventory_memory_budget`` (256 MiB by default).
+Small calculations remain eager COO; other large calculations dynamically
+promote to disk-backed sparse Dask blocks. The public results remain
 ``xarray.DataArray`` objects with the same dimensions and coordinates. TRAILS'
-FaIR, EDGES, and plotting helpers process these blocks sequentially.
+FaIR, EDGES, and plotting helpers process the lazy storage sequentially.
 
 Use ``inventory_backend="chunked"`` to force this representation or
 ``inventory_backend="coo"`` to request the legacy eager form; an unsafe eager
@@ -122,12 +124,13 @@ temporary store. Guarded ``materialize_inventory()`` and
 ``materialize_characterized_inventory()`` helpers are available when an eager
 COO is genuinely required.
 
-For root-attributed direct or iterative solves,
-``inventory_backend="factorized"`` writes annual activity-by-root supply
-matrices and keeps ordinary biosphere multiplication lazy. Ported temporal
-exchanges are stored as compact offset/weight kernels and applied lazily as
-well. Only matrix-sourced temporal exchanges and direct biosphere corrections
-use the explicit chunked sparse store.
+The automatically selected factorized backend writes annual activity-by-root
+supply matrices and keeps ordinary biosphere multiplication lazy. Ported
+temporal exchanges are stored as compact offset/weight kernels and applied
+lazily as well. Only matrix-sourced temporal exchanges and direct biosphere
+corrections use the explicit chunked sparse store. Set
+``inventory_backend="factorized"`` to force this backend regardless of the
+size estimate.
 
 Adaptive score-potential routing
 --------------------------------

@@ -556,7 +556,7 @@ def _run_supervisor(args: argparse.Namespace) -> int:
                     "inventory_backend_used": diagnostics.get("backend")
                     == (
                         "factorized"
-                        if args.inventory_backend == "factorized"
+                        if args.inventory_backend in {"auto", "factorized"}
                         else "chunked"
                     ),
                     "inventory_nonempty": (
