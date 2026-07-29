@@ -2382,7 +2382,16 @@ def plot_temporal_scores(
     :returns: Return value.
     :rtype: go.Figure | list[go.Figure]
     :raises ValueError: If an error occurs."""
-    if trails.characterized_inventory is not None:
+    if (
+        not show_flow_contributions
+        and getattr(trails, "scores", None) is not None
+    ):
+        # Scores are accumulated incrementally during LCA and are already
+        # reduced over elementary flows. Prefer this compact representation for
+        # ordinary plots; characterized_inventory remains available for flow
+        # contribution analysis and downstream coupling.
+        results_by_year = trails.scores
+    elif trails.characterized_inventory is not None:
         results_by_year: Union[
             Dict[int, Dict[str, Any]], Dict[str, Any], xr.DataArray
         ] = trails.characterized_inventory
@@ -2488,7 +2497,7 @@ def plot_temporal_scores(
         else:
             raise ValueError(
                 "Multiple static scores provided but plotting data has no "
-                "'method' dimension. Run trails.lca(..., store_inventory=True) "
+                "'method' dimension. Run trails.lci() and trails.lcia(...) "
                 "to retain per-method characterized inventory, or pass "
                 "method=... with a single static score."
             )
@@ -2978,18 +2987,22 @@ def _adaptive_sankey_year_depth_positions(
     labels: list[str],
     x_min: float,
     x_max: float,
+    max_depth: int | None = None,
+    min_year: int | None = None,
+    max_year: int | None = None,
 ) -> tuple[list[float], list[float]]:
     """Return fixed Sankey node positions with depth on x and year on y."""
     if not years:
         return [], []
 
-    min_year = min(years)
-    max_year = max(years)
-    max_depth = max(max(depths), 1)
+    min_year = min(int(min_year) if min_year is not None else min(years), min(years))
+    max_year = max(int(max_year) if max_year is not None else max(years), max(years))
+    depth_axis_max = max(int(max_depth or max(depths)), 1)
     year_span = max(max_year - min_year, 1)
     x_span = max(float(x_max) - float(x_min), 0.01)
     x_values = [
-        float(x_min) + (float(depth) / float(max_depth)) * x_span for depth in depths
+        float(x_min) + (float(depth) / float(depth_axis_max)) * x_span
+        for depth in depths
     ]
     y_centers = [(float(year) - float(min_year)) / float(year_span) for year in years]
 
@@ -3299,8 +3312,8 @@ def _adaptive_sankey_depth_density_elements(
     scale_max: float | None,
     x_min: float,
     x_max: float,
-    y0: float = -0.155,
-    y1: float = -0.045,
+    y0: float = -0.245,
+    y1: float = -0.140,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     max_depth = max(int(max_depth), 1)
     panel_height = max(float(y1) - float(y0), 0.01)
@@ -3348,11 +3361,11 @@ def _adaptive_sankey_depth_density_elements(
             "xref": "paper",
             "yref": "paper",
             "x": (float(x_min) + float(x_max)) / 2.0,
-            "y": float(y1) - 0.008,
+            "y": float(y1) + 0.014,
             "text": label,
             "showarrow": False,
             "xanchor": "center",
-            "yanchor": "top",
+            "yanchor": "bottom",
             "font": {"size": 10, "color": "#374151"},
         }
     ]
@@ -3423,9 +3436,9 @@ def _adaptive_sankey_legend_elements(
     if not entries:
         return [], []
 
-    x0 = 0.665
-    x1 = 0.985
-    y1 = 1.245
+    x0 = 0.615
+    x1 = 0.935
+    y1 = 1.305
     row_height = 0.022
     header_height = 0.044
     pad = 0.010
@@ -3510,9 +3523,12 @@ def plot_adaptive_sankey(
     height: int = 1100,
     show_time_density: bool = True,
     show_depth_density: bool = True,
+    depth_axis_max: int | None = None,
+    year_axis_min: int | None = None,
+    year_axis_max: int | None = None,
     node_score_rows: list[dict[str, Any]] | None = None,
     time_density_label: str = "score-potential density<br>over time",
-    depth_density_label: str = "score-potential density over depths",
+    depth_density_label: str = "score-potential density over depth",
     output_path: str | os.PathLike[str] | None = None,
     png_path: str | os.PathLike[str] | None = None,
     png_scale: int = 3,
@@ -3551,6 +3567,16 @@ def plot_adaptive_sankey(
     :type show_time_density: bool
     :param show_depth_density: Include the bottom depth density panel.
     :type show_depth_density: bool
+    :param depth_axis_max: Optional maximum depth shown on the fixed depth
+        axis. Use this to make multiple Sankey plots share the same depth
+        spacing even when they contain different maximum depths.
+    :type depth_axis_max: int | None
+    :param year_axis_min: Optional minimum calendar year shown on the fixed
+        year axis. The value is expanded when needed to include routed nodes.
+    :type year_axis_min: int | None
+    :param year_axis_max: Optional maximum calendar year shown on the fixed
+        year axis. The value is expanded when needed to include routed nodes.
+    :type year_axis_max: int | None
     :param node_score_rows: Optional rows with ``branch``, ``depth``, and
         ``node_score_abs`` keys for the bottom panel. If omitted, routed node
         score potentials are used.
@@ -3583,9 +3609,9 @@ def plot_adaptive_sankey(
         )
 
     sankey_x_min = 0.02
-    sankey_x_max = 0.80 if show_time_density else 0.96
-    density_x_min = 0.875
-    density_x_max = 0.985
+    sankey_x_max = 0.81 if show_time_density else 0.96
+    density_x_min = 0.835
+    density_x_max = 0.933
 
     all_edge_rows = _adaptive_sankey_edge_rows(trails, method=method)
     if not all_edge_rows:
@@ -3737,18 +3763,32 @@ def plot_adaptive_sankey(
     if not values:
         raise ValueError("No non-self routed graph links to plot.")
 
+    max_depth = max(max(depths), 1)
+    depth_axis_max = max(int(depth_axis_max or max_depth), max_depth, 1)
+    data_min_year = min(years)
+    data_max_year = max(years)
+    year_axis_min = min(
+        int(year_axis_min) if year_axis_min is not None else data_min_year,
+        data_min_year,
+    )
+    year_axis_max = max(
+        int(year_axis_max) if year_axis_max is not None else data_max_year,
+        data_max_year,
+    )
     x_values, y_values = _adaptive_sankey_year_depth_positions(
         years=years,
         depths=depths,
         labels=labels,
         x_min=sankey_x_min,
         x_max=sankey_x_max,
+        max_depth=depth_axis_max,
+        min_year=year_axis_min,
+        max_year=year_axis_max,
     )
-    min_year = min(years)
-    max_year = max(years)
-    max_depth = max(max(depths), 1)
+    min_year = int(year_axis_min)
+    max_year = int(year_axis_max)
     grid_shapes, grid_annotations = _adaptive_sankey_grid_elements(
-        max_depth=max_depth,
+        max_depth=depth_axis_max,
         min_year=min_year,
         max_year=max_year,
         x_min=sankey_x_min,
@@ -3786,14 +3826,15 @@ def plot_adaptive_sankey(
         ),
         default=0.0,
     )
-    depth_density_scale = max(
-        (
-            float(row.get("node_score_abs") or 0.0)
-            for row in node_score_rows
-            if str(row.get("branch") or "") in displayed_branches
-        ),
-        default=0.0,
-    )
+    branch_depth_scores_for_scale: dict[tuple[str, int], float] = defaultdict(float)
+    for row in node_score_rows:
+        branch = str(row.get("branch") or "")
+        if branch not in displayed_branches:
+            continue
+        branch_depth_scores_for_scale[
+            (branch, int(row.get("depth", -1)))
+        ] += float(row.get("node_score_abs") or 0.0)
+    depth_density_scale = max(branch_depth_scores_for_scale.values(), default=0.0)
 
     density_shapes: list[dict[str, Any]] = []
     density_annotations: list[dict[str, Any]] = []
@@ -3818,7 +3859,7 @@ def plot_adaptive_sankey(
                 node_score_rows,
                 branches=displayed_branches,
                 color_map=color_map,
-                max_depth=max_depth,
+                max_depth=depth_axis_max,
                 label=depth_density_label,
                 scale_max=depth_density_scale,
                 x_min=sankey_x_min,
@@ -4008,6 +4049,9 @@ def plot_adaptive_sankey(
             labels=branch_labels,
             x_min=sankey_x_min,
             x_max=sankey_x_max,
+            max_depth=depth_axis_max,
+            min_year=year_axis_min,
+            max_year=year_axis_max,
         )
         return go.Sankey(
             arrangement="fixed",
@@ -4073,7 +4117,7 @@ def plot_adaptive_sankey(
                     node_rows_by_branch.get(branch, []),
                     branches=[branch],
                     color_map=color_map,
-                    max_depth=max_depth,
+                    max_depth=depth_axis_max,
                     label=depth_density_label,
                     scale_max=depth_density_scale,
                     x_min=sankey_x_min,
@@ -4140,6 +4184,8 @@ def plot_adaptive_sankey(
                 default=0,
             )
         ),
+        "year_axis_min": int(year_axis_min),
+        "year_axis_max": int(year_axis_max),
     }
     fig.update_layout(
         title=dict(
@@ -4151,7 +4197,7 @@ def plot_adaptive_sankey(
         ),
         width=int(width),
         height=int(height),
-        margin=dict(l=85, r=30, t=260, b=140 if show_depth_density else 30),
+        margin=dict(l=78, r=22, t=205, b=150 if show_depth_density else 30),
         shapes=base_shapes + density_shapes + depth_density_shapes,
         annotations=base_annotations,
         font=dict(size=11),
@@ -4188,7 +4234,7 @@ def _node_scores_from_trails(trails: Trails) -> dict[tuple[int, int], float]:
         characterized = getattr(trails, "characterized_inventory", None)
         if characterized is None:
             raise ValueError(
-                "No scores available. Run lca(..., compute_score=True) or "
+                "No scores available. Run lcia(...) or "
                 "build characterized_inventory first."
             )
         return _node_scores_from_characterized_inventory(characterized)

@@ -1700,6 +1700,27 @@ def test_plot_temporal_scores_auto_trims_year_window() -> None:
     assert x[-1] == 2004
 
 
+def test_plot_temporal_scores_prefers_compact_scores_over_characterized_inventory() -> None:
+    trails = DummyTrailsScores()
+    # This deliberately lacks the dimensions required by the characterized
+    # inventory plotting path. Ordinary plots must use the independently
+    # accumulated score array when both results are present.
+    trails.characterized_inventory = xr.DataArray(
+        np.ones((1, 1)), dims=("method", "flow")
+    )
+
+    fig = plot_temporal_scores(
+        trails=trails,
+        year_range=None,
+        show_flow_contributions=False,
+        show_cumulative_axis=False,
+        legend_top_n=1,
+    )
+
+    assert fig is not None
+    assert len(fig.data) >= 1
+
+
 def test_plot_temporal_scores_stacked_separates_sign_groups() -> None:
     class DummyTrailsMixedSigns:
         def __init__(self) -> None:

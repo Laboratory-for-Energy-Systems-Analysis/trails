@@ -35,7 +35,8 @@ class StaticActivityScores:
     ``scores[m, y, a]`` is the static characterized score for one unit of the
     reference product of activity ``a`` in scenario year ``y`` using method
     ``m``. Values are used only as routing-screening estimates; the final
-    temporal inventory and impact scores are still computed by ``lca()``.
+    temporal inventory and impact scores are still computed by ``lci()`` and
+    ``lcia()``.
     """
 
     methods: tuple[str, ...]
@@ -281,7 +282,6 @@ def _compute_static_activity_scores(
     n_activities = int(trails.A.shape[1])
     scores = np.empty((n_methods, int(years.size), n_activities), dtype=np.float64)
 
-    direct_matrix_cache = {}
     for year_pos, year in enumerate(years):
         context = trails._get_scenario_context(int(year))
         if context is None:
@@ -290,7 +290,6 @@ def _compute_static_activity_scores(
         A_csc, _product_dict, _ref_cache = _build_direct_technosphere_for_year(
             trails=trails,
             year=int(scenario_year),
-            cache=direct_matrix_cache,
         )
         B_t = trails.B[int(t), :, :]
         direct_scores = np.vstack(

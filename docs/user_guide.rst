@@ -35,7 +35,6 @@ Loading TRAILS
     trails = Trails(
         package,
         interpolate_annual=True,
-        methods=[method],
         ei_version="3.11",
     )
 
@@ -45,7 +44,6 @@ Loading TRAILS
     #     interpolate_annual=True,
     #     interpolation_start_year_offset=-20,
     #     interpolation_end_year_offset=20,
-    #     methods=[method],
     #     ei_version="3.11",
     # )
 
@@ -78,13 +76,11 @@ workflow is to select an activity and store the index for repeated calls:
 Running temporal LCA
 --------------------
 
-The primary entry point is ``trails.lca.lca``. The usual workflow is to store
-regular LCIA methods and the LCIA data version on the ``Trails`` instance at
-initialization, then reuse those defaults during routing and scoring.
+The primary workflow follows bw2calc: build the routing graph, calculate one
+temporal inventory with ``lci()``, and characterize it with one or more
+``lcia()`` calls.
 
 .. code-block:: python
-
-    from trails import lca
 
     # Run temporal routing (builds the traversal graph).
     # By default this uses adaptive routing with a relative cutoff of 1e-4.
@@ -96,25 +92,21 @@ initialization, then reuse those defaults during routing and scoring.
         show_progress=True,
         debug=False,
         attribute_to_roots=True,
+        adaptive_methods=[method],
     )
 
-    # Run temporal LCA (stores results on the Trails instance)
-    lca(
-        trails=trails,
-        # defaults shown explicitly:
+    # Build and retain the uncharacterized temporal inventory
+    trails.lci(
         solver_mode="iterative",
         iterative_rtol=1e-3,
     )
 
-You can still override the constructor defaults in a specific call with
-``lca(trails, methods=[...], ei_version="...")`` or
-``temporal_routing(..., adaptive_methods=[...])``.
+    # Characterize without rerunning the linear systems
+    scores = trails.lcia(methods=[method])
 
-Temporal LCA results are stored on the Trails instance. Use ``trails.scores``
-for impact scores (when ``compute_score=True``). If you run
-``lca(..., store_inventory=True)``, TRAILS also stores ``trails.inventory``;
-with ``compute_score=True`` and ``store_inventory=True``, it also stores
-``trails.characterized_inventory``.
+Constructor ``methods`` are optional defaults for ``lcia()``. Call-level
+methods override them. Adaptive routing methods are configured independently
+with ``adaptive_methods``.
 
 For large calculations, ``inventory_backend="auto"`` switches from an eager COO
 to disk-backed sparse Dask blocks before the estimated eager allocation exceeds
@@ -129,6 +121,11 @@ backing directory. Otherwise, call ``trails.close()`` to remove the managed
 temporary store. Guarded ``materialize_inventory()`` and
 ``materialize_characterized_inventory()`` helpers are available when an eager
 COO is genuinely required.
+
+For root-attributed direct or iterative solves,
+``inventory_backend="factorized"`` writes annual activity-by-root supply
+matrices and keeps ordinary biosphere multiplication lazy. Only temporal and
+direct-biosphere corrections use the explicit chunked sparse store.
 
 Adaptive score-potential routing
 --------------------------------
@@ -148,10 +145,12 @@ when ``max_depth`` is omitted, TRAILS uses ``max_depth=None`` and
         amount=1.0,
         max_depth=None,
         min_amount=1e-18,
+        adaptive_methods=[method],
         adaptive_relative_score_cutoff=1e-4,
         adaptive_min_depth=1,
     )
-    lca(trails=trails)
+    trails.lci()
+    trails.lcia(methods=[method])
 
 The relative cutoff is multiplied by the functional unit's static score
 potential. In the example above, branches are stopped once their estimated
@@ -213,13 +212,12 @@ There are four common routing configurations:
 Important behavior:
 
 * Adaptive pruning only changes graph expansion. Stopped branches are stored as
-  frontier demands and still enter the year-wise matrix solve in ``lca()``.
+  frontier demands and still enter the year-wise matrix solve in ``lci()``.
 * Passing an integer ``max_depth`` without an adaptive cutoff selects
   fixed-depth routing. You can also combine an adaptive relative cutoff with a
   finite ``max_depth`` to keep a hard cap.
-* Adaptive routing uses ``Trails(..., methods=...)`` unless
-  ``adaptive_methods=...`` is provided explicitly. EDGES methods cannot
-  currently be used for adaptive screening.
+* Adaptive routing uses explicit regular ``adaptive_methods``. EDGES methods
+  cannot currently be used for adaptive screening.
 * Static activity scores are cached by default. Set
   ``adaptive_use_cache=False`` for tests or diagnostics that should recompute
   the screening intensities.
@@ -310,7 +308,7 @@ Temporal distributions
 ----------------------
 
 Temporal distributions control how exchanges are spread across impact years.
-In the main temporal workflow, ``temporal_routing`` and ``lca`` use temporal
+In the main temporal workflow, ``temporal_routing`` and ``lci`` use temporal
 exchange distributions by default:
 
 .. code-block:: python
@@ -319,10 +317,10 @@ exchange distributions by default:
         start_year=2030,
         start_act_idx=start_act_idx,
         min_amount=1e-18,
+        adaptive_methods=[method],
     )
-    lca(
-        trails=trails,
-    )
+    trails.lci()
+    trails.lcia(methods=[method])
 
 For a non-temporal baseline in a single year, use ``trails.static_lca(...)``.
 
@@ -376,9 +374,9 @@ The same helper is available on a ``Trails`` instance:
 Interpreting outputs
 --------------------
 
-Impact time series can be accessed from ``trails.scores`` (if computed). When
-``store_inventory=True``, you can also inspect ``trails.inventory`` and (if
-``compute_score=True``) ``trails.characterized_inventory``.
+Impact time series are available from ``trails.scores`` after ``lcia()``.
+``trails.inventory`` is available after ``lci()``, and regular LCIA also exposes
+``trails.characterized_inventory``.
 
 Troubleshooting and diagnostics
 -------------------------------
@@ -411,14 +409,10 @@ across all FaIR_ configurations as quantiles (2.5, 25, 50, 75, 97.5).
 
 .. code-block:: python
 
-    from trails import lca
     from trails.fair_rf import run_fair_delta_rf
 
     # Ensure an inventory with root attribution is available
-    lca(
-        trails=trails,
-        store_inventory=True,
-    )
+    trails.lci()
 
     rf = run_fair_delta_rf(
         trails,
@@ -436,7 +430,7 @@ The outputs are stored on:
 Notes:
 
 * ``run_fair_delta_rf`` requires ``trails.inventory`` with a
-  ``root activity`` dimension. Run ``lca(..., store_inventory=True)`` first.
+  ``root activity`` dimension. Run ``lci()`` first.
 * ``scenario`` must match a scenario label present in the emissions CSV used by
   ``run_fair_delta_rf``.
 * If ``config_name`` and ``config_names`` are omitted, TRAILS evaluates all

@@ -20,9 +20,9 @@ future years. Each frontier slice is solved with the corresponding
 :math:`A_t` and combined with :math:`B_t` to construct inventories for impact
 years.
 
-This traversal is performed by ``trails.temporal_routing(...)`` before running
-``trails.lca(...)``, which consumes the stored routing graph to build the
-time-resolved inventory and impact scores.
+This traversal is performed by ``trails.temporal_routing(...)``. ``trails.lci()``
+then consumes the routing graph to build one time-resolved inventory, and
+``trails.lcia(...)`` characterizes that inventory without repeating the solves.
 
 The final output is a mapping from impact year to characterized impact scores
 (plus attribution to first-level suppliers when available).
@@ -67,11 +67,9 @@ activity scores are cached using matrix and LCIA-data fingerprints so repeated
 adaptive runs over the same interpolated data package avoid recomputing the
 upfront screening intensities.
 
-In the recommended workflow, regular LCIA methods are configured once with
-``Trails(..., methods=[...], ei_version="...")``. Adaptive routing uses those
-methods when ``adaptive_methods`` is omitted, and ``lca(trails)`` reuses the
-same methods for final scoring. Call-level methods can still be supplied to
-override this default. EDGES methods are currently limited to final scoring and
+In the recommended workflow, regular screening methods are passed explicitly as
+``adaptive_methods``. Final regular or EDGES methods are supplied independently
+to ``lcia()``. EDGES methods are currently limited to final characterization and
 cannot provide adaptive routing potentials.
 
 Temporal exchange distributions
@@ -102,10 +100,10 @@ remains consistent across time horizons.
 Impact attribution across time
 ------------------------------
 
-The core LCA routine stores its outputs on the Trails instance. Use
-``trails.scores`` for impact time series (when compute_score=True) and
-``trails.inventory`` / ``trails.characterized_inventory`` for time-resolved
-inventories and attribution.
+``lci()`` stores the temporal inventory on ``trails.inventory``. ``lcia()``
+stores the current impact time series on ``trails.scores`` and regular methods
+also expose ``trails.characterized_inventory``. Multiple LCIA results are kept
+in ``trails.lcia_results``.
 
 Because impacts are booked in impact years, TRAILS provides a direct answer to
 questions such as:

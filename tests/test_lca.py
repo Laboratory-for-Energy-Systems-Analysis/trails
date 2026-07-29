@@ -798,6 +798,112 @@ def test_lca_direct_solver_matches_bw2calc_total(example_package: Package) -> No
     assert total_iterative == pytest.approx(total_bw, rel=1e-5, abs=1e-8)
 
 
+def test_lca_root_direct_solver_uses_matrix_inventory_path(
+    monkeypatch: pytest.MonkeyPatch,
+    example_package: Package,
+) -> None:
+    trails = Trails(example_package, interpolate_annual=False)
+    activity_indices = next(iter(trails.activity_indices.values()))
+    start_act_idx = next(iter(activity_indices.keys()))
+    trails.temporal_routing(
+        start_year=2005,
+        start_act_idx=start_act_idx,
+        max_depth=1,
+        min_amount=0.0,
+        show_progress=False,
+        attribute_to_roots=True,
+    )
+
+    calls: list[tuple[tuple[int, int], tuple[int, ...]]] = []
+    original = trails.accumulate_temporalized_biosphere_inventory_matrix
+
+    def spy_matrix_inventory(*args: object, **kwargs: object) -> None:
+        supply_matrix = np.asarray(kwargs["supply_matrix"])
+        roots = np.asarray(kwargs["root_activities"])
+        calls.append((supply_matrix.shape, roots.shape))
+        original(*args, **kwargs)
+
+    monkeypatch.setattr(
+        trails,
+        "accumulate_temporalized_biosphere_inventory_matrix",
+        spy_matrix_inventory,
+    )
+    try:
+        lca_module.lca(
+            trails=trails,
+            show_progress=False,
+            compute_score=False,
+            store_inventory=True,
+            attribute_to_roots=True,
+            solver_mode="direct",
+        )
+        assert calls
+        assert all(matrix_shape[1] == root_shape[0] for matrix_shape, root_shape in calls)
+    finally:
+        trails.close()
+
+
+def test_lca_iterative_nonconvergence_falls_back_to_direct(
+    monkeypatch: pytest.MonkeyPatch,
+    example_package: Package,
+) -> None:
+    """GMRES non-convergence should warn and retry with the direct solver."""
+    methods = get_lcia_method_names(ei_version="3.11")[:1]
+    trails = Trails(example_package, interpolate_annual=False)
+    activity_indices = next(iter(trails.activity_indices.values()))
+    start_act_idx = next(iter(activity_indices.keys()))
+
+    trails.temporal_routing(
+        start_year=2005,
+        start_act_idx=start_act_idx,
+        max_depth=1,
+        min_amount=0.0,
+        show_progress=False,
+        attribute_to_roots=False,
+        debug=False,
+    )
+
+    calls = {"iterative": 0, "direct": 0}
+    original_direct_solver = lca_module.solve_many_rhs_umfpack_factorized
+
+    def fail_iterative_solver(*args: object, **kwargs: object) -> np.ndarray:
+        calls["iterative"] += 1
+        raise RuntimeError(
+            "GMRES failed to converge "
+            "(rhs_col=0, info=1, rtol=0.001, maxiter=300)"
+        )
+
+    def spy_direct_solver(*args: object, **kwargs: object) -> np.ndarray:
+        calls["direct"] += 1
+        return original_direct_solver(*args, **kwargs)
+
+    monkeypatch.setattr(
+        lca_module,
+        "solve_many_rhs_jacobi_gmres",
+        fail_iterative_solver,
+    )
+    monkeypatch.setattr(
+        lca_module,
+        "solve_many_rhs_umfpack_factorized",
+        spy_direct_solver,
+    )
+
+    with pytest.warns(RuntimeWarning, match="retrying with the direct solver"):
+        lca_module.lca(
+            trails=trails,
+            methods=methods,
+            show_progress=False,
+            compute_score=True,
+            store_inventory=False,
+            attribute_to_roots=False,
+            solver_mode="iterative",
+        )
+
+    assert calls["iterative"] == 1
+    assert calls["direct"] >= 1
+    assert trails.scores is not None
+
+
 def test_lca_invalid_solver_mode_raises(example_trails: Trails) -> None:
     """Invalid solver mode should raise a clear error."""
     activity_indices = next(iter(example_trails.activity_indices.values()))
@@ -830,3 +936,28 @@ def test_lca_defaults_use_iterative_solver_mode() -> None:
     sig = inspect.signature(lca_module.lca)
     assert sig.parameters["solver_mode"].default == "iterative"
     assert sig.parameters["iterative_rtol"].default == 1e-3
+
+
+def test_direct_technosphere_cache_is_explicit(example_trails: Trails) -> None:
+    """One-pass callers should not retain annual CSC matrices implicitly."""
+    cache: dict = {}
+
+    uncached, _, _ = lca_module._build_direct_technosphere_for_year(
+        example_trails,
+        2005,
+    )
+    assert cache == {}
+
+    cached, _, _ = lca_module._build_direct_technosphere_for_year(
+        example_trails,
+        2005,
+        cache=cache,
+    )
+    reused, _, _ = lca_module._build_direct_technosphere_for_year(
+        example_trails,
+        2005,
+        cache=cache,
+    )
+    assert cache[2005][0] is cached
+    assert reused is cached
+    assert uncached is not cached

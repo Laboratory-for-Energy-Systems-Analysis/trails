@@ -7,7 +7,7 @@ import sparse
 import xarray as xr
 
 from .lcia import get_lcia_methods
-from .chunked_inventory import is_chunked_sparse
+from .chunked_inventory import is_chunked_sparse, iter_sparse_blocks
 
 if TYPE_CHECKING:
     from .trails import Trails
@@ -183,7 +183,7 @@ def build_characterized_inventory(
     :rtype: xr.DataArray
     :raises ValueError: If an error occurs."""
     if trails.inventory is None:
-        raise ValueError("Trails.inventory is empty; run LCA first.")
+        raise ValueError("Trails.inventory is empty; run lci() first.")
 
     cf = _build_cf_matrix_flowid_space(
         trails=trails,
@@ -204,9 +204,9 @@ def build_characterized_inventory(
                 "flow": inventory.coords["flow"],
             },
         )
-        characterized = inventory.expand_dims(
-            method=np.asarray(methods, dtype=object)
-        ) * cf_da
+        characterized = (
+            inventory.expand_dims(method=np.asarray(methods, dtype=object)) * cf_da
+        )
         dims = ["method", "activity", "flow", "year"]
         if "root activity" in inventory.dims:
             dims.append("root activity")
@@ -260,6 +260,154 @@ def build_characterized_inventory(
         coords=coords,
     )
     return trails.characterized_inventory
+
+
+def score_inventory_with_regular_methods(
+    trails: Trails,
+    methods: List[str],
+    char_cache: dict[tuple, np.ndarray],
+    *,
+    ei_version: str = "3.11",
+    show_progress: bool = True,
+) -> xr.DataArray:
+    """Incrementally reduce a finalized inventory with regular CF vectors."""
+    if trails.inventory is None:
+        raise ValueError("Regular LCIA requires a finalized Trails inventory.")
+    if not methods:
+        raise ValueError("methods must contain at least one regular LCIA method.")
+
+    cf = _build_cf_matrix_flowid_space(
+        trails=trails,
+        methods=methods,
+        ei_version=ei_version,
+        char_cache=char_cache,
+    )
+    inventory = trails.inventory.transpose(
+        "activity",
+        "flow",
+        "year",
+        *[
+            dim
+            for dim in trails.inventory.dims
+            if dim not in {"activity", "flow", "year"}
+        ],
+    )
+    has_root = "root activity" in inventory.dims
+    n_methods = len(methods)
+    n_activities = int(inventory.sizes["activity"])
+    n_years = int(inventory.sizes["year"])
+    n_roots = int(inventory.sizes["root activity"]) if has_root else 0
+    selected_flows = np.flatnonzero(np.any(cf != 0.0, axis=0)).astype(np.int64)
+
+    output_coords: list[np.ndarray] = []
+    output_data: list[np.ndarray] = []
+
+    def append_entries(
+        activities: np.ndarray,
+        flows: np.ndarray,
+        years: np.ndarray,
+        values: np.ndarray,
+        roots: np.ndarray | None,
+    ) -> None:
+        for method_idx in range(n_methods):
+            scored = values.astype(np.float64, copy=False) * cf[method_idx, flows]
+            keep = scored != 0.0
+            count = int(np.count_nonzero(keep))
+            if not count:
+                continue
+            axes: list[np.ndarray] = []
+            if n_methods > 1:
+                axes.append(np.full(count, method_idx, dtype=np.int64))
+            axes.extend([activities[keep], years[keep]])
+            if roots is not None:
+                axes.append(roots[keep])
+            output_coords.append(np.vstack(axes))
+            output_data.append(scored[keep])
+
+    builder = getattr(trails, "_inventory_builder", None)
+    if (
+        has_root
+        and builder is not None
+        and getattr(builder, "_finalized", False)
+        and hasattr(builder, "iter_entries_for_flows")
+    ):
+        for (
+            _year_block,
+            activities,
+            flows,
+            years,
+            roots,
+            values,
+        ) in builder.iter_entries_for_flows(
+            selected_flows,
+            show_progress=show_progress,
+            progress_desc="Regular LCIA inventory",
+        ):
+            append_entries(activities, flows, years, values, roots)
+    elif is_chunked_sparse(inventory.data):
+        selected_mask = np.zeros(int(inventory.sizes["flow"]), dtype=bool)
+        selected_mask[selected_flows] = True
+        for slices, block in iter_sparse_blocks(inventory.data, primary_axis=2):
+            coords = block.coords.astype(np.int64, copy=False)
+            activities = coords[0] + int(slices[0].start or 0)
+            flows = coords[1] + int(slices[1].start or 0)
+            years = coords[2] + int(slices[2].start or 0)
+            roots = coords[3] + int(slices[3].start or 0) if has_root else None
+            keep = selected_mask[flows]
+            if not np.any(keep):
+                continue
+            append_entries(
+                activities[keep],
+                flows[keep],
+                years[keep],
+                block.data[keep],
+                roots[keep] if roots is not None else None,
+            )
+    else:
+        data = inventory.data
+        if not isinstance(data, sparse.COO):
+            data = sparse.COO.from_numpy(np.asarray(data))
+        coords = data.coords.astype(np.int64, copy=False)
+        append_entries(
+            coords[0],
+            coords[1],
+            coords[2],
+            data.data,
+            coords[3] if has_root else None,
+        )
+
+    if has_root and n_methods > 1:
+        shape = (n_methods, n_activities, n_years, n_roots)
+        dims = ("method", "activity", "year", "root activity")
+    elif has_root:
+        shape = (n_activities, n_years, n_roots)
+        dims = ("activity", "year", "root activity")
+    elif n_methods > 1:
+        shape = (n_methods, n_activities, n_years)
+        dims = ("method", "activity", "year")
+    else:
+        shape = (n_activities, n_years)
+        dims = ("activity", "year")
+
+    coords_xr: dict[str, np.ndarray] = {
+        "activity": inventory.coords["activity"].values,
+        "year": inventory.coords["year"].values,
+    }
+    if n_methods > 1:
+        coords_xr["method"] = np.asarray(methods, dtype=object)
+    if has_root:
+        coords_xr["root activity"] = inventory.coords["root activity"].values
+
+    if output_coords:
+        scores_data = sparse.COO(
+            np.concatenate(output_coords, axis=1),
+            np.concatenate(output_data).astype(np.float64, copy=False),
+            shape=shape,
+        )
+    else:
+        scores_data = sparse.zeros(shape, dtype=np.float64)
+    trails.scores = xr.DataArray(scores_data, dims=dims, coords=coords_xr)
+    return trails.scores
 
 
 def get_cf_vector(

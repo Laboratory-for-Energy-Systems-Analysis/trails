@@ -96,7 +96,10 @@ def _resolve_lca_method_defaults(
     if methods is None and edges_methods is None:
         default_edges = getattr(trails, "default_edges_methods", None)
         default_methods = getattr(trails, "default_methods", None)
-        if default_edges:
+        default_backend = getattr(trails, "default_method_backend", "auto")
+        if default_methods and default_backend == "edges":
+            resolved_edges_methods = list(default_methods)
+        elif default_edges:
             resolved_edges_methods = list(default_edges)
         elif default_methods:
             resolved_methods = list(default_methods)
@@ -226,15 +229,20 @@ def _build_rhs_matrix_from_root_demands(
 def _build_direct_technosphere_for_year(
     trails: Trails,
     year: int,
-    cache: dict[
-        int, tuple[sp.csc_matrix, _IdentityProductMap, dict[int, tuple[int, float]]]
-    ],
+    cache: (
+        dict[
+            int,
+            tuple[sp.csc_matrix, _IdentityProductMap, dict[int, tuple[int, float]]],
+        ]
+        | None
+    ) = None,
 ) -> tuple[sp.csc_matrix, _IdentityProductMap, dict[int, tuple[int, float]]]:
     """Build (or fetch cached) direct technosphere matrix for one solve year."""
     y = int(year)
-    cached = cache.get(y)
-    if cached is not None:
-        return cached
+    if cache is not None:
+        cached = cache.get(y)
+        if cached is not None:
+            return cached
 
     context = trails._get_scenario_context(y)
     if context is None:
@@ -265,7 +273,8 @@ def _build_direct_technosphere_for_year(
         )
 
     result = (A_csc, _IdentityProductMap(A_csc.shape[0]), {})
-    cache[y] = result
+    if cache is not None:
+        cache[y] = result
     return result
 
 
@@ -474,7 +483,13 @@ def lca_static(
     :raises RuntimeError: If an error occurs."""
     if methods is None:
         default_methods = getattr(trails, "default_methods", None)
-        methods = list(default_methods) if default_methods else None
+        default_backend = getattr(trails, "default_method_backend", "auto")
+        if (
+            default_methods
+            and default_backend != "edges"
+            and all(isinstance(method, str) for method in default_methods)
+        ):
+            methods = list(default_methods)
     ei_version = _default_ei_version(trails, ei_version)
     if not methods:
         raise ValueError(
@@ -597,7 +612,9 @@ def lca(
     edges_strategies: list[str] | None = None,
     edges_reuse_cached_cfs: bool = True,
     inventory_workers: int | None = None,
-    inventory_backend: Literal["auto", "coo", "chunked"] = "auto",
+    inventory_backend: Literal[
+        "auto", "coo", "chunked", "factorized"
+    ] = "auto",
     inventory_memory_budget: int = DEFAULT_INVENTORY_MEMORY_BUDGET,
     inventory_store: str | Path | None = None,
 ) -> None:
@@ -633,7 +650,9 @@ def lca(
     :param ei_version: LCIA data version for regular methods. If omitted, uses
         ``Trails(..., ei_version=...)``.
     :type ei_version: str | None
-    :param solver_mode: Solver backend mode. Defaults to ``"iterative"``.
+    :param solver_mode: Solver backend mode. Defaults to ``"iterative"``. If the
+        iterative GMRES solver does not converge, ``lca()`` warns and falls back
+        to the direct solver for the rest of the call.
     :type solver_mode: Literal["bw2calc", "direct", "iterative"]
     :param iterative_rtol: Relative tolerance for iterative solves.
         Defaults to ``1e-3``.
@@ -667,7 +686,7 @@ def lca(
     :param inventory_backend: Inventory storage mode. ``"auto"`` preserves an
         eager COO for small calculations and switches to bounded disk-backed
         sparse blocks before an unsafe eager finalization.
-    :type inventory_backend: Literal["auto", "coo", "chunked"]
+    :type inventory_backend: Literal["auto", "coo", "chunked", "factorized"]
     :param inventory_memory_budget: Maximum estimated resident bytes used by
         inventory buffering, sorting, merging, and guarded materialization.
     :type inventory_memory_budget: int
@@ -697,6 +716,13 @@ def lca(
     if methods and edges_methods:
         raise ValueError("methods and edges_methods are mutually exclusive.")
 
+    if inventory_backend == "factorized":
+        if solver_mode not in {"direct", "iterative"}:
+            raise ValueError(
+                "inventory_backend='factorized' requires solver_mode='direct' "
+                "or 'iterative'"
+            )
+
     edge_mode = bool(edges_methods)
     store_inventory_effective = bool(store_inventory or (edge_mode and compute_score))
 
@@ -718,6 +744,10 @@ def lca(
             attribute_to_roots = bool(routing_attr_to_roots)
         else:
             attribute_to_roots = True
+    if inventory_backend == "factorized" and not attribute_to_roots:
+        raise ValueError(
+            "inventory_backend='factorized' requires attribute_to_roots=True"
+        )
 
     score_methods = (
         methods
@@ -899,18 +929,60 @@ def lca(
     if show_progress:
         pbar = tqdm(
             total=len(candidate_years),
-            desc="TRAILS LCA [1/5] Solve and accumulate years",
+            desc="TRAILS LCI [1/4] Solve and accumulate years",
             unit="year",
             leave=True,
         )
 
-    direct_matrix_cache: dict[
-        int, tuple[sp.csc_matrix, _IdentityProductMap, dict[int, tuple[int, float]]]
-    ] = {}
+    iterative_direct_fallback_active = False
     phase_seconds: dict[str, float] = {}
+    year_component_seconds = {
+        "solve_and_supply": 0.0,
+        "inventory_accumulation": 0.0,
+        "score_accumulation": 0.0,
+    }
     solve_phase_started = time.perf_counter()
 
+    def _solve_many_rhs_iterative_with_direct_fallback(
+        A_csc: sp.csc_matrix,
+        rhs_matrix: np.ndarray,
+        *,
+        solve_year: int,
+        cache: dict | None,
+    ) -> np.ndarray:
+        nonlocal iterative_direct_fallback_active
+
+        if not iterative_direct_fallback_active:
+            try:
+                return solve_many_rhs_jacobi_gmres(
+                    A_csc,
+                    rhs_matrix,
+                    rtol=float(iterative_rtol),
+                    atol=float(iterative_atol),
+                    restart=iterative_restart,
+                    maxiter=iterative_maxiter,
+                    use_guess=bool(iterative_use_guess),
+                    preconditioner_mode=iterative_preconditioner,
+                    ilu_drop_tol=float(iterative_ilu_drop_tol),
+                    ilu_fill_factor=float(iterative_ilu_fill_factor),
+                )
+            except RuntimeError as error:
+                if "GMRES failed to converge" not in str(error):
+                    raise
+                iterative_direct_fallback_active = True
+                warnings.warn(
+                    "Iterative GMRES solver failed to converge "
+                    f"for solve_year={solve_year}; retrying with the direct solver "
+                    "and using the direct solver for the remaining years in this "
+                    f"lca() call. Original error: {error}",
+                    RuntimeWarning,
+                    stacklevel=3,
+                )
+
+        return solve_many_rhs_umfpack_factorized(A_csc, rhs_matrix, cache=cache)
+
     for solve_year in candidate_years:
+        solve_and_supply_started = time.perf_counter()
         root_ids = None
         root_supply_matrix = None
 
@@ -925,17 +997,21 @@ def lca(
         activity_demand = {int(i): float(demand_vector[i]) for i in nonzero_indices}
         n_activities = int(trails.A.shape[1]) if trails.A is not None else 0
         supplies: list[tuple[Dict[int, float], int | None]] = []
-        need_supply_dicts = bool(store_inventory_effective) or (
-            bool(compute_score) and not edge_mode and not bool(attribute_to_roots)
-        )
         use_direct_solver = bool(solver_mode in {"direct", "iterative"})
         use_iterative_solver = bool(solver_mode == "iterative")
+        use_matrix_inventory = bool(
+            store_inventory_effective and attribute_to_roots and use_direct_solver
+        )
+        need_supply_dicts = bool(
+            store_inventory_effective and not use_matrix_inventory
+        ) or (
+            bool(compute_score) and not edge_mode and not bool(attribute_to_roots)
+        )
 
         if use_direct_solver:
             A_csc, product_dict, ref_prod_cache = _build_direct_technosphere_for_year(
                 trails=trails,
                 year=solve_year,
-                cache=direct_matrix_cache,
             )
             functional_unit_demand = _map_activity_demands_to_products_direct(
                 A_csc=A_csc,
@@ -967,17 +1043,13 @@ def lca(
 
                 if roots:
                     if use_iterative_solver:
-                        root_supply_matrix = solve_many_rhs_jacobi_gmres(
-                            A_csc,
-                            rhs_matrix,
-                            rtol=float(iterative_rtol),
-                            atol=float(iterative_atol),
-                            restart=iterative_restart,
-                            maxiter=iterative_maxiter,
-                            use_guess=bool(iterative_use_guess),
-                            preconditioner_mode=iterative_preconditioner,
-                            ilu_drop_tol=float(iterative_ilu_drop_tol),
-                            ilu_fill_factor=float(iterative_ilu_fill_factor),
+                        root_supply_matrix = (
+                            _solve_many_rhs_iterative_with_direct_fallback(
+                                A_csc,
+                                rhs_matrix,
+                                solve_year=solve_year,
+                                cache=umfpack_cache,
+                            )
                         )
                     else:
                         root_supply_matrix = solve_many_rhs_umfpack_factorized(
@@ -999,17 +1071,11 @@ def lca(
                 for prod_id, v in functional_unit_demand.items():
                     rhs[int(product_dict[int(prod_id)]), 0] += float(v)
                 if use_iterative_solver:
-                    X = solve_many_rhs_jacobi_gmres(
+                    X = _solve_many_rhs_iterative_with_direct_fallback(
                         A_csc,
                         rhs,
-                        rtol=float(iterative_rtol),
-                        atol=float(iterative_atol),
-                        restart=iterative_restart,
-                        maxiter=iterative_maxiter,
-                        use_guess=bool(iterative_use_guess),
-                        preconditioner_mode=iterative_preconditioner,
-                        ilu_drop_tol=float(iterative_ilu_drop_tol),
-                        ilu_fill_factor=float(iterative_ilu_fill_factor),
+                        solve_year=solve_year,
+                        cache=None,
                     )
                 else:
                     X = solve_many_rhs_umfpack_factorized(A_csc, rhs, cache=None)
@@ -1155,8 +1221,26 @@ def lca(
                     if supply_total:
                         supplies.append((supply_total, None))
 
+        year_component_seconds["solve_and_supply"] += (
+            time.perf_counter() - solve_and_supply_started
+        )
+
         # ---- Inventory ----
-        if supplies and store_inventory_effective:
+        inventory_accumulation_started = time.perf_counter()
+        if (
+            use_matrix_inventory
+            and root_supply_matrix is not None
+            and root_ids is not None
+        ):
+            trails.accumulate_temporalized_biosphere_inventory_matrix(
+                base_year=solve_year,
+                supply_matrix=root_supply_matrix,
+                root_activities=root_ids,
+                min_amount=float(min_amount),
+                use_temporal_distributions=True,
+                debug=debug,
+            )
+        elif supplies and store_inventory_effective:
             trails.accumulate_temporalized_biosphere_inventory_batch(
                 base_year=solve_year,
                 supplies=supplies,
@@ -1165,8 +1249,12 @@ def lca(
                 debug=debug,
                 workers=inventory_workers,
             )
+        year_component_seconds["inventory_accumulation"] += (
+            time.perf_counter() - inventory_accumulation_started
+        )
 
         # ---- Scores ----
+        score_accumulation_started = time.perf_counter()
         if compute_score and not edge_mode:
             assert cf_vectors is not None
             # Build dense supply matrix (n_acts, n_roots_this_year).
@@ -1204,20 +1292,26 @@ def lca(
                             debug=debug,
                             method_idx=method_idx,
                         )
+        year_component_seconds["score_accumulation"] += (
+            time.perf_counter() - score_accumulation_started
+        )
 
         if pbar is not None:
             pbar.update(1)
     if pbar is not None:
         pbar.close()
-    phase_seconds["solve_and_accumulate"] = (
-        time.perf_counter() - solve_phase_started
+    phase_seconds["solve_and_accumulate"] = time.perf_counter() - solve_phase_started
+    phase_seconds.update(year_component_seconds)
+    phase_seconds["solve_loop_other"] = max(
+        0.0,
+        phase_seconds["solve_and_accumulate"] - sum(year_component_seconds.values()),
     )
 
     injection_phase_started = time.perf_counter()
     injection_progress = (
         tqdm(
             total=1,
-            desc="TRAILS LCA [2/5] Process direct biosphere inputs",
+            desc="TRAILS LCI [2/4] Process direct biosphere inputs",
             unit="phase",
             leave=True,
         )
@@ -1313,7 +1407,6 @@ def lca(
     root_demands_by_year.clear()
     root_injected_by_year.clear()
     datapackage_cache.clear()
-    direct_matrix_cache.clear()
     if "injected_by_raw_year" in locals():
         injected_by_raw_year.clear()
     gc.collect()
@@ -1324,16 +1417,14 @@ def lca(
             trails.finalize_inventory(show_progress=True)
         else:
             trails.finalize_inventory()
-    phase_seconds["finalize_inventory"] = (
-        time.perf_counter() - inventory_phase_started
-    )
+    phase_seconds["finalize_inventory"] = time.perf_counter() - inventory_phase_started
 
     if compute_score:
         score_phase_started = time.perf_counter()
         score_progress = (
             tqdm(
                 total=1,
-                desc="TRAILS LCA [4/5] Finalize scores",
+                desc="TRAILS LCIA | Finalize scores",
                 unit="phase",
                 leave=True,
             )
@@ -1363,9 +1454,7 @@ def lca(
                 "compute_score=True but trails.scores is still None. "
                 "This indicates lca() did not finalize scores correctly."
             )
-        phase_seconds["finalize_scores"] = (
-            time.perf_counter() - score_phase_started
-        )
+        phase_seconds["finalize_scores"] = time.perf_counter() - score_phase_started
 
     # Characterized inventory is optional and only meaningful when scoring.
     if store_inventory_effective and compute_score and not edge_mode:
@@ -1373,7 +1462,7 @@ def lca(
         characterization_progress = (
             tqdm(
                 total=1,
-                desc="TRAILS LCA [5/5] Build characterized inventory",
+                desc="TRAILS LCIA | Build characterized inventory",
                 unit="phase",
                 leave=True,
             )
@@ -1393,7 +1482,81 @@ def lca(
     trails.lca_diagnostics = {
         "phase_seconds": phase_seconds,
         "inventory": dict(getattr(trails, "inventory_diagnostics", {})),
+        "years_solved": int(len(candidate_years)),
+        "seconds_per_year": (
+            float(phase_seconds["solve_and_accumulate"] / len(candidate_years))
+            if candidate_years
+            else 0.0
+        ),
+        "solver_mode": str(solver_mode),
     }
+
+
+def lci(
+    trails: Trails,
+    show_progress: bool = True,
+    attribute_to_roots: bool | None = None,
+    *,
+    solver_mode: Literal["bw2calc", "direct", "iterative"] = "iterative",
+    iterative_rtol: float = 1e-3,
+    iterative_atol: float = 0.0,
+    iterative_restart: int | None = 50,
+    iterative_maxiter: int | None = 300,
+    iterative_use_guess: bool = True,
+    iterative_preconditioner: Literal["jacobi", "ilu", "none"] = "jacobi",
+    iterative_ilu_drop_tol: float = 1e-4,
+    iterative_ilu_fill_factor: float = 10.0,
+    inventory_workers: int | None = None,
+    inventory_backend: Literal[
+        "auto", "coo", "chunked", "factorized"
+    ] = "auto",
+    inventory_memory_budget: int = DEFAULT_INVENTORY_MEMORY_BUDGET,
+    inventory_store: str | Path | None = None,
+) -> xr.DataArray:
+    """Build and retain an uncharacterized temporal inventory.
+
+    ``temporal_routing()`` must be called first. LCIA configuration is
+    intentionally absent: characterization belongs to a subsequent ``lcia()``
+    call and can therefore be repeated without another temporal solve.
+    """
+    started = time.perf_counter()
+    for builder in getattr(trails, "_inventory_builders", []):
+        builder.close()
+    trails._inventory_builders = []
+    trails._inventory_builder = None
+    lca(
+        trails,
+        methods=None,
+        edges_methods=None,
+        show_progress=show_progress,
+        attribute_to_roots=attribute_to_roots,
+        store_inventory=True,
+        compute_score=False,
+        solver_mode=solver_mode,
+        iterative_rtol=iterative_rtol,
+        iterative_atol=iterative_atol,
+        iterative_restart=iterative_restart,
+        iterative_maxiter=iterative_maxiter,
+        iterative_use_guess=iterative_use_guess,
+        iterative_preconditioner=iterative_preconditioner,
+        iterative_ilu_drop_tol=iterative_ilu_drop_tol,
+        iterative_ilu_fill_factor=iterative_ilu_fill_factor,
+        inventory_workers=inventory_workers,
+        inventory_backend=inventory_backend,
+        inventory_memory_budget=inventory_memory_budget,
+        inventory_store=inventory_store,
+    )
+    if trails.inventory is None:
+        raise RuntimeError("lci() completed without producing an inventory.")
+    diagnostics = dict(getattr(trails, "lca_diagnostics", {}))
+    diagnostics["total_seconds"] = float(time.perf_counter() - started)
+    trails.lci_diagnostics = diagnostics
+    trails.lcia_diagnostics = {}
+    trails.lcia_results = {}
+    trails.current_lcia_result = None
+    trails.scores = None
+    trails.characterized_inventory = None
+    return trails.inventory
 
 
 def build_temporal_sankey_tree(

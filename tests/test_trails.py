@@ -191,6 +191,50 @@ def test_accumulate_temporalized_biosphere_inventory(example_trails: Trails) -> 
     assert np.isclose(float(value), 30000.0)
 
 
+def test_matrix_inventory_matches_temporal_dictionary_batches(
+    example_package,
+) -> None:
+    """Matrix-native root accumulation must preserve temporal inventory values."""
+    legacy = Trails(example_package, interpolate_annual=False)
+    matrix_native = Trails(example_package, interpolate_annual=False)
+    try:
+        n_activities = int(legacy.A.shape[1])
+        root_ids = np.array([0, 1], dtype=np.int64)
+        supply_matrix = np.zeros((n_activities, root_ids.size), dtype=np.float64)
+        supply_matrix[0, 0] = 2.0
+        supply_matrix[2, 0] = 0.5
+        supply_matrix[1, 1] = 1.25
+        supply_matrix[2, 1] = 0.75
+        supplies = [
+            ({0: 2.0, 2: 0.5}, 0),
+            ({1: 1.25, 2: 0.75}, 1),
+        ]
+
+        legacy.reset_inventory(attribute_to_roots=True)
+        legacy.accumulate_temporalized_biosphere_inventory_batch(
+            base_year=2005,
+            supplies=supplies,
+            min_amount=1e6,
+            use_temporal_distributions=True,
+        )
+        expected = legacy.finalize_inventory().data
+
+        matrix_native.reset_inventory(attribute_to_roots=True)
+        matrix_native.accumulate_temporalized_biosphere_inventory_matrix(
+            base_year=2005,
+            supply_matrix=supply_matrix,
+            root_activities=root_ids,
+            min_amount=1e6,
+            use_temporal_distributions=True,
+        )
+        actual = matrix_native.finalize_inventory().data
+
+        assert np.allclose(actual.todense(), expected.todense())
+    finally:
+        legacy.close()
+        matrix_native.close()
+
+
 def test_reset_inventory_uses_inventory_offset_bounds(example_trails: Trails) -> None:
     """Verify inventory year axis uses both technosphere and biosphere offsets."""
     min_inv, max_inv = example_trails._inventory_offset_bounds()

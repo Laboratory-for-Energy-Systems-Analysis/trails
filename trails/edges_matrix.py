@@ -239,15 +239,66 @@ def _hashable_metadata(value: Any) -> Any:
     return value
 
 
+_SIGNATURE_CONTROL_FIELDS = {"matrix", "operator", "weight", "position"}
+
+
+def _method_signature_fields(
+    method: Any,
+    raw_cfs_data: Any = None,
+) -> tuple[frozenset[str], frozenset[str]] | None:
+    """Return metadata fields that can affect matching for an EDGES method."""
+    exchanges = method.get("exchanges") if isinstance(method, Mapping) else None
+    if exchanges is None:
+        exchanges = raw_cfs_data
+    if not isinstance(exchanges, list) or not exchanges:
+        return None
+    supplier_fields: set[str] = set()
+    consumer_fields: set[str] = set()
+    for exchange in exchanges:
+        if not isinstance(exchange, Mapping):
+            continue
+        supplier_fields.update(
+            str(key)
+            for key in (exchange.get("supplier") or {})
+            if str(key) not in _SIGNATURE_CONTROL_FIELDS
+        )
+        consumer_fields.update(
+            str(key)
+            for key in (exchange.get("consumer") or {})
+            if str(key) not in _SIGNATURE_CONTROL_FIELDS
+        )
+    if not supplier_fields and not consumer_fields:
+        return None
+    return frozenset(supplier_fields), frozenset(consumer_fields)
+
+
+def _project_metadata_signature(
+    metadata: Mapping[str, Any],
+    fields: frozenset[str] | None,
+) -> Any:
+    if fields is None:
+        return _hashable_metadata(metadata)
+    return tuple(
+        (field, _hashable_metadata(metadata.get(field))) for field in sorted(fields)
+    )
+
+
 def _edge_signature(
     edge: tuple[int, int],
     biosphere_lookup: Mapping[int, Mapping[str, Any]],
     technosphere_lookup: Mapping[int, Mapping[str, Any]],
+    signature_fields: tuple[frozenset[str], frozenset[str]] | None = None,
 ) -> tuple[Any, Any]:
     supplier, consumer = edge
+    supplier_fields = signature_fields[0] if signature_fields is not None else None
+    consumer_fields = signature_fields[1] if signature_fields is not None else None
     return (
-        _hashable_metadata(biosphere_lookup.get(int(supplier), {})),
-        _hashable_metadata(technosphere_lookup.get(int(consumer), {})),
+        _project_metadata_signature(
+            biosphere_lookup.get(int(supplier), {}), supplier_fields
+        ),
+        _project_metadata_signature(
+            technosphere_lookup.get(int(consumer), {}), consumer_fields
+        ),
     )
 
 
@@ -256,6 +307,7 @@ def _cache_cf_entries_by_signature(
     entries: list[Mapping[str, Any]],
     biosphere_lookup: Mapping[int, Mapping[str, Any]],
     technosphere_lookup: Mapping[int, Mapping[str, Any]],
+    signature_fields: tuple[frozenset[str], frozenset[str]] | None = None,
 ) -> set[tuple[int, int]]:
     entries_by_signature = cache.setdefault("entries_by_signature", {})
     templates_by_edge: dict[tuple[int, int], list[dict[str, Any]]] = {}
@@ -271,7 +323,12 @@ def _cache_cf_entries_by_signature(
             processed.add(edge)
 
     for edge, templates in templates_by_edge.items():
-        signature = _edge_signature(edge, biosphere_lookup, technosphere_lookup)
+        signature = _edge_signature(
+            edge,
+            biosphere_lookup,
+            technosphere_lookup,
+            signature_fields,
+        )
         entries_by_signature[signature] = templates
     return processed
 
@@ -286,11 +343,20 @@ def _evaluate_edges_mapping_for_year(
 ) -> sp.csr_matrix:
     """Ask EDGES to evaluate matched CF entries for one inventory year."""
     combined_entries: list[dict[str, Any]] = []
+    grouped_templates: dict[int, dict[str, Any]] = {}
+    grouped_positions: dict[int, list[tuple[int, int]]] = {}
     for edge, entries in cached_entries_by_edge.items():
         for entry in entries:
-            restored = deepcopy(dict(entry))
-            restored["positions"] = (edge,)
-            combined_entries.append(restored)
+            template_id = id(entry)
+            if template_id not in grouped_templates:
+                grouped_templates[template_id] = dict(entry)
+                grouped_positions[template_id] = []
+            grouped_positions[template_id].append(edge)
+
+    for template_id, template in grouped_templates.items():
+        restored = deepcopy(template)
+        restored["positions"] = tuple(grouped_positions[template_id])
+        combined_entries.append(restored)
 
     combined_entries.extend(deepcopy(list(mapped_entries)))
     edge_lca.cfs_mapping = combined_entries
@@ -334,8 +400,8 @@ def _ensure_edges_available() -> type:
     except ImportError as exc:  # pragma: no cover - depends on optional package
         raise ImportError(
             "EDGES methods require the optional 'edges' package. Install EDGES "
-            "and its solver dependencies before calling trails.lca(..., "
-            "edges_methods=...)."
+            "and its solver dependencies before calling trails.lcia(..., "
+            "method_backend='edges')."
         ) from exc
     return EdgeLCIA
 
@@ -370,6 +436,7 @@ def _build_edges_characterization_matrices_for_year(
     biosphere_edges: set[tuple[int, int]] | None = None,
     mapping_caches: list[dict[str, Any]] | None = None,
     progress: Any | None = None,
+    progress_update: bool = True,
     suppress_edges_output: bool = True,
 ) -> list[sp.csr_matrix]:
     """Build one EDGES CF matrix per method for a Trails inventory year.
@@ -435,35 +502,6 @@ def _build_edges_characterization_matrices_for_year(
 
     planes: list[sp.csr_matrix] = []
     for method_idx, method in enumerate(methods):
-        mapping_cache = (
-            mapping_caches[method_idx]
-            if mapping_caches is not None and method_idx < len(mapping_caches)
-            else None
-        )
-        cached_entries_by_edge: dict[tuple[int, int], list[Mapping[str, Any]]] = {}
-        edges_to_map = set(edge_pairs)
-        if mapping_cache is not None:
-            entries_by_signature = mapping_cache.setdefault("entries_by_signature", {})
-            miss_signatures = mapping_cache.setdefault("miss_signatures", set())
-            edges_to_map = set()
-            for edge in edge_pairs:
-                signature = _edge_signature(
-                    edge,
-                    biosphere_lookup,
-                    technosphere_lookup,
-                )
-                if signature in entries_by_signature:
-                    cached_entries_by_edge[edge] = entries_by_signature[signature]
-                elif signature in miss_signatures:
-                    continue
-                else:
-                    edges_to_map.add(edge)
-
-        if progress is not None:
-            progress.set_postfix_str(
-                f"year={inventory_year}, method={method_idx + 1}/{len(methods)}, "
-                f"edges={len(edge_pairs)}, new={len(edges_to_map)}"
-            )
         edge_lca = EdgeLCIA(
             demand={},
             method=method,
@@ -476,6 +514,44 @@ def _build_edges_characterization_matrices_for_year(
                 "Trails currently supports EDGES methods whose supplier matrix "
                 "is only 'biosphere'. Technosphere-supplier and mixed EDGES "
                 "methods need technosphere edge inventory support."
+            )
+
+        mapping_cache = (
+            mapping_caches[method_idx]
+            if mapping_caches is not None and method_idx < len(mapping_caches)
+            else None
+        )
+        signature_fields = _method_signature_fields(
+            method,
+            raw_cfs_data=getattr(edge_lca, "raw_cfs_data", None),
+        )
+        cached_entries_by_edge: dict[tuple[int, int], list[Mapping[str, Any]]] = {}
+        edges_to_map = set(edge_pairs)
+        edges_by_signature: dict[tuple[Any, Any], list[tuple[int, int]]] = {}
+        if mapping_cache is not None:
+            entries_by_signature = mapping_cache.setdefault("entries_by_signature", {})
+            miss_signatures = mapping_cache.setdefault("miss_signatures", set())
+            representatives_to_map: dict[tuple[Any, Any], tuple[int, int]] = {}
+            for edge in sorted(edge_pairs):
+                signature = _edge_signature(
+                    edge,
+                    biosphere_lookup,
+                    technosphere_lookup,
+                    signature_fields,
+                )
+                edges_by_signature.setdefault(signature, []).append(edge)
+                if signature in entries_by_signature:
+                    cached_entries_by_edge[edge] = entries_by_signature[signature]
+                elif signature in miss_signatures:
+                    continue
+                else:
+                    representatives_to_map.setdefault(signature, edge)
+            edges_to_map = set(representatives_to_map.values())
+
+        if progress is not None:
+            progress.set_postfix_str(
+                f"year={inventory_year}, method={method_idx + 1}/{len(methods)}, "
+                f"edges={len(edge_pairs)}, new signatures={len(edges_to_map)}"
             )
 
         edge_lca.biosphere_edges = edges_to_map
@@ -507,6 +583,7 @@ def _build_edges_characterization_matrices_for_year(
                         new_entries,
                         biosphere_lookup,
                         technosphere_lookup,
+                        signature_fields,
                     )
                     miss_signatures = mapping_cache.setdefault("miss_signatures", set())
                     for edge in edges_to_map - processed_edges:
@@ -515,16 +592,30 @@ def _build_edges_characterization_matrices_for_year(
                                 edge,
                                 biosphere_lookup,
                                 technosphere_lookup,
+                                signature_fields,
                             )
                         )
+
+            mapped_entries = edge_lca.cfs_mapping
+            if mapping_cache is not None:
+                entries_by_signature = mapping_cache.setdefault(
+                    "entries_by_signature", {}
+                )
+                for signature, signature_edges in edges_by_signature.items():
+                    templates = entries_by_signature.get(signature)
+                    if templates is None:
+                        continue
+                    for edge in signature_edges:
+                        cached_entries_by_edge[edge] = templates
+                mapped_entries = []
             matrix = _evaluate_edges_mapping_for_year(
                 edge_lca,
                 year=inventory_year,
                 shape=biosphere_inventory.shape,
                 cached_entries_by_edge=cached_entries_by_edge,
-                mapped_entries=edge_lca.cfs_mapping,
+                mapped_entries=mapped_entries,
             )
-        if progress is not None:
+        if progress is not None and progress_update:
             progress.update(1)
 
         if matrix.shape != biosphere_inventory.shape:
@@ -581,9 +672,7 @@ def _method_labels(methods: list[Any]) -> np.ndarray:
     return np.asarray(labels, dtype=object)
 
 
-def _eligible_biosphere_flow_ids(
-    trails: Any, methods: list[Any]
-) -> np.ndarray | None:
+def _eligible_biosphere_flow_ids(trails: Any, methods: list[Any]) -> np.ndarray | None:
     """Return supplier-flow IDs declared by mapping-based EDGES methods."""
     supplier_names: set[str] = set()
     saw_mapping = False
@@ -629,6 +718,24 @@ def _score_chunked_inventory_with_edges(
     years = np.asarray(inv.coords["year"].values, dtype=int)
     dtype = np.dtype(getattr(trails, "value_dtype", np.float64))
     eligible_flows = _eligible_biosphere_flow_ids(trails, methods)
+    builder = getattr(trails, "_inventory_builder", None)
+    if (
+        eligible_flows is not None
+        and builder is not None
+        and getattr(builder, "_finalized", False)
+        and hasattr(builder, "iter_entries_for_flows")
+    ):
+        return _score_finalized_builder_with_edges(
+            trails,
+            inv,
+            methods,
+            builder=builder,
+            eligible_flows=eligible_flows,
+            additional_topologies=additional_topologies,
+            strategies=strategies,
+            reuse_cached_cfs=reuse_cached_cfs,
+            show_progress=show_progress,
+        )
 
     year_indices_seen: set[int] = set()
     edges_by_year: dict[int, set[tuple[int, int]]] = {}
@@ -675,17 +782,19 @@ def _score_chunked_inventory_with_edges(
         else nullcontext()
     )
 
-    current_year: int | None = None
-    matrices: list[sp.csr_matrix] | None = None
+    current_year_chunk_start: int | None = None
+    matrices_by_year: dict[int, list[sp.csr_matrix]] = {}
     with progress_context as progress:
         for slices, block in iter_sparse_blocks(data, primary_axis=2):
+            year_chunk_start = int(slices[2].start or 0)
+            if current_year_chunk_start != year_chunk_start:
+                matrices_by_year.clear()
+                current_year_chunk_start = year_chunk_start
             coords = block.coords.astype(np.int64, copy=False)
             activities = coords[0] + int(slices[0].start or 0)
             flows = coords[1] + int(slices[1].start or 0)
             year_indices = coords[2] + int(slices[2].start or 0)
-            roots = (
-                coords[3] + int(slices[3].start or 0) if has_root else None
-            )
+            roots = coords[3] + int(slices[3].start or 0) if has_root else None
             values = block.data.astype(dtype, copy=False)
             if eligible_flows is not None:
                 eligible = np.isin(flows, eligible_flows)
@@ -701,7 +810,8 @@ def _score_chunked_inventory_with_edges(
             for year_idx in np.unique(year_indices):
                 year_idx_i = int(year_idx)
                 inventory_year = int(years[year_idx_i])
-                if current_year != inventory_year:
+                matrices = matrices_by_year.get(inventory_year)
+                if matrices is None:
                     matrices = _build_edges_characterization_matrices_for_year(
                         trails,
                         methods,
@@ -713,8 +823,7 @@ def _score_chunked_inventory_with_edges(
                         progress=progress,
                         suppress_edges_output=True,
                     )
-                    current_year = inventory_year
-                assert matrices is not None
+                    matrices_by_year[inventory_year] = matrices
                 mask = year_indices == year_idx_i
                 act_group = activities[mask]
                 flow_group = flows[mask]
@@ -800,6 +909,182 @@ def _score_chunked_inventory_with_edges(
             np.concatenate(output_coords, axis=1),
             np.concatenate(output_data).astype(dtype, copy=False),
             shape=shape,
+        )
+    else:
+        arr = sparse.zeros(shape, dtype=dtype)
+    scores = xr.DataArray(arr, dims=dims, coords=coords_xr)
+    trails.scores = scores
+    return scores
+
+
+def _score_finalized_builder_with_edges(
+    trails: Any,
+    inv: xr.DataArray,
+    methods: list[Any],
+    *,
+    builder: Any,
+    eligible_flows: np.ndarray,
+    additional_topologies: dict[str, Any] | None,
+    strategies: list[str] | None,
+    reuse_cached_cfs: bool,
+    show_progress: bool,
+) -> xr.DataArray:
+    """Score selected finalized runs in one bounded, year-ordered pass."""
+    n_methods = len(methods)
+    n_activities = int(inv.sizes["activity"])
+    n_years = int(inv.sizes["year"])
+    n_roots = int(inv.sizes["root activity"])
+    years = np.asarray(inv.coords["year"].values, dtype=int)
+    dtype = np.dtype(getattr(trails, "value_dtype", np.float64))
+
+    if n_methods > 1:
+        shape = (n_methods, n_activities, n_years, n_roots)
+        dims = ("method", "activity", "year", "root activity")
+        coords_xr = {
+            "method": _method_labels(methods),
+            "activity": inv.coords["activity"].values,
+            "year": years,
+            "root activity": inv.coords["root activity"].values,
+        }
+    else:
+        shape = (n_activities, n_years, n_roots)
+        dims = ("activity", "year", "root activity")
+        coords_xr = {
+            "activity": inv.coords["activity"].values,
+            "year": years,
+            "root activity": inv.coords["root activity"].values,
+        }
+
+    mapping_caches: list[dict[str, Any]] | None = (
+        [{} for _method in methods] if reuse_cached_cfs else None
+    )
+    output_coords: list[np.ndarray] = []
+    output_data: list[np.ndarray] = []
+
+    progress_context = (
+        tqdm(
+            total=int(getattr(builder, "nnz", 0)),
+            desc="EDGES LCIA",
+            unit="entry",
+            unit_scale=True,
+            leave=True,
+        )
+        if show_progress
+        else nullcontext()
+    )
+
+    def score_year_block(
+        parts: list[tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]],
+        progress: Any | None,
+    ) -> None:
+        if not parts:
+            return
+        activities = np.concatenate([part[0] for part in parts])
+        flows = np.concatenate([part[1] for part in parts])
+        year_indices = np.concatenate([part[2] for part in parts])
+        roots = np.concatenate([part[3] for part in parts])
+        values = np.concatenate([part[4] for part in parts]).astype(dtype, copy=False)
+        block_coords: list[np.ndarray] = []
+        block_data: list[np.ndarray] = []
+
+        for year_idx in np.unique(year_indices):
+            year_idx_i = int(year_idx)
+            mask = year_indices == year_idx_i
+            act_group = activities[mask]
+            flow_group = flows[mask]
+            value_group = values[mask]
+            root_group = roots[mask]
+            pair_ids = np.unique(
+                flow_group.astype(np.int64, copy=False) * n_activities
+                + act_group.astype(np.int64, copy=False)
+            )
+            biosphere_edges = {
+                (int(pair_id // n_activities), int(pair_id % n_activities))
+                for pair_id in pair_ids
+            }
+            inventory_year = int(years[year_idx_i])
+            matrices = _build_edges_characterization_matrices_for_year(
+                trails,
+                methods,
+                year=inventory_year,
+                additional_topologies=additional_topologies,
+                strategies=strategies,
+                biosphere_edges=biosphere_edges,
+                mapping_caches=mapping_caches,
+                progress=progress,
+                progress_update=False,
+                suppress_edges_output=True,
+            )
+            for method_idx, matrix in enumerate(matrices):
+                cf_values = _lookup_sparse_values(matrix, flow_group, act_group)
+                scored = value_group * cf_values.astype(value_group.dtype, copy=False)
+                keep = scored != 0.0
+                count = int(np.count_nonzero(keep))
+                if not count:
+                    continue
+                if n_methods > 1:
+                    coords = np.vstack(
+                        [
+                            np.full(count, method_idx, dtype=np.int64),
+                            act_group[keep],
+                            np.full(count, year_idx_i, dtype=np.int64),
+                            root_group[keep],
+                        ]
+                    )
+                else:
+                    coords = np.vstack(
+                        [
+                            act_group[keep],
+                            np.full(count, year_idx_i, dtype=np.int64),
+                            root_group[keep],
+                        ]
+                    )
+                block_coords.append(coords)
+                block_data.append(scored[keep])
+
+        if block_coords:
+            canonical = sparse.COO(
+                np.concatenate(block_coords, axis=1),
+                np.concatenate(block_data).astype(dtype, copy=False),
+                shape=shape,
+            )
+            if canonical.nnz:
+                output_coords.append(canonical.coords.copy())
+                output_data.append(canonical.data.copy())
+
+    current_year_block: int | None = None
+    year_block_parts: list[
+        tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]
+    ] = []
+    with progress_context as progress:
+        for (
+            year_block,
+            activities,
+            flows,
+            year_indices,
+            roots,
+            values,
+        ) in builder.iter_entries_for_flows(
+            eligible_flows,
+            show_progress=False,
+            progress=progress,
+        ):
+            if current_year_block is None:
+                current_year_block = int(year_block)
+            elif int(year_block) != current_year_block:
+                score_year_block(year_block_parts, progress)
+                year_block_parts.clear()
+                current_year_block = int(year_block)
+            year_block_parts.append((activities, flows, year_indices, roots, values))
+        score_year_block(year_block_parts, progress)
+
+    if output_coords:
+        arr = sparse.COO(
+            np.concatenate(output_coords, axis=1),
+            np.concatenate(output_data).astype(dtype, copy=False),
+            shape=shape,
+            has_duplicates=False,
+            sorted=False,
         )
     else:
         arr = sparse.zeros(shape, dtype=dtype)

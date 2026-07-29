@@ -6,8 +6,8 @@ import os
 from typing import Any, Dict, List, Optional, Callable
 import importlib
 import importlib.util
+import warnings
 from collections import defaultdict, deque
-from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import numpy as np
@@ -39,6 +39,7 @@ from .chunked_inventory import (
     estimate_materialization_peak_bytes,
     is_chunked_sparse,
 )
+from .factorized_inventory import FactorizedInventoryBuilder
 
 import logging
 
@@ -109,10 +110,10 @@ class Trails:
 
     ``Trails`` loads 3D sparse matrices from a Frictionless data package, can
     interpolate scenario slices to annual resolution, and stores optional
-    default LCIA configuration. Constructor ``methods`` are regular LCIA method
-    names used by ``lca()``, ``static_lca()``, and adaptive routing unless a
-    call provides explicit methods. Constructor ``edges_methods`` are used only
-    for final EDGES scoring in ``lca()``.
+    default LCIA configuration. The recommended workflow is
+    ``temporal_routing()``, ``lci()``, then one or more ``lcia()`` calls.
+    Constructor ``methods`` are optional characterization defaults; routing
+    screening methods are configured independently.
 
     Dimensions: ``A`` is ``(scenario, activity, product)`` and ``B`` is
     ``(scenario, activity, biosphere_flow)``.
@@ -127,7 +128,8 @@ class Trails:
         interpolation_end_year_offset: int = 1,
         value_dtype: np.dtype = np.float32,
         index_dtype: np.dtype = np.int32,
-        methods: list[str] | None = None,
+        methods: list[Any] | None = None,
+        method_backend: str = "auto",
         edges_methods: list[Any] | None = None,
         ei_version: str = "3.11",
         debug: bool = False,
@@ -149,12 +151,15 @@ class Trails:
         :type value_dtype: np.dtype
         :param index_dtype: Sparse matrix coordinate dtype.
         :type index_dtype: np.dtype
-        :param methods: Default regular LCIA methods. These are used by
-            ``lca()``, ``static_lca()``, and adaptive routing when those calls do
-            not provide explicit methods.
-        :type methods: list[str] | None
-        :param edges_methods: Default EDGES methods for ``lca()``. These are
-            used only for final EDGES scoring, not for adaptive routing.
+        :param methods: Optional default regular or EDGES methods for
+            ``lcia()``. Methods can instead be supplied to each ``lcia()`` call.
+        :type methods: list[Any] | None
+        :param method_backend: Default characterization backend. ``"auto"``
+            infers mapping-based EDGES methods and treats string names as
+            regular methods.
+        :type method_backend: str
+        :param edges_methods: Deprecated alias for ``methods`` with
+            ``method_backend="edges"``.
         :type edges_methods: list[Any] | None
         :param ei_version: Default ecoinvent LCIA data version for regular
             methods and adaptive routing.
@@ -165,11 +170,28 @@ class Trails:
         self.value_dtype = value_dtype
         self.index_dtype = index_dtype
         self.debug = debug
+        if method_backend not in {"auto", "regular", "edges"}:
+            raise ValueError(
+                "method_backend must be one of {'auto', 'regular', 'edges'}"
+            )
+        if methods and edges_methods:
+            raise ValueError("methods and edges_methods are mutually exclusive.")
+        if edges_methods:
+            warnings.warn(
+                "Trails(..., edges_methods=...) is deprecated; pass the EDGES "
+                "method through methods=... with method_backend='edges'.",
+                FutureWarning,
+                stacklevel=2,
+            )
+            methods = list(edges_methods)
+            method_backend = "edges"
         self.methods = list(methods) if methods else None
+        self.method_backend = str(method_backend)
         self.edges_methods = list(edges_methods) if edges_methods else None
         self.ei_version = str(ei_version)
         self.default_methods = self.methods
         self.default_edges_methods = self.edges_methods
+        self.default_method_backend = self.method_backend
         self.default_ei_version = self.ei_version
         self.interpolation_start_year_offset = int(interpolation_start_year_offset)
         self.interpolation_end_year_offset = int(interpolation_end_year_offset)
@@ -372,10 +394,18 @@ class Trails:
         self._inventory_backend_requested = "coo"
         self._inventory_memory_budget = DEFAULT_INVENTORY_MEMORY_BUDGET
         self._inventory_store: str | Path | None = None
-        self._inventory_builder: ChunkedInventoryBuilder | None = None
-        self._inventory_builders: list[ChunkedInventoryBuilder] = []
+        self._inventory_builder: (
+            ChunkedInventoryBuilder | FactorizedInventoryBuilder | None
+        ) = None
+        self._inventory_builders: list[
+            ChunkedInventoryBuilder | FactorizedInventoryBuilder
+        ] = []
         self.inventory_diagnostics: dict[str, object] = {}
         self.lca_diagnostics: dict[str, object] = {}
+        self.lci_diagnostics: dict[str, object] = {}
+        self.lcia_diagnostics: dict[str, object] = {}
+        self.lcia_results: dict[str, dict[str, Any]] = {}
+        self.current_lcia_result: str | None = None
 
     def configure_inventory_storage(
         self,
@@ -385,9 +415,10 @@ class Trails:
         store: str | Path | None = None,
     ) -> None:
         """Configure storage used by the next ``reset_inventory`` call."""
-        if backend not in {"auto", "coo", "chunked"}:
+        if backend not in {"auto", "coo", "chunked", "factorized"}:
             raise ValueError(
-                "inventory_backend must be one of {'auto', 'coo', 'chunked'}"
+                "inventory_backend must be one of "
+                "{'auto', 'coo', 'chunked', 'factorized'}"
             )
         budget = int(memory_budget)
         if budget <= 0:
@@ -400,6 +431,21 @@ class Trails:
         if self.A is None or self.B is None or self._inventory_years is None:
             raise RuntimeError("Inventory dimensions are not initialized")
         builder = ChunkedInventoryBuilder(
+            n_activities=int(self.A.shape[1]),
+            n_flows=int(self.B.shape[2]),
+            n_years=int(self._inventory_years.size),
+            has_root=bool(self._inventory_has_root),
+            value_dtype=self.value_dtype,
+            memory_budget=int(self._inventory_memory_budget),
+            store=self._inventory_store,
+        )
+        self._inventory_builders.append(builder)
+        return builder
+
+    def _new_factorized_inventory_builder(self) -> FactorizedInventoryBuilder:
+        if self.A is None or self.B is None or self._inventory_years is None:
+            raise RuntimeError("Inventory dimensions are not initialized")
+        builder = FactorizedInventoryBuilder(
             n_activities=int(self.A.shape[1]),
             n_flows=int(self.B.shape[2]),
             n_years=int(self._inventory_years.size),
@@ -647,8 +693,11 @@ class Trails:
         self._inv_key_parts = []
         self._inv_value_parts = []
         self._inventory_builder = None
-        if getattr(self, "_inventory_backend_requested", "coo") == "chunked":
+        backend = getattr(self, "_inventory_backend_requested", "coo")
+        if backend == "chunked":
             self._inventory_builder = self._new_chunked_inventory_builder()
+        elif backend == "factorized":
+            self._inventory_builder = self._new_factorized_inventory_builder()
 
         # Initialize inventory chunk builders (block-based appends)
         self._inv_chunk_act = []
@@ -713,6 +762,9 @@ class Trails:
         :rtype: dict[str, int]"""
         from .importer import import_excel_inventory
 
+        self._invalidate_calculation_results(close_inventory=True)
+        self.graph = None
+
         return import_excel_inventory(
             self,
             path,
@@ -720,6 +772,21 @@ class Trails:
             scenario_label=scenario_label,
             cache_import=cache_import,
         )
+
+    def _invalidate_calculation_results(self, *, close_inventory: bool) -> None:
+        """Invalidate inventory and characterization state after model changes."""
+        if close_inventory:
+            for builder in getattr(self, "_inventory_builders", []):
+                builder.close()
+            self._inventory_builders = []
+            self._inventory_builder = None
+        self.inventory = None
+        self.characterized_inventory = None
+        self.scores = None
+        self.lci_diagnostics = {}
+        self.lcia_diagnostics = {}
+        self.lcia_results = {}
+        self.current_lcia_result = None
 
     def _append_score_entry(
         self,
@@ -1276,7 +1343,7 @@ class Trails:
                 root_arr = np.asarray(root_activity)
                 if root_arr.shape == ():
                     root_arr = np.full_like(acts_out, int(root_arr))
-                elif root_arr.shape[0] != acts_out.shape[0]:
+                elif root_arr.shape[0] != acts_arr.shape[0]:
                     raise ValueError(
                         "root_activity array must match act/flow/value length for bulk append."
                     )
@@ -1286,12 +1353,6 @@ class Trails:
         else:
             root_out = None
 
-        keys = self._linearize_inventory_entries(
-            acts_out,
-            flows_out,
-            years_out,
-            root_idx=root_out,
-        )
         if self._inventory_builder is not None:
             self._inventory_builder.append(
                 acts_out,
@@ -1301,6 +1362,12 @@ class Trails:
                 roots=root_out,
             )
         else:
+            keys = self._linearize_inventory_entries(
+                acts_out,
+                flows_out,
+                years_out,
+                root_idx=root_out,
+            )
             self._inv_key_parts.append(keys)
             self._inv_value_parts.append(vals_out)
             self._maybe_promote_inventory_to_chunked()
@@ -1370,7 +1437,7 @@ class Trails:
             if len(self._inv_key_parts) != len(self._inv_value_parts):
                 raise RuntimeError(
                     "Inventory key/value builders are inconsistent. "
-                    "Call reset_inventory() and rerun lca()."
+                    "Call reset_inventory() and rerun lci()."
                 )
 
             keys = np.concatenate(self._inv_key_parts).astype(np.int64, copy=False)
@@ -2197,6 +2264,28 @@ class Trails:
 
         return lca_fn(self, *args, **kwargs)
 
+    def lci(self, *args: Any, **kwargs: Any) -> xr.DataArray:
+        """Build the temporal life-cycle inventory from the routing graph.
+
+        This phase performs the year-specific linear solves and always retains
+        the finalized inventory. It does not load or apply LCIA methods.
+        """
+        from .lca import lci as lci_fn
+
+        if "debug" in kwargs:
+            self.debug = bool(kwargs.pop("debug"))
+        return lci_fn(self, *args, **kwargs)
+
+    def lcia(self, *args: Any, **kwargs: Any) -> xr.DataArray:
+        """Characterize the finalized temporal inventory.
+
+        Methods supplied here override optional constructor defaults. Repeated
+        calls reuse the same inventory and never rerun the linear systems.
+        """
+        from .lcia import lcia as lcia_fn
+
+        return lcia_fn(self, *args, **kwargs)
+
     def temporal_routing(
         self,
         *,
@@ -2220,7 +2309,7 @@ class Trails:
         demand and stores an explicit graph of process-year nodes. Branches
         stop at frontier nodes when they reach an optional ``max_depth``, fall
         below ``min_amount``, have no child demands, or meet the adaptive
-        score-potential cutoff. Frontier demands are still solved by ``lca()``
+        score-potential cutoff. Frontier demands are still solved by ``lci()``
         in the corresponding year-specific background matrices, so adaptive
         pruning changes how much of the graph is routed explicitly, not whether
         the remaining demand is included.
@@ -2258,9 +2347,9 @@ class Trails:
         :param debug: Enable detailed routing logging.
         :type debug: bool
         :param adaptive_methods: Optional regular LCIA method or methods used
-            to screen branch impact potential. If omitted and an adaptive cutoff
-            is provided, ``Trails(..., methods=...)`` is used. EDGES methods
-            cannot currently be used for adaptive screening.
+            to screen branch impact potential. This routing configuration is
+            independent of methods later passed to ``lcia()``. A deprecated
+            constructor-method fallback remains for compatibility.
         :type adaptive_methods: str | list[str] | tuple[str, ...] | None
         :param adaptive_relative_score_cutoff: Relative cutoff multiplied by the
             functional-unit static score potential. Defaults to ``1e-4`` when
@@ -2291,6 +2380,8 @@ class Trails:
 
         if debug:
             self.debug = True
+
+        self._invalidate_calculation_results(close_inventory=True)
 
         start_activity = int(start_act_idx)
         start_year_int = int(start_year)
@@ -2581,25 +2672,37 @@ class Trails:
         adaptive_requested = adaptive_relative_score_cutoff is not None
         if adaptive_methods is None and adaptive_requested:
             default_methods = getattr(self, "default_methods", None)
-            if default_methods:
+            default_backend = getattr(self, "default_method_backend", "auto")
+            if (
+                default_methods
+                and default_backend != "edges"
+                and all(isinstance(method, str) for method in default_methods)
+            ):
+                warnings.warn(
+                    "Using Trails(..., methods=...) for adaptive routing is "
+                    "deprecated; pass adaptive_methods=... explicitly to "
+                    "temporal_routing().",
+                    FutureWarning,
+                    stacklevel=2,
+                )
                 adaptive_methods = list(default_methods)
-            elif getattr(self, "default_edges_methods", None):
+            elif default_methods or getattr(self, "default_edges_methods", None):
                 raise ValueError(
                     "Adaptive routing requires regular LCIA methods. EDGES "
-                    "methods can be used for final lca(..., edges_methods=...), "
-                    "but provide Trails(..., methods=...) or adaptive_methods=... "
-                    "for adaptive screening."
+                    "methods can be used for final lcia(), but provide "
+                    "adaptive_methods=... for adaptive screening."
                 )
             else:
                 raise ValueError(
-                    "adaptive_methods or Trails(..., methods=...) must be "
-                    "provided when an adaptive relative score cutoff is set."
+                    "adaptive_methods (preferred) or Trails(..., methods=...) "
+                    "must be provided when an adaptive relative score cutoff "
+                    "is set."
                 )
         adaptive_enabled = adaptive_methods is not None
         if adaptive_enabled and not adaptive_requested:
             raise ValueError(
                 "Set adaptive_relative_score_cutoff "
-                "when adaptive_methods or Trails(..., methods=...) is provided "
+                "when adaptive_methods is provided "
                 "for adaptive routing."
             )
         if max_depth is None and not adaptive_enabled:
@@ -5740,6 +5843,84 @@ class Trails:
         setattr(self, "_numba_matrix_kernel", _matrix_kernel)
         return _matrix_kernel
 
+    def _accumulate_no_td_supply_matrix(
+        self,
+        ctx: _BioAccumulationContext,
+        supply_matrix: np.ndarray,
+        root_ids: np.ndarray,
+        *,
+        min_amount: float,
+        excluded_activities: set[int] | None = None,
+    ) -> None:
+        """Accumulate non-temporal biosphere rows for all roots in bounded chunks."""
+        matrix = np.asarray(supply_matrix, dtype=np.float64)
+        roots = np.asarray(root_ids, dtype=np.int64)
+        if matrix.ndim != 2:
+            raise ValueError("supply_matrix must be two-dimensional")
+        if matrix.shape[0] != int(ctx.n_acts):
+            raise ValueError(
+                f"supply_matrix has {matrix.shape[0]} activities; "
+                f"expected {ctx.n_acts}"
+            )
+        if roots.ndim != 1 or roots.size != matrix.shape[1]:
+            raise ValueError(
+                "root_activities must be one-dimensional and aligned with "
+                "supply_matrix columns"
+            )
+        n_roots = int(roots.size)
+        nnz = int(ctx.data.shape[0])
+        if n_roots == 0 or nnz == 0:
+            return
+
+        # Bound the dense B-row x root work array plus its sparse coordinate
+        # extraction. Keeping roughly one million candidate contributions per
+        # chunk caps temporary memory near 64 MiB with int64 coordinates.
+        configured_budget = int(
+            getattr(self, "_inventory_memory_budget", DEFAULT_INVENTORY_MEMORY_BUDGET)
+        )
+        temporary_budget = max(
+            8 * 2**20,
+            min(64 * 2**20, configured_budget // 2),
+        )
+        candidate_limit = max(n_roots, temporary_budget // 64)
+        chunk_size = max(1, min(200_000, candidate_limit // n_roots))
+        excluded = excluded_activities or set()
+        excluded_array = np.fromiter(
+            excluded, dtype=np.int64, count=len(excluded)
+        )
+
+        for start in range(0, nnz, chunk_size):
+            end = min(start + chunk_size, nnz)
+            act_chunk = ctx.act_coords[start:end].astype(np.int64, copy=False)
+            flow_chunk = ctx.flow_coords[start:end].astype(np.int64, copy=False)
+            data_chunk = ctx.data[start:end].astype(np.float64, copy=False)
+
+            if excluded:
+                keep_rows = ~np.isin(act_chunk, excluded_array)
+                if not np.any(keep_rows):
+                    continue
+                act_chunk = act_chunk[keep_rows]
+                flow_chunk = flow_chunk[keep_rows]
+                data_chunk = data_chunk[keep_rows]
+
+            supply_chunk = matrix[act_chunk, :]
+            active_supply = supply_chunk != 0.0
+            if not np.any(active_supply):
+                continue
+
+            values = data_chunk[:, None] * supply_chunk
+            values[~active_supply] = 0.0
+            row_indices, root_columns = np.nonzero(values)
+            if row_indices.size == 0:
+                continue
+            self._append_inventory_entries_bulk(
+                act_chunk[row_indices],
+                int(ctx.base_year),
+                flow_chunk[row_indices],
+                values[row_indices, root_columns],
+                root_activity=roots[root_columns],
+            )
+
     def _accumulate_no_td_batch(
         self,
         ctx: _BioAccumulationContext,
@@ -5771,8 +5952,6 @@ class Trails:
         if any(store_activity is None for _, store_activity in supplies):
             return False
 
-        base_year = int(ctx.base_year)
-
         root_ids = np.array([int(store) for _, store in supplies], dtype=np.int64)
         n_roots = int(root_ids.size)
         if n_roots == 0:
@@ -5784,59 +5963,93 @@ class Trails:
                 a_idx = int(act_idx)
                 if 0 <= a_idx < ctx.n_acts:
                     supply_matrix[a_idx, col] += float(supply_amt)
-
-        nnz = int(ctx.data.shape[0])
-        if nnz == 0:
-            return True
-
-        chunk_size = 200_000
-        chunk_bounds = [
-            (start, min(start + chunk_size, nnz)) for start in range(0, nnz, chunk_size)
-        ]
-
-        workers_i = int(workers) if workers is not None else 1
-        if workers_i < 1:
-            workers_i = 1
-
-        def compute_chunk(bounds: tuple[int, int]) -> tuple[np.ndarray, ...]:
-            start, end = bounds
-            act_chunk = ctx.act_coords[start:end].astype(np.int64, copy=False)
-            flow_chunk = ctx.flow_coords[start:end].astype(np.int64, copy=False)
-            data_chunk = ctx.data[start:end].astype(np.float64, copy=False)
-
-            supply_chunk = supply_matrix[act_chunk, :]
-            values = data_chunk[:, None] * supply_chunk
-
-            acts_rep = np.repeat(act_chunk, n_roots)
-            flows_rep = np.repeat(flow_chunk, n_roots)
-            roots_rep = np.tile(root_ids, int(act_chunk.size))
-            values_flat = values.ravel()
-            return acts_rep, flows_rep, roots_rep, values_flat
-
-        if workers_i > 1 and len(chunk_bounds) > 1:
-            with ThreadPoolExecutor(max_workers=workers_i) as executor:
-                for acts_rep, flows_rep, roots_rep, values_flat in executor.map(
-                    compute_chunk, chunk_bounds
-                ):
-                    self._append_inventory_entries_bulk(
-                        acts_rep,
-                        base_year,
-                        flows_rep,
-                        values_flat,
-                        root_activity=roots_rep,
-                    )
-        else:
-            for bounds in chunk_bounds:
-                acts_rep, flows_rep, roots_rep, values_flat = compute_chunk(bounds)
-                self._append_inventory_entries_bulk(
-                    acts_rep,
-                    base_year,
-                    flows_rep,
-                    values_flat,
-                    root_activity=roots_rep,
-                )
-
+        self._accumulate_no_td_supply_matrix(
+            ctx,
+            supply_matrix,
+            root_ids,
+            min_amount=min_amount,
+        )
         return True
+
+    def accumulate_temporalized_biosphere_inventory_matrix(
+        self,
+        base_year: int,
+        supply_matrix: np.ndarray,
+        root_activities: np.ndarray,
+        *,
+        min_amount: float = 0.0,
+        use_temporal_distributions: bool = True,
+        debug: bool = False,
+    ) -> None:
+        """Accumulate a root-attributed supply matrix without Python dictionaries.
+
+        Biosphere rows without temporal distributions are expanded across all
+        root columns in bounded NumPy chunks. Activities owning at least one
+        temporal biosphere exchange retain the established row-wise path, so
+        ported and matrix-sourced temporal semantics remain unchanged.
+        """
+        if not bool(getattr(self, "_inventory_has_root", False)):
+            raise ValueError(
+                "Matrix inventory accumulation requires root-attributed storage"
+            )
+        ctx = self._build_bio_accumulation_context(
+            base_year,
+            use_temporal_distributions=use_temporal_distributions,
+            debug=debug,
+        )
+        if ctx is None:
+            return
+
+        matrix = np.asarray(supply_matrix, dtype=np.float64)
+        roots = np.asarray(root_activities, dtype=np.int64)
+        temporal_activities: set[int] = set()
+        if use_temporal_distributions and ctx.tpl_label is not None:
+            temporal_activities = {
+                int(key[1])
+                for key in self.temporal_biosphere_exchanges
+                if len(key) >= 3 and str(key[0]) == str(ctx.tpl_label)
+            }
+
+        builder = self._inventory_builder
+        if isinstance(builder, FactorizedInventoryBuilder):
+            inventory_year = self._clamp_year_to_inventory(int(ctx.base_year))
+            year_index = self._inventory_year_index.get(inventory_year)
+            if year_index is None:
+                raise RuntimeError(
+                    "Inventory year index is missing for factorized accumulation"
+                )
+            builder.append_factor(
+                year_index=int(year_index),
+                activities=ctx.act_coords,
+                flows=ctx.flow_coords,
+                biosphere_values=ctx.data,
+                supply_matrix=matrix,
+                roots=roots,
+                excluded_activities=temporal_activities,
+            )
+        else:
+            self._accumulate_no_td_supply_matrix(
+                ctx,
+                matrix,
+                roots,
+                min_amount=min_amount,
+                excluded_activities=temporal_activities,
+            )
+
+        for activity in temporal_activities:
+            if activity < 0 or activity >= matrix.shape[0]:
+                continue
+            supplies = matrix[activity, :]
+            root_columns = np.flatnonzero(supplies != 0.0)
+            for column in root_columns:
+                self._accumulate_temporalized_biosphere_inventory_core(
+                    ctx,
+                    {int(activity): float(supplies[int(column)])},
+                    min_amount=min_amount,
+                    store_activity=int(roots[int(column)]),
+                    use_temporal_distributions=use_temporal_distributions,
+                    debug=debug,
+                )
 
     def accumulate_temporalized_biosphere_inventory(
         self,

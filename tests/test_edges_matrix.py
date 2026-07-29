@@ -210,6 +210,102 @@ def test_build_edges_matrices_uses_real_edges_year_expression() -> None:
     assert matrices[0][0, 0] == pytest.approx(3.0)
 
 
+@pytest.mark.parametrize("use_named_method", [False, True])
+def test_edges_method_maps_one_representative_per_matching_signature(
+    monkeypatch: pytest.MonkeyPatch,
+    use_named_method: bool,
+) -> None:
+    """Inline and named methods should match equivalent metadata only once."""
+    trails = DummyMatrixTrails(n_activities=3, n_flows=1)
+    trails.activity_indices = {
+        "2000": {
+            0: {"name": "activity A", "location": "CH"},
+            1: {"name": "activity B", "location": "CH"},
+            2: {"name": "activity C", "location": "FR"},
+        }
+    }
+    trails.biosphere_indices = {
+        "2000": {0: {"name": "water", "compartment": "water", "unit": "m3"}}
+    }
+    method = {
+        "name": "regional water",
+        "exchanges": [
+            {
+                "supplier": {
+                    "name": "water",
+                    "categories": ["water"],
+                    "matrix": "biosphere",
+                },
+                "consumer": {"location": "CH", "matrix": "technosphere"},
+                "value": 2.0,
+            },
+            {
+                "supplier": {
+                    "name": "water",
+                    "categories": ["water"],
+                    "matrix": "biosphere",
+                },
+                "consumer": {"location": "FR", "matrix": "technosphere"},
+                "value": 3.0,
+            },
+        ],
+    }
+    mapped_edge_sets: list[set[tuple[int, int]]] = []
+    evaluated_entry_counts: list[int] = []
+
+    class FakeEdgeLCIA:
+        def __init__(self, *args, **kwargs):
+            self.lca = kwargs["lca"]
+            self.raw_cfs_data = method["exchanges"]
+            self.cfs_mapping = []
+            self.characterization_matrix = None
+
+        def _preprocess_lookups(self, **kwargs):
+            return None
+
+        def apply_strategies(self, strategies):
+            mapped_edge_sets.append(set(self.biosphere_edges))
+            for edge in sorted(self.biosphere_edges):
+                location = self.position_to_technosphere_flows_lookup[edge[1]][
+                    "location"
+                ]
+                self.cfs_mapping.append(
+                    {
+                        "supplier": {"matrix": "biosphere"},
+                        "consumer": {"matrix": "technosphere", "location": location},
+                        "positions": (edge,),
+                        "direction": "biosphere-technosphere",
+                        "value": 2.0 if location == "CH" else 3.0,
+                    }
+                )
+
+        def evaluate_cfs(self, scenario_idx):
+            evaluated_entry_counts.append(len(self.cfs_mapping))
+            matrix = sp.lil_matrix(self.lca.inventory.shape)
+            for cf in self.cfs_mapping:
+                for supplier, consumer in cf["positions"]:
+                    matrix[int(supplier), int(consumer)] = cf["value"]
+            self.characterization_matrix = matrix.tocsr()
+
+    monkeypatch.setattr(
+        "trails.edges_matrix._ensure_edges_available",
+        lambda: FakeEdgeLCIA,
+    )
+
+    matrices = _build_edges_characterization_matrices_for_year(
+        trails,
+        ["regional water" if use_named_method else method],
+        year=2000,
+        biosphere_edges={(0, 0), (0, 1), (0, 2)},
+        mapping_caches=[{}],
+    )
+
+    assert len(mapped_edge_sets[0]) == 2
+    assert {edge[1] for edge in mapped_edge_sets[0]} in ({0, 2}, {1, 2})
+    assert evaluated_entry_counts == [2]
+    assert np.asarray(matrices[0].todense()).tolist() == [[2.0, 2.0, 3.0]]
+
+
 def test_score_inventory_with_edges_reuses_cached_mappings_for_next_year(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -541,6 +637,7 @@ def test_lca_defaults_prefer_edges_methods_for_final_scoring() -> None:
     class DummyTrails:
         default_methods = ["regular-method"]
         default_edges_methods = ["edge-method"]
+        default_method_backend = "auto"
         default_ei_version = "3.11"
 
     methods, edges_methods, ei_version = lca_module._resolve_lca_method_defaults(
@@ -561,3 +658,21 @@ def test_lca_defaults_prefer_edges_methods_for_final_scoring() -> None:
     )
     assert methods == ["explicit-regular"]
     assert edges_methods is None
+
+
+def test_lca_defaults_support_unified_edges_configuration() -> None:
+    class DummyTrails:
+        default_methods = ["edge-method"]
+        default_edges_methods = None
+        default_method_backend = "edges"
+        default_ei_version = "3.11"
+
+    methods, edges_methods, _ei_version = lca_module._resolve_lca_method_defaults(
+        DummyTrails(),
+        methods=None,
+        edges_methods=None,
+        ei_version=None,
+    )
+
+    assert methods is None
+    assert edges_methods == ["edge-method"]

@@ -43,7 +43,25 @@ from .chunked_inventory import is_chunked_sparse, iter_sparse_blocks
 _FAIR_RUN_LOCK = Lock()
 
 
-def _inventory_flow_year_root(inv: xr.DataArray) -> sparse.COO:
+def _resolve_flow_mapping(mapping: dict[object, Any], flow_key: object) -> Any:
+    """Resolve mappings that may use either a full flow key or only its name."""
+    name_key = (
+        str(flow_key[0])
+        if isinstance(flow_key, tuple) and len(flow_key) >= 1
+        else str(flow_key)
+    )
+    if name_key in mapping:
+        return mapping[name_key]
+    return mapping.get(flow_key)
+
+
+def _inventory_flow_year_root(
+    inv: xr.DataArray,
+    *,
+    flow_positions: list[int] | None = None,
+    builder: Any | None = None,
+    show_progress: bool = False,
+) -> sparse.COO:
     """Reduce an eager or chunked inventory to flow/year/root sequentially."""
     canonical = inv.transpose("activity", "flow", "year", "root activity")
     data = canonical.data
@@ -52,14 +70,42 @@ def _inventory_flow_year_root(inv: xr.DataArray) -> sparse.COO:
             data = sparse.COO.from_numpy(np.asarray(data, dtype=float))
         return data.sum(axis=0)
 
+    if (
+        builder is not None
+        and getattr(builder, "_finalized", False)
+        and flow_positions is not None
+    ):
+        return builder.reduce_activity_for_flows(
+            flow_positions,
+            show_progress=show_progress,
+        )
+
     coords_parts: list[np.ndarray] = []
     data_parts: list[np.ndarray] = []
     for slices, block in iter_sparse_blocks(data, primary_axis=2):
-        reduced = block.sum(axis=0)
+        flow_offset = int(slices[1].start or 0)
+        if flow_positions is not None:
+            local_flows = np.asarray(
+                [
+                    int(flow) - flow_offset
+                    for flow in flow_positions
+                    if flow_offset <= int(flow) < int(slices[1].stop)
+                ],
+                dtype=np.int64,
+            )
+            if not local_flows.size:
+                continue
+            reduced = block[:, local_flows, :, :].sum(axis=0)
+        else:
+            local_flows = None
+            reduced = block.sum(axis=0)
         if not isinstance(reduced, sparse.COO) or not reduced.nnz:
             continue
         coords = reduced.coords.astype(np.int64, copy=True)
-        coords[0] += int(slices[1].start or 0)
+        if local_flows is None:
+            coords[0] += flow_offset
+        else:
+            coords[0] = local_flows[coords[0]] + flow_offset
         coords[1] += int(slices[2].start or 0)
         coords[2] += int(slices[3].start or 0)
         coords_parts.append(coords)
@@ -1403,6 +1449,7 @@ def run_fair_delta_rf(
     per_species_runs: bool = True,
     per_species_workers: int | None = None,
     quantiles: list[float] | None = None,
+    show_progress: bool = True,
 ) -> xr.DataArray:
     """Run fair delta rf.
 
@@ -1451,6 +1498,9 @@ def run_fair_delta_rf(
     :type per_species_workers: int | None
     :param quantiles: Value for `quantiles`.
     :type quantiles: list[float] | None
+    :param show_progress: Show inventory-preparation progress for disk-backed
+        inventories.
+    :type show_progress: bool
     :returns: Return value.
     :rtype: xr.DataArray
     :raises ValueError: If an error occurs."""
@@ -1499,9 +1549,6 @@ def run_fair_delta_rf(
     dims = list(inv.dims)
     if "activity" not in dims or "flow" not in dims or "year" not in dims:
         raise ValueError("Trails.inventory must include activity/flow/year dimensions.")
-    # Reduce once and reuse this COO for species deltas and allocations.
-    inv_data = _inventory_flow_year_root(inv)
-
     n_flow = int(inv.sizes["flow"])
     n_root = int(inv.sizes["root activity"])
 
@@ -1541,6 +1588,21 @@ def run_fair_delta_rf(
             flow_pos_to_key.setdefault(pos, flow_key)
 
     inv_years = [int(y) for y in inv.coords["year"].values.tolist()]
+
+    mapped_flow_positions = sorted(
+        int(position)
+        for position, flow_key in flow_pos_to_key.items()
+        if _resolve_flow_mapping(species_map, flow_key) is not None
+    )
+    # Reduce only FaIR-mapped atmospheric flows and reuse this compact COO for
+    # species deltas and root allocations. The chunked builder streams directly
+    # from its finalized runs and caches the result for subsequent FaIR calls.
+    inv_data = _inventory_flow_year_root(
+        inv,
+        flow_positions=mapped_flow_positions,
+        builder=getattr(trails, "_inventory_builder", None),
+        show_progress=bool(show_progress),
+    )
 
     # Build perturbations from activity-reduced inventory (single sparse
     # reduction path).

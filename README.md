@@ -95,9 +95,9 @@ The field `temporal_amount_source` controls how amounts are applied over time:
 **`matrix`** rereads the exchange coefficient from each pulse scenario year before
 applying the weight. Branches stopped by `max_depth`, `min_amount`, leaf status, or
 the adaptive score-potential cutoff remain frontier demand and are still solved by
-`lca()`. Routing does not temporalize direct biosphere exchanges itself; it records
-direct-bio supply amounts for expanded non-root nodes, and `lca()` applies
-biosphere temporal distributions while accumulating inventories and scores.
+`lci()`. Routing does not temporalize direct biosphere exchanges itself; it records
+direct-bio supply amounts for expanded non-root nodes, and `lci()` applies
+biosphere temporal distributions while accumulating the inventory.
 
 ---
 
@@ -158,7 +158,6 @@ from datapackage import Package
 
 from trails import (
     Trails,
-    lca,
     get_lcia_method_names,
     plot_temporal_scores,
     plot_adaptive_sankey,
@@ -176,7 +175,6 @@ method = get_lcia_method_names(ei_version="3.11")[0]
 trails = Trails(
     package,
     interpolate_annual=True,
-    methods=[method],
     ei_version="3.11",
 )
 
@@ -186,7 +184,6 @@ trails = Trails(
 #     interpolate_annual=True,
 #     interpolation_start_year_offset=-20,
 #     interpolation_end_year_offset=20,
-#     methods=[method],
 #     ei_version="3.11",
 # )
 
@@ -199,15 +196,17 @@ start_act_idx = next(iter(activity_indices.keys()))
 trails.temporal_routing(
     start_year=2030,
     start_act_idx=start_act_idx,
+    adaptive_methods=[method],
 )
 
-# Run temporal LCA (stores scores on trails.scores)
-lca(
-    trails=trails,
-    # defaults shown explicitly:
+# Build the temporal inventory once
+trails.lci(
     solver_mode="iterative",
     iterative_rtol=1e-3,
 )
+
+# Characterize the same inventory as many times as needed
+scores = trails.lcia(methods=[method])
 
 # Plot temporal impact scores
 fig = plot_temporal_scores(trails, method_label=method)
@@ -234,12 +233,17 @@ demands and are still included in the year-wise matrix solve.
 
 ```python
 # 1. Default adaptive routing
-trails.temporal_routing(start_year=2030, start_act_idx=start_act_idx)
+trails.temporal_routing(
+    start_year=2030,
+    start_act_idx=start_act_idx,
+    adaptive_methods=[method],
+)
 
 # 2. Adaptive routing with a different relative cutoff
 trails.temporal_routing(
     start_year=2030,
     start_act_idx=start_act_idx,
+    adaptive_methods=[method],
     adaptive_relative_score_cutoff=1e-5,
 )
 
@@ -248,6 +252,7 @@ trails.temporal_routing(
     start_year=2030,
     start_act_idx=start_act_idx,
     max_depth=5,
+    adaptive_methods=[method],
     adaptive_relative_score_cutoff=1e-4,
 )
 
@@ -259,10 +264,9 @@ trails.temporal_routing(
 )
 ```
 
-Adaptive routing requires regular LCIA methods, usually provided once with
-`Trails(..., methods=[method], ei_version="...")`. EDGES methods are final-score
-methods only; EDGES-only workflows should use fixed-depth routing or also
-provide regular `methods` for adaptive routing before EDGES final scoring.
+Adaptive routing requires explicit regular ``adaptive_methods``. These screening
+methods are independent of the regular or EDGES methods later passed to
+``lcia()``.
 
 ---
 
@@ -281,6 +285,7 @@ from trails import plot_adaptive_sankey
 trails.temporal_routing(
     start_year=2030,
     start_act_idx=start_act_idx,
+    adaptive_methods=[method],
     adaptive_relative_score_cutoff=1e-4,
 )
 
@@ -314,28 +319,27 @@ from trails import Trails, get_edges_lcia_method_names
 
 edges_method = get_edges_lcia_method_names()[0]
 
-trails_edges = Trails(
-    package,
-    interpolate_annual=True,
-    edges_methods=[edges_method],
+trails_edges = Trails(package, interpolate_annual=True)
+trails_edges.temporal_routing(
+    start_year=2030,
+    start_act_idx=start_act_idx,
+    max_depth=3,
 )
-
-lca(
-    trails=trails_edges,
-    edges_reuse_cached_cfs=True,
+trails_edges.lci()
+edge_scores = trails_edges.lcia(
+    methods=[edges_method],
+    method_backend="edges",
+    reuse_mappings=True,
 )
 ```
 
-``edges_methods`` is mutually exclusive with regular ``methods`` for final
-scoring. Constructor ``methods`` can still be used as regular LCIA proxy
-methods for adaptive routing before final EDGES scoring. With the
-default ``edges_reuse_cached_cfs=True``, TRAILS reuses EDGES matched CF
+With the default ``reuse_mappings=True``, TRAILS reuses EDGES matched CF
 templates across temporal inventory years when supplier and consumer metadata
 signatures are identical. TRAILS passes each actual inventory year to EDGES as
 ``scenario_idx``, so prospective AWARE factors and their interpolation remain
 year-specific even if the Trails A/B matrices use a nearby database scenario
 year. Set
-``edges_reuse_cached_cfs=False`` to force EDGES matching independently for every
+``reuse_mappings=False`` to force EDGES matching independently for every
 year, for example if an EDGES method changes which CF row matches an exchange
 based on the year.
 
@@ -409,8 +413,8 @@ plot_temp(trails, year_range=(2000, 2100))
 Notes:
 
 * ``run_fair_delta_rf`` requires ``trails.inventory`` with
-  ``root activity`` attribution. Run ``lca(..., store_inventory=True)`` after
-  ``temporal_routing(...)`` before calling FaIR.
+  ``root activity`` attribution. Run ``lci()`` after ``temporal_routing(...)``
+  before calling FaIR.
 * ``scenario`` must match a scenario label present in the emissions CSV used by
   ``run_fair_delta_rf`` (bundled default uses REMIND/FaIR data).
 * If you don't pass ``config_name`` or ``config_names``, TRAILS evaluates all
@@ -520,20 +524,23 @@ Scenario labels are treated as calendar years. When a year is requested that doe
 exist in the package, the nearest available scenario year is used.
 
 **Do I need both scores and inventory?**  
-By default `lca()` computes scores and stores them on `trails.scores`. If you set
-`store_inventory=True`, TRAILS also stores `trails.inventory`. If
-`compute_score=True` at the same time, `trails.characterized_inventory` is also
-available. Remember to run `trails.temporal_routing(...)` before `lca()`.
+``lci()`` always builds and retains ``trails.inventory``. A subsequent
+``lcia(methods=[...])`` stores compact impact results on ``trails.scores`` and,
+for regular methods, exposes a lazy or sparse ``trails.characterized_inventory``.
+Repeated ``lcia()`` calls reuse the same inventory.
 
 Large stored inventories use a bounded, disk-backed sparse representation
 automatically. ``trails.inventory`` and ``trails.characterized_inventory`` remain
 ``xarray.DataArray`` objects; their data can be a Dask array of sparse COO blocks.
+Buffered partitions are written into a fixed set of binary shard buckets, which
+are compacted independently as they grow. Adjacent inventory years share both
+storage partitions and Dask chunks. This bounds file count, reclaims duplicates
+without a whole-inventory copy, and reduces scheduler overhead.
 The default 256 MiB inventory working-memory budget can be changed explicitly:
 
 ```python
-trails.lca(
-    store_inventory=True,
-    inventory_backend="auto",       # auto, coo, or chunked
+trails.lci(
+    inventory_backend="auto",       # auto, coo, chunked, or factorized
     inventory_memory_budget=256 * 2**20,
     inventory_store=None,            # managed temporary store
 )
@@ -545,6 +552,10 @@ a time. Use ``materialize_inventory()`` or
 both estimate the allocation and raise before exceeding the configured budget.
 Call ``trails.close()`` (or use ``with Trails(...) as trails``) to remove managed
 temporary blocks.
+
+For classical LCIA, scores are reduced incrementally from the stored inventory.
+Both ``trails.scores`` and ``trails.characterized_inventory`` remain available,
+without rerunning the year-specific linear systems.
 
 For the full BrightCon DACCS case, ``dev/profile_daccs_memory.py`` reproduces the
 notebook pipeline in an isolated worker while a parent process samples runtime and
@@ -562,8 +573,9 @@ python dev/profile_daccs_memory.py \
 
 ``trails.lca_diagnostics`` separates total LCA phases, while
 ``trails.inventory_diagnostics`` reports append, online flush, final flush, and
-merge time. This makes bounded-storage I/O visible instead of attributing it to
-the linear-system solver alone.
+merge time, plus the final storage-file and Dask-block counts. This makes
+bounded-storage and scheduling overhead visible instead of attributing it to the
+linear-system solver alone.
 
 ## Limitations & Assumptions
 

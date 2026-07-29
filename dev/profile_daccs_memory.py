@@ -37,7 +37,6 @@ from typing import Any, Iterator
 
 import psutil
 
-
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 if str(REPOSITORY_ROOT) not in sys.path:
     sys.path.insert(0, str(REPOSITORY_ROOT))
@@ -129,16 +128,12 @@ class EventLog:
 
 
 def _prospective_aware_method(ssp: str = "SSP126") -> dict[str, Any]:
-    path = files("edges").joinpath(
-        "data/AWARE 2.0 prospective_Country_all_yearly.json"
-    )
+    path = files("edges").joinpath("data/AWARE 2.0 prospective_Country_all_yearly.json")
     method = json.loads(path.read_text(encoding="utf-8"))
     if ssp not in method["parameters"]:
         raise ValueError(f"Unknown AWARE scenario {ssp!r}")
     method["parameters"] = {ssp: method["parameters"][ssp]}
-    method["name"] = (
-        f"AWARE 2.0 prospective | Country | all | yearly | {ssp}"
-    )
+    method["name"] = f"AWARE 2.0 prospective | Country | all | yearly | {ssp}"
     return method
 
 
@@ -176,7 +171,6 @@ def _run_worker(args: argparse.Namespace) -> int:
     from datapackage import Package
 
     from trails import Trails, plot_temp, plot_temporal_scores
-    from trails.edges_matrix import score_inventory_with_edges
     from trails.fair_rf import run_fair_delta_rf
 
     event_log = EventLog(Path(args.events))
@@ -204,8 +198,9 @@ def _run_worker(args: argparse.Namespace) -> int:
             "start_year": START_YEAR,
         },
         "configuration": {
-            "inventory_backend": "auto",
+            "inventory_backend": args.inventory_backend,
             "inventory_memory_budget_mib": args.memory_budget_mib,
+            "scores_only_diagnostic": args.scores_only_diagnostic,
             "solver_mode": "iterative",
             "iterative_rtol": 1e-3,
             "fair": not args.skip_fair,
@@ -236,7 +231,6 @@ def _run_worker(args: argparse.Namespace) -> int:
                 interpolate_annual=True,
                 interpolation_start_year_offset=-20,
                 interpolation_end_year_offset=20,
-                methods=[GWP],
                 ei_version="3.12",
             )
 
@@ -258,36 +252,56 @@ def _run_worker(args: argparse.Namespace) -> int:
                 start_act_idx=daccs_index,
                 amount=DACCS_AMOUNT_KG,
                 attribute_to_roots=True,
+                adaptive_methods=[GWP],
                 show_progress=args.show_progress,
             )
 
-        with measured("temporal_lca"):
-            model.lca(
-                compute_score=True,
-                store_inventory=True,
-                show_progress=args.show_progress,
-                solver_mode="iterative",
-                iterative_rtol=1e-3,
-                inventory_backend="auto",
-                inventory_memory_budget=int(args.memory_budget_mib * 2**20),
-                inventory_store=args.inventory_store,
-            )
+        if args.scores_only_diagnostic:
+            with measured("legacy_scores_only_lca"):
+                model.lca(
+                    methods=[GWP],
+                    compute_score=True,
+                    store_inventory=False,
+                    show_progress=args.show_progress,
+                    solver_mode="iterative",
+                    iterative_rtol=1e-3,
+                )
+        else:
+            with measured("temporal_lci"):
+                model.lci(
+                    show_progress=args.show_progress,
+                    solver_mode="iterative",
+                    iterative_rtol=1e-3,
+                    inventory_backend=args.inventory_backend,
+                    inventory_memory_budget=int(args.memory_budget_mib * 2**20),
+                    inventory_store=args.inventory_store,
+                )
+            with measured("regular_gwp_lcia"):
+                model.lcia(methods=[GWP], show_progress=args.show_progress)
 
-        report["inventory"] = {
-            "shape": list(model.inventory.shape),
-            "chunks": (
-                [list(axis) for axis in model.inventory.data.chunks]
-                if isinstance(model.inventory.data, da.Array)
-                else None
-            ),
-            "lazy": isinstance(model.inventory.data, da.Array),
-            "characterized_lazy": isinstance(
-                model.characterized_inventory.data, da.Array
-            ),
-            "diagnostics": model.inventory_diagnostics,
-            "lca_diagnostics": model.lca_diagnostics,
-            "gwp_total": _sum_dataarray(model.scores),
-        }
+        if args.scores_only_diagnostic:
+            report["inventory"] = {
+                "scores_only_diagnostic": True,
+                "lca_diagnostics": model.lca_diagnostics,
+                "gwp_total": _sum_dataarray(model.scores),
+            }
+        else:
+            report["inventory"] = {
+                "shape": list(model.inventory.shape),
+                "chunks": (
+                    [list(axis) for axis in model.inventory.data.chunks]
+                    if isinstance(model.inventory.data, da.Array)
+                    else None
+                ),
+                "lazy": isinstance(model.inventory.data, da.Array),
+                "characterized_lazy": isinstance(
+                    model.characterized_inventory.data, da.Array
+                ),
+                "diagnostics": model.inventory_diagnostics,
+                "lci_diagnostics": model.lci_diagnostics,
+                "lcia_diagnostics": model.lcia_diagnostics,
+                "gwp_total": _sum_dataarray(model.scores),
+            }
         checkpoint()
 
         if not args.skip_plots:
@@ -315,6 +329,7 @@ def _run_worker(args: argparse.Namespace) -> int:
                     model,
                     scenario="REMIND|SSP2-PkBudg1000",
                     scale_target_fraction=0.1,
+                    show_progress=args.show_progress,
                 )
             if not args.skip_plots:
                 with measured("plot_fair_temperature"):
@@ -335,10 +350,10 @@ def _run_worker(args: argparse.Namespace) -> int:
             with measured("load_prospective_aware"):
                 aware_method = _prospective_aware_method("SSP126")
             with measured("edges_aware"):
-                aware_scores = score_inventory_with_edges(
-                    model,
-                    [aware_method],
-                    reuse_cached_cfs=True,
+                aware_scores = model.lcia(
+                    methods=[aware_method],
+                    method_backend="edges",
+                    reuse_mappings=True,
                     show_progress=args.show_progress,
                 )
             report["aware_total"] = _sum_dataarray(aware_scores)
@@ -447,12 +462,15 @@ def _run_supervisor(args: argparse.Namespace) -> int:
             str(output_path),
             "--memory-budget-mib",
             str(args.memory_budget_mib),
+            "--inventory-backend",
+            str(args.inventory_backend),
         ]
         for enabled, flag in (
             (args.skip_fair, "--skip-fair"),
             (args.skip_aware, "--skip-aware"),
             (args.skip_plots, "--skip-plots"),
             (args.show_progress, "--show-progress"),
+            (args.scores_only_diagnostic, "--scores-only-diagnostic"),
         ):
             if enabled:
                 command.append(flag)
@@ -527,13 +545,26 @@ def _run_supervisor(args: argparse.Namespace) -> int:
             "rss_below_ceiling": (
                 not exceeded and not low_available and peak_rss <= effective_limit
             ),
-            "inventory_is_lazy": inventory.get("lazy") is True,
-            "characterized_inventory_is_lazy": (
-                inventory.get("characterized_lazy") is True
-            ),
-            "chunked_backend_used": diagnostics.get("backend") == "chunked",
-            "inventory_nonempty": diagnostics.get("canonical_entries", 0) > 0,
         }
+        if not args.scores_only_diagnostic:
+            checks.update(
+                {
+                    "inventory_is_lazy": inventory.get("lazy") is True,
+                    "characterized_inventory_is_lazy": (
+                        inventory.get("characterized_lazy") is True
+                    ),
+                    "inventory_backend_used": diagnostics.get("backend")
+                    == (
+                        "factorized"
+                        if args.inventory_backend == "factorized"
+                        else "chunked"
+                    ),
+                    "inventory_nonempty": (
+                        diagnostics.get("canonical_entries", 0) > 0
+                        or diagnostics.get("factor_candidate_entries", 0) > 0
+                    ),
+                }
+            )
         report = {
             **worker_report,
             "supervisor": {
@@ -573,6 +604,11 @@ def _parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--rss-limit-gib", type=float, default=12.0)
     parser.add_argument("--memory-budget-mib", type=int, default=256)
+    parser.add_argument(
+        "--inventory-backend",
+        choices=("auto", "chunked", "factorized"),
+        default="auto",
+    )
     parser.add_argument("--sample-interval", type=float, default=0.25)
     parser.add_argument(
         "--min-available-gib",
@@ -586,6 +622,11 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--skip-fair", action="store_true")
     parser.add_argument("--skip-aware", action="store_true")
     parser.add_argument("--skip-plots", action="store_true")
+    parser.add_argument(
+        "--scores-only-diagnostic",
+        action="store_true",
+        help="Profile the solve and score path without storing an inventory.",
+    )
     parser.add_argument("--worker", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--events", help=argparse.SUPPRESS)
     parser.add_argument("--worker-result", help=argparse.SUPPRESS)
@@ -594,7 +635,14 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def main() -> int:
-    args = _parser().parse_args()
+    parser = _parser()
+    args = parser.parse_args()
+    if args.scores_only_diagnostic and not (
+        args.skip_fair and args.skip_aware and args.skip_plots
+    ):
+        parser.error(
+            "--scores-only-diagnostic requires --skip-fair --skip-aware " "--skip-plots"
+        )
     if args.worker:
         if not args.events or not args.worker_result:
             raise ValueError("Worker mode requires --events and --worker-result")

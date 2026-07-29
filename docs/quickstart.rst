@@ -33,7 +33,6 @@ Run a temporal LCA
 
     from trails import (
         Trails,
-        lca,
         get_lcia_method_names,
         plot_temporal_scores,
         plot_adaptive_sankey,
@@ -51,7 +50,6 @@ Run a temporal LCA
     trails = Trails(
         package,
         interpolate_annual=True,
-        methods=[method],
         ei_version="3.11",
     )
 
@@ -61,7 +59,6 @@ Run a temporal LCA
     #     interpolate_annual=True,
     #     interpolation_start_year_offset=-20,
     #     interpolation_end_year_offset=20,
-    #     methods=[method],
     #     ei_version="3.11",
     # )
 
@@ -75,14 +72,18 @@ Run a temporal LCA
         start_year=2030,
         start_act_idx=start_act_idx,
         min_amount=1e-18,
+        adaptive_methods=[method],
     )
 
-    # Run temporal LCA (stores scores on trails.scores)
-    lca(
-        trails=trails,
-        # defaults shown explicitly:
+    # Build one temporal inventory
+    trails.lci(
         solver_mode="iterative",
         iterative_rtol=1e-3,
+    )
+
+    # Characterize it without repeating the annual solves
+    scores = trails.lcia(
+        methods=[method],
     )
 
     # Plot temporal impact scores
@@ -126,7 +127,7 @@ The routed graph can be inspected with ``plot_adaptive_sankey``:
 This figure uses only explicit routed graph edges. Link widths are based on
 adaptive routing score potential; nodes are positioned by routing depth and
 calendar year. Frontier branches that are not explicitly expanded are still
-included in ``lca(...)`` through the matrix solve, but they are not drawn as
+included in ``lci()`` through the matrix solve, but they are not drawn as
 downstream Sankey paths.
 
 To run fixed-depth routing instead, pass an integer ``max_depth`` and omit
@@ -135,11 +136,11 @@ the adaptive relative cutoff.
 What you get
 ------------
 
-Temporal LCA results are stored on the Trails instance. Use ``trails.scores``
-for impact scores (when ``compute_score=True``). If you run
-``lca(..., store_inventory=True)``, TRAILS also stores ``trails.inventory``;
-with ``compute_score=True`` and ``store_inventory=True``, it also stores
-``trails.characterized_inventory``.
+Temporal results are stored on the Trails instance. ``lci()`` always retains
+``trails.inventory``. ``lcia(methods=[...])`` stores impact results on
+``trails.scores`` and, for regular methods, exposes
+``trails.characterized_inventory``. Repeated ``lcia()`` calls reuse the same
+inventory.
 
 Stored inventories use ``inventory_backend="auto"`` by default. Small results
 remain eager sparse COO arrays; larger results become disk-backed Dask arrays of
@@ -204,14 +205,10 @@ quantiles (2.5, 25, 50, 75, 97.5).
 
 .. code-block:: python
 
-    from trails import lca
     from trails.fair_rf import run_fair_delta_rf
 
     # Ensure an inventory with root attribution is available
-    lca(
-        trails=trails,
-        store_inventory=True,
-    )
+    trails.lci()
 
     rf = run_fair_delta_rf(
         trails,
@@ -229,7 +226,7 @@ The resulting outputs are stored on the Trails instance:
 Notes:
 
 * ``run_fair_delta_rf`` requires ``trails.inventory`` with a
-  ``root activity`` dimension. Run ``lca(..., store_inventory=True)`` first.
+  ``root activity`` dimension. Run ``lci()`` first.
 * ``scenario`` must match a scenario label present in the emissions CSV used by
   ``run_fair_delta_rf``.
 * If ``config_name`` and ``config_names`` are omitted, TRAILS evaluates all
