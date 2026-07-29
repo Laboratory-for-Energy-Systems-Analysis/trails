@@ -124,8 +124,10 @@ COO is genuinely required.
 
 For root-attributed direct or iterative solves,
 ``inventory_backend="factorized"`` writes annual activity-by-root supply
-matrices and keeps ordinary biosphere multiplication lazy. Only temporal and
-direct-biosphere corrections use the explicit chunked sparse store.
+matrices and keeps ordinary biosphere multiplication lazy. Ported temporal
+exchanges are stored as compact offset/weight kernels and applied lazily as
+well. Only matrix-sourced temporal exchanges and direct biosphere corrections
+use the explicit chunked sparse store.
 
 Adaptive score-potential routing
 --------------------------------

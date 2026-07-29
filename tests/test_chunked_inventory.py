@@ -131,6 +131,74 @@ def test_factorized_builder_keeps_base_inventory_lazy_and_adds_corrections() -> 
     assert not store.exists()
 
 
+def test_factorized_builder_keeps_ported_temporal_kernels_lazy() -> None:
+    builder = FactorizedInventoryBuilder(
+        n_activities=3,
+        n_flows=2,
+        n_years=4,
+        has_root=True,
+        value_dtype=np.float32,
+        memory_budget=2**20,
+        activity_block_size=2,
+        root_block_size=2,
+        year_block_size=2,
+    )
+    builder.append_temporal_factor(
+        base_year_index=1,
+        activities=np.array([0, 1]),
+        flows=np.array([0, 1]),
+        biosphere_values=np.array([2.0, 4.0]),
+        supply_matrix=np.array(
+            [
+                [1.0, 2.0],
+                [0.1, 0.0],
+                [0.0, 0.0],
+            ]
+        ),
+        roots=np.array([0, 2]),
+        pulse_indptr=np.array([0, 2, 4]),
+        pulse_year_indices=np.array([1, 3, 0, 2]),
+        pulse_weights=np.array([0.25, 0.75, 0.5, 0.5]),
+        min_amount=1.0,
+    )
+    result = builder.finalize()
+    try:
+        actual = result.compute(scheduler="synchronous")
+        expected = np.zeros((3, 2, 4, 3), dtype=np.float32)
+        expected[0, 0, 1, 0] = 0.5
+        expected[0, 0, 3, 0] = 1.5
+        expected[0, 0, 1, 2] = 1.0
+        expected[0, 0, 3, 2] = 3.0
+        # Below-threshold values remain anchored at the base year.
+        expected[1, 1, 1, 0] = 0.4
+        assert np.allclose(actual.todense(), expected)
+
+        reduced = builder.reduce_activity_for_flows([0, 1])
+        assert np.allclose(reduced.todense(), expected.sum(axis=0))
+
+        streamed = list(builder.iter_entries_for_flows([0, 1]))
+        coords = np.concatenate(
+            [np.vstack([part[1], part[2], part[3], part[4]]) for part in streamed],
+            axis=1,
+        )
+        values = np.concatenate([part[5] for part in streamed])
+        streamed_inventory = sparse.COO(
+            coords,
+            values,
+            shape=expected.shape,
+            has_duplicates=True,
+        )
+        assert np.allclose(streamed_inventory.todense(), expected)
+
+        diagnostics = builder.diagnostics()
+        assert diagnostics["temporal_factor_count"] == 1
+        assert diagnostics["temporal_factor_candidate_entries"] == 3
+        assert diagnostics["temporal_factor_pulse_entries"] == 6
+        assert diagnostics["explicit_correction_entries"] == 0
+    finally:
+        builder.close()
+
+
 def test_explicit_builder_store_is_not_deleted(tmp_path: Path) -> None:
     builder = ChunkedInventoryBuilder(
         n_activities=1,

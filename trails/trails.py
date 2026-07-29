@@ -5072,6 +5072,9 @@ class Trails:
         store_activity: int | None,
         use_temporal_distributions: bool,
         debug: bool,
+        include_no_td: bool = True,
+        include_ported_td: bool = True,
+        include_matrix_td: bool = True,
     ) -> None:
         """accumulate temporalized biosphere inventory core.
 
@@ -5364,7 +5367,7 @@ class Trails:
 
             no_td_idx, ported_groups, matrix_entries = td_struct
 
-            if no_td_idx is not None:
+            if include_no_td and no_td_idx is not None:
                 idx = no_td_idx
                 if idx.size:
                     anchor_flow_parts.append(flows_full[idx])
@@ -5386,7 +5389,7 @@ class Trails:
             # -------------------------
             # PORTED TD groups (min_amount controls temporalization only)
             # -------------------------
-            if ported_groups:
+            if include_ported_td and ported_groups:
                 for k, idx_full in ported_groups.items():
                     if idx_full is None or idx_full.size == 0:
                         continue
@@ -5500,7 +5503,7 @@ class Trails:
                     row_year_parts.append(years_use)
                     row_value_parts.append(contrib)
 
-            if matrix_entries:
+            if include_matrix_td and matrix_entries:
                 matrix_kernel = self._get_numba_matrix_kernel()
                 if isinstance(matrix_entries, list):
                     grouped: dict[tuple, tuple[list[int], TemporalExchange]] = {}
@@ -5885,9 +5888,7 @@ class Trails:
         candidate_limit = max(n_roots, temporary_budget // 64)
         chunk_size = max(1, min(200_000, candidate_limit // n_roots))
         excluded = excluded_activities or set()
-        excluded_array = np.fromiter(
-            excluded, dtype=np.int64, count=len(excluded)
-        )
+        excluded_array = np.fromiter(excluded, dtype=np.int64, count=len(excluded))
 
         for start in range(0, nnz, chunk_size):
             end = min(start + chunk_size, nnz)
@@ -6018,6 +6019,120 @@ class Trails:
                 raise RuntimeError(
                     "Inventory year index is missing for factorized accumulation"
                 )
+            n_flows = int(self.B.shape[2]) if self.B is not None else 0
+            row_codes = ctx.act_coords.astype(
+                np.int64, copy=False
+            ) * n_flows + ctx.flow_coords.astype(np.int64, copy=False)
+            temporal_by_code: dict[int, TemporalExchange] = {}
+            if use_temporal_distributions and ctx.tpl_label is not None:
+                temporal_by_code = {
+                    int(key[1]) * n_flows + int(key[2]): tex
+                    for key, tex in self.temporal_biosphere_exchanges.items()
+                    if len(key) >= 3 and str(key[0]) == str(ctx.tpl_label)
+                }
+
+            port_groups: dict[tuple, list[int]] = {}
+            matrix_positions: list[int] = []
+            if temporal_by_code:
+                temporal_codes = np.fromiter(
+                    temporal_by_code, dtype=np.int64, count=len(temporal_by_code)
+                )
+                candidate_positions = np.flatnonzero(np.isin(row_codes, temporal_codes))
+
+                def factor_td_key(tex: TemporalExchange) -> tuple:
+                    return (
+                        tex.distribution,
+                        tex.loc,
+                        tex.scale,
+                        tex.offset_min,
+                        tex.offset_max,
+                        getattr(tex, "amount_source", "port"),
+                        tuple(getattr(tex, "offsets", ()) or ()),
+                        tuple(getattr(tex, "weights", ()) or ()),
+                    )
+
+                for position in candidate_positions:
+                    tex = temporal_by_code[int(row_codes[int(position)])]
+                    if getattr(tex, "amount_source", "port") == "matrix":
+                        matrix_positions.append(int(position))
+                    else:
+                        port_groups.setdefault(factor_td_key(tex), []).append(
+                            int(position)
+                        )
+
+            ordinary_rows = np.ones(ctx.data.size, dtype=bool)
+            if matrix_positions:
+                ordinary_rows[np.asarray(matrix_positions, dtype=np.int64)] = False
+
+            ported_row_parts: list[np.ndarray] = []
+            pulse_count_parts: list[np.ndarray] = []
+            pulse_year_parts: list[np.ndarray] = []
+            pulse_weight_parts: list[np.ndarray] = []
+            if port_groups:
+                years_axis = self._inventory_years
+                if years_axis is None or not years_axis.size:
+                    raise RuntimeError("Inventory years are not initialized")
+                first_year = int(years_axis[0])
+                last_year = int(years_axis[-1])
+                for key, positions_list in port_groups.items():
+                    pulses = ctx.pulse_cache.get(key)
+                    if pulses is None:
+                        (
+                            dist,
+                            loc,
+                            scale,
+                            off_min,
+                            off_max,
+                            amount_source,
+                            offsets,
+                            weights,
+                        ) = key
+                        tex = TemporalExchange(
+                            distribution=dist,
+                            loc=loc,
+                            scale=scale,
+                            offset_min=off_min,
+                            offset_max=off_max,
+                            amount_source=amount_source,
+                            offsets=offsets,
+                            weights=weights,
+                        )
+                        pulses = [
+                            (int(offset), float(weight))
+                            for offset, weight in TemporalDistribution(
+                                tex
+                            ).iter_offsets_and_weights(debug=False)
+                        ]
+                        ctx.pulse_cache[key] = pulses
+                    positions = np.asarray(positions_list, dtype=np.int64)
+                    if not pulses:
+                        continue
+                    offsets_array = np.fromiter(
+                        (offset for offset, _ in pulses),
+                        dtype=np.int64,
+                        count=len(pulses),
+                    )
+                    weights_array = np.fromiter(
+                        (weight for _, weight in pulses),
+                        dtype=np.float64,
+                        count=len(pulses),
+                    )
+                    pulse_years = (
+                        np.clip(
+                            int(ctx.base_year) + offsets_array,
+                            first_year,
+                            last_year,
+                        )
+                        - first_year
+                    ).astype(np.int64, copy=False)
+                    ordinary_rows[positions] = False
+                    ported_row_parts.append(positions)
+                    pulse_count_parts.append(
+                        np.full(positions.size, len(pulses), dtype=np.int64)
+                    )
+                    pulse_year_parts.append(np.tile(pulse_years, positions.size))
+                    pulse_weight_parts.append(np.tile(weights_array, positions.size))
+
             builder.append_factor(
                 year_index=int(year_index),
                 activities=ctx.act_coords,
@@ -6025,8 +6140,51 @@ class Trails:
                 biosphere_values=ctx.data,
                 supply_matrix=matrix,
                 roots=roots,
-                excluded_activities=temporal_activities,
+                included_rows=ordinary_rows,
             )
+            if ported_row_parts:
+                ported_rows = np.concatenate(ported_row_parts)
+                pulse_counts = np.concatenate(pulse_count_parts)
+                pulse_indptr = np.concatenate(
+                    [
+                        np.array([0], dtype=np.int64),
+                        np.cumsum(pulse_counts, dtype=np.int64),
+                    ]
+                )
+                builder.append_temporal_factor(
+                    base_year_index=int(year_index),
+                    activities=ctx.act_coords[ported_rows],
+                    flows=ctx.flow_coords[ported_rows],
+                    biosphere_values=ctx.data[ported_rows],
+                    supply_matrix=matrix,
+                    roots=roots,
+                    pulse_indptr=pulse_indptr,
+                    pulse_year_indices=np.concatenate(pulse_year_parts),
+                    pulse_weights=np.concatenate(pulse_weight_parts),
+                    min_amount=float(min_amount),
+                )
+
+            matrix_activities = {
+                int(ctx.act_coords[position]) for position in matrix_positions
+            }
+            for activity in matrix_activities:
+                if activity < 0 or activity >= matrix.shape[0]:
+                    continue
+                supplies = matrix[activity, :]
+                root_columns = np.flatnonzero(supplies != 0.0)
+                for column in root_columns:
+                    self._accumulate_temporalized_biosphere_inventory_core(
+                        ctx,
+                        {int(activity): float(supplies[int(column)])},
+                        min_amount=min_amount,
+                        store_activity=int(roots[int(column)]),
+                        use_temporal_distributions=use_temporal_distributions,
+                        debug=debug,
+                        include_no_td=False,
+                        include_ported_td=False,
+                        include_matrix_td=True,
+                    )
+            return
         else:
             self._accumulate_no_td_supply_matrix(
                 ctx,

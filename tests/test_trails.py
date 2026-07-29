@@ -197,6 +197,7 @@ def test_matrix_inventory_matches_temporal_dictionary_batches(
     """Matrix-native root accumulation must preserve temporal inventory values."""
     legacy = Trails(example_package, interpolate_annual=False)
     matrix_native = Trails(example_package, interpolate_annual=False)
+    factorized = Trails(example_package, interpolate_annual=False)
     try:
         n_activities = int(legacy.A.shape[1])
         root_ids = np.array([0, 1], dtype=np.int64)
@@ -205,9 +206,11 @@ def test_matrix_inventory_matches_temporal_dictionary_batches(
         supply_matrix[2, 0] = 0.5
         supply_matrix[1, 1] = 1.25
         supply_matrix[2, 1] = 0.75
+        supply_matrix[13, 1] = 0.3
+        supply_matrix[16, 0] = 0.2
         supplies = [
-            ({0: 2.0, 2: 0.5}, 0),
-            ({1: 1.25, 2: 0.75}, 1),
+            ({0: 2.0, 2: 0.5, 16: 0.2}, 0),
+            ({1: 1.25, 2: 0.75, 13: 0.3}, 1),
         ]
 
         legacy.reset_inventory(attribute_to_roots=True)
@@ -230,9 +233,28 @@ def test_matrix_inventory_matches_temporal_dictionary_batches(
         actual = matrix_native.finalize_inventory().data
 
         assert np.allclose(actual.todense(), expected.todense())
+
+        factorized.configure_inventory_storage(
+            backend="factorized", memory_budget=2**20
+        )
+        factorized.reset_inventory(attribute_to_roots=True)
+        factorized.accumulate_temporalized_biosphere_inventory_matrix(
+            base_year=2005,
+            supply_matrix=supply_matrix,
+            root_activities=root_ids,
+            min_amount=1e6,
+            use_temporal_distributions=True,
+        )
+        factorized_data = factorized.finalize_inventory().data.compute(
+            scheduler="synchronous"
+        )
+        assert np.allclose(factorized_data.todense(), expected.todense())
+        diagnostics = factorized.inventory_diagnostics
+        assert diagnostics["temporal_factor_count"] == 1
     finally:
         legacy.close()
         matrix_native.close()
+        factorized.close()
 
 
 def test_reset_inventory_uses_inventory_offset_bounds(example_trails: Trails) -> None:
