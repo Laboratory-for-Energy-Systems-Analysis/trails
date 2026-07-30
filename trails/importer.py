@@ -26,7 +26,7 @@ def import_excel_inventory(
     year: int | None = None,
     scenario_label: str | None = None,
     cache_import: bool = False,
-) -> dict[str, int]:
+) -> dict[str, object]:
     """Import excel inventory.
 
     :param trails: Value for `trails`.
@@ -40,7 +40,7 @@ def import_excel_inventory(
     :param cache_import: Value for `cache_import`.
     :type cache_import: bool
     :returns: Return value.
-    :rtype: dict[str, int]
+    :rtype: dict[str, object]
     :raises FileNotFoundError: If an error occurs.
     :raises RuntimeError: If an error occurs.
     :raises ValueError: If an error occurs."""

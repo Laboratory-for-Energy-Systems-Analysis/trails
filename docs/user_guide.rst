@@ -247,6 +247,10 @@ years and interpolated across annual years.
     # Target a single scenario slice instead
     trails.import_excel_inventory("path/to/inventory.xlsx", year=2020)
 
+The method modifies the ``Trails`` instance and returns ``None``. Import counts
+and target scenario indices are available afterward in
+``trails.import_diagnostics``.
+
 Example inventory: ``examples/lci-pass_cars.xlsx``
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 

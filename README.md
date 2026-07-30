@@ -359,6 +359,9 @@ trails.import_excel_inventory("path/to/inventory.xlsx")
 trails.import_excel_inventory("path/to/inventory.xlsx", year=2020)
 ```
 
+The method updates `trails` in place and returns `None`. The import summary is
+available afterward as `trails.import_diagnostics`.
+
 ### Year-specific amounts
 
 You can provide **year-specific amounts** directly in the Excel exchanges by

@@ -7,6 +7,11 @@ from trails.trails import Trails
 from trails.temporal_distributions import TemporalDistribution, TemporalExchange
 
 
+def test_default_ei_version(example_trails: Trails) -> None:
+    assert example_trails.ei_version == "3.12"
+    assert example_trails.default_ei_version == "3.12"
+
+
 def test_map_year_helpers(example_trails: Trails) -> None:
     """Verify year mapping helpers for scenario and template years.
 

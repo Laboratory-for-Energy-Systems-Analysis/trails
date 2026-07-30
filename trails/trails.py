@@ -131,7 +131,7 @@ class Trails:
         methods: list[Any] | None = None,
         method_backend: str = "auto",
         edges_methods: list[Any] | None = None,
-        ei_version: str = "3.11",
+        ei_version: str = "3.12",
         debug: bool = False,
     ) -> None:
         """Initialize a Trails data package wrapper.
@@ -404,6 +404,7 @@ class Trails:
         self.lca_diagnostics: dict[str, object] = {}
         self.lci_diagnostics: dict[str, object] = {}
         self.lcia_diagnostics: dict[str, object] = {}
+        self.import_diagnostics: dict[str, object] = {}
         self.lcia_results: dict[str, dict[str, Any]] = {}
         self.current_lcia_result: str | None = None
 
@@ -747,7 +748,7 @@ class Trails:
         year: int | None = None,
         scenario_label: str | None = None,
         cache_import: bool = False,
-    ) -> dict[str, int]:
+    ) -> None:
         """Import excel inventory.
 
         :param path: Value for `path`.
@@ -758,14 +759,15 @@ class Trails:
         :type scenario_label: str | None
         :param cache_import: Value for `cache_import`.
         :type cache_import: bool
-        :returns: Return value.
-        :rtype: dict[str, int]"""
+        :returns: None. Import counts are stored in ``import_diagnostics``.
+        :rtype: None"""
         from .importer import import_excel_inventory
 
         self._invalidate_calculation_results(close_inventory=True)
         self.graph = None
+        self.import_diagnostics = {}
 
-        return import_excel_inventory(
+        self.import_diagnostics = import_excel_inventory(
             self,
             path,
             year=year,

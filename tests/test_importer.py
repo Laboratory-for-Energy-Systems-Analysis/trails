@@ -9,6 +9,7 @@ import pytest
 import sparse
 
 from trails.importer import import_excel_inventory
+from trails.trails import Trails
 
 
 class DummyTrails:
@@ -53,6 +54,11 @@ class DummyTrails:
 
         self.min_year = 2000
         self.max_year = 2010
+        self.graph = object()
+        self.invalidated_with_close_inventory = False
+
+    def _invalidate_calculation_results(self, *, close_inventory: bool) -> None:
+        self.invalidated_with_close_inventory = bool(close_inventory)
 
     def _map_year_to_template_year(self, year: int) -> int:
         return 2000 if year < 2005 else 2010
@@ -196,6 +202,21 @@ def test_import_excel_inventory_all_template_years(tmp_path: Path) -> None:
     assert trails._B_cf_actvec_cache == {}
     assert trails._bio_score_row_char_cache == {}
     assert trails._bio_score_row_char_matrix_cache == {}
+
+
+def test_trails_import_excel_inventory_returns_none(tmp_path: Path) -> None:
+    trails = DummyTrails()
+    _install_fake_bw2io(_sample_importer_data())
+    inv_path = tmp_path / "inv.xlsx"
+    inv_path.write_text("stub")
+
+    result = Trails.import_excel_inventory(trails, inv_path)
+
+    assert result is None
+    assert trails.invalidated_with_close_inventory is True
+    assert trails.graph is None
+    assert trails.import_diagnostics["new_activities"] == 2
+    assert trails.import_diagnostics["new_flows"] == 1
 
 
 def test_import_excel_inventory_single_year(tmp_path: Path) -> None:
