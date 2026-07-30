@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from typing import List, TYPE_CHECKING
 
 import numpy as np
@@ -135,11 +137,35 @@ def _build_cf_matrix_flowid_space(
     if n_flows <= 0:
         return np.zeros((0, 0), dtype=np.float64)
 
-    cache_key = ("cf_matrix_flowid_space", ei_version, tuple(methods))
+    flowkey_to_flowid = _build_flowkey_to_flowindex(trails)
+    hasher = hashlib.blake2b(digest_size=20)
+    hasher.update(str(n_flows).encode("ascii"))
+    for flow_key, flow_position in sorted(
+        flowkey_to_flowid.items(),
+        key=lambda item: (
+            str(item[0][0]),
+            str(item[0][1]),
+            str(item[0][2]),
+            int(item[1]),
+        ),
+    ):
+        record = [*(str(part) for part in flow_key), int(flow_position)]
+        hasher.update(
+            json.dumps(record, ensure_ascii=False, separators=(",", ":")).encode(
+                "utf-8"
+            )
+        )
+        hasher.update(b"\x00")
+    flow_fingerprint = hasher.hexdigest()
+
+    cache_key = (
+        "cf_matrix_flowid_space",
+        ei_version,
+        tuple(methods),
+        flow_fingerprint,
+    )
     if cache_key in char_cache:
         return char_cache[cache_key]
-
-    flowkey_to_flowid = _build_flowkey_to_flowindex(trails)
 
     methods_dict = get_lcia_methods(methods=methods, ei_version=ei_version)
 

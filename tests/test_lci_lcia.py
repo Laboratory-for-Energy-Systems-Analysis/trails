@@ -10,6 +10,7 @@ import xarray as xr
 from trails.lcia import lcia, resolve_lcia_methods
 from trails.lcia import get_lcia_method_names
 from trails.trails import Trails
+import trails.characterization as characterization_module
 
 
 def test_resolve_lcia_methods_requires_configuration() -> None:
@@ -42,6 +43,61 @@ def test_lcia_requires_lci_first() -> None:
     trails = SimpleNamespace(inventory=None)
     with pytest.raises(RuntimeError, match=r"run trails\.lci\(\)"):
         lcia(trails, methods=["regular"])
+
+
+def test_cf_cache_is_scoped_to_biosphere_flow_mapping(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    flow_key = ("Carbon dioxide, fossil", "air", "urban air close to ground")
+
+    def model(n_flows: int, target_position: int) -> SimpleNamespace:
+        metadata = {
+            idx: {
+                "name": f"uncharacterized flow {idx}",
+                "compartment": "air",
+                "subcompartment": "",
+            }
+            for idx in range(n_flows)
+        }
+        metadata[target_position] = {
+            "name": flow_key[0],
+            "compartment": flow_key[1],
+            "subcompartment": flow_key[2],
+        }
+        return SimpleNamespace(
+            B=SimpleNamespace(shape=(1, 1, n_flows)),
+            inventory=xr.DataArray(
+                np.zeros((1, n_flows, 1), dtype=float),
+                dims=("activity", "flow", "year"),
+                coords={"activity": [0], "flow": np.arange(n_flows), "year": [2035]},
+            ),
+            biosphere_indices={"2035": metadata},
+        )
+
+    monkeypatch.setattr(
+        characterization_module,
+        "get_lcia_methods",
+        lambda **kwargs: {"GWP": {flow_key: 1.0}},
+    )
+    cache: dict[tuple, np.ndarray] = {}
+
+    two_flow_cf = characterization_module.get_cf_matrix(
+        model(2, 0), ["GWP"], cache, ei_version="3.12"
+    )
+    large_cf = characterization_module.get_cf_matrix(
+        model(9_850, 9_849), ["GWP"], cache, ei_version="3.12"
+    )
+    reordered_cf = characterization_module.get_cf_matrix(
+        model(2, 1), ["GWP"], cache, ei_version="3.12"
+    )
+
+    assert two_flow_cf.shape == (1, 2)
+    assert two_flow_cf[0, 0] == pytest.approx(1.0)
+    assert large_cf.shape == (1, 9_850)
+    assert large_cf[0, 9_849] == pytest.approx(1.0)
+    assert reordered_cf.shape == (1, 2)
+    assert reordered_cf[0, 1] == pytest.approx(1.0)
+    assert len(cache) == 3
 
 
 def test_lci_then_regular_lcia_reuses_inventory(example_trails: Trails) -> None:
