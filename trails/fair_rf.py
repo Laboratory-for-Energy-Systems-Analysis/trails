@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 from threading import Lock
 from typing import Any, Dict, Tuple
+import warnings
 
 import pandas as pd
 import numpy as np
@@ -37,9 +38,9 @@ from .fair_io import (
 )
 from .chunked_inventory import is_chunked_sparse, iter_sparse_blocks
 
-# FaIR ensemble runs are not reliably thread-safe with all SciPy/FaIR
-# combinations. Serialize the actual model execution so per-species threading in
-# ``run_fair_delta_rf`` cannot overlap calls into ``fair.FAIR.run``.
+# FaIR's setup phase is not reliably thread-safe with all SciPy/FaIR
+# combinations. Unprepared/fallback runs remain serialized; prepared runs reuse
+# setup generated once in the cached template and operate on independent copies.
 _FAIR_RUN_LOCK = Lock()
 
 
@@ -513,9 +514,45 @@ def _build_fair_template_cached(
     f.override_defaults(config_csv)
 
     # Initialize arrays to stable values before each deep-copied run.
+    f.emissions.data[...] = 0
     initialise(f.temperature, 0)
     initialise(f.forcing, 0)
+
+    # These setup products only depend on the time axis, species, and calibrated
+    # configurations, all of which are part of this function's cache key.  FaIR
+    # normally rebuilds them at the start of every run; doing that for every
+    # per-species perturbation is particularly costly for large ensembles.
+    f._check_properties()
+    f._make_indices()
+    if f._routine_flags["temperature"]:
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                "ignore",
+                category=RuntimeWarning,
+                module="scipy.stats._multivariate",
+            )
+            f._make_ebms()
+    f._trails_prepared_setup = True
     return f
+
+
+def _run_prepared_fair(f: fair.FAIR, *, progress: bool) -> None:
+    """Run FaIR while reusing immutable setup cached in a copied template."""
+    if not getattr(f, "_trails_prepared_setup", False):
+        f.run(progress=progress)
+        return
+
+    # ``FAIR.run`` unconditionally rebuilds these objects.  Shadow the setup
+    # methods only for this call; the cached indices and EBM matrices copied
+    # from the template remain available to the numerical integration.
+    method_names = ("_check_properties", "_make_indices", "_make_ebms")
+    for name in method_names:
+        setattr(f, name, lambda: None)
+    try:
+        f.run(progress=progress)
+    finally:
+        for name in method_names:
+            delattr(f, name)
 
 
 def _fill_emissions_from_df_fast(
@@ -810,8 +847,11 @@ def _run_fair_emissions(
         year_cols=year_cols,
         year_vals=year_vals,
     )
-    with _FAIR_RUN_LOCK:
-        f.run(progress=progress)
+    if getattr(f, "_trails_prepared_setup", False):
+        _run_prepared_fair(f, progress=progress)
+    else:
+        with _FAIR_RUN_LOCK:
+            _run_prepared_fair(f, progress=progress)
     if not np.isfinite(f.forcing.values).any():
         forcing = _compute_ghg_forcing_from_concentration(f)
         if forcing is not None:

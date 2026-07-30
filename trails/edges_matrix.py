@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from copy import deepcopy
 from contextlib import nullcontext, redirect_stdout
 from io import StringIO
 from types import SimpleNamespace
@@ -315,7 +314,12 @@ def _cache_cf_entries_by_signature(
     for entry in entries:
         if entry.get("direction") != "biosphere-technosphere":
             continue
-        template = deepcopy(dict(entry))
+        # EDGES only reads nested CF metadata during deterministic evaluation.
+        # Keep the immutable nested structures shared and detach only the entry
+        # dictionary whose ``positions`` field is removed below. Prospective
+        # AWARE fallback metadata is large enough that recursive copies dominate
+        # runtime when repeated across signatures and years.
+        template = dict(entry)
         template.pop("positions", None)
         for supplier, consumer in entry.get("positions", ()):
             edge = (int(supplier), int(consumer))
@@ -354,11 +358,11 @@ def _evaluate_edges_mapping_for_year(
             grouped_positions[template_id].append(edge)
 
     for template_id, template in grouped_templates.items():
-        restored = deepcopy(template)
+        restored = dict(template)
         restored["positions"] = tuple(grouped_positions[template_id])
         combined_entries.append(restored)
 
-    combined_entries.extend(deepcopy(list(mapped_entries)))
+    combined_entries.extend(dict(entry) for entry in mapped_entries)
     edge_lca.cfs_mapping = combined_entries
     edge_lca.evaluate_cfs(scenario_idx=int(year))
 
@@ -435,6 +439,7 @@ def _build_edges_characterization_matrices_for_year(
     strategies: list[str] | None = None,
     biosphere_edges: set[tuple[int, int]] | None = None,
     mapping_caches: list[dict[str, Any]] | None = None,
+    evaluator_cache: list[Any | None] | None = None,
     progress: Any | None = None,
     progress_update: bool = True,
     suppress_edges_output: bool = True,
@@ -502,12 +507,39 @@ def _build_edges_characterization_matrices_for_year(
 
     planes: list[sp.csr_matrix] = []
     for method_idx, method in enumerate(methods):
-        edge_lca = EdgeLCIA(
-            demand={},
-            method=method,
-            lca=lca_obj,
-            additional_topologies=additional_topologies,
-        )
+        edge_lca = None
+        if evaluator_cache is not None and method_idx < len(evaluator_cache):
+            edge_lca = evaluator_cache[method_idx]
+        if edge_lca is None:
+            edge_lca = EdgeLCIA(
+                demand={},
+                method=method,
+                lca=lca_obj,
+                additional_topologies=additional_topologies,
+            )
+            if evaluator_cache is not None and method_idx < len(evaluator_cache):
+                evaluator_cache[method_idx] = edge_lca
+        else:
+            # Loading and normalizing a large EDGES method can take several
+            # seconds. The method is invariant across inventory years, so keep
+            # the initialized evaluator and replace only its year-specific LCA
+            # adapter and metadata lookups.
+            edge_lca.lca = lca_obj
+            for attr in (
+                "_base_supplier_lookup_bio",
+                "_base_supplier_lookup_tech",
+                "_base_consumer_lookup",
+            ):
+                if hasattr(edge_lca, attr):
+                    setattr(edge_lca, attr, None)
+            for attr in (
+                "_cls_hits_cache",
+                "_cf_pair_match_cache",
+                "_cf_valid_pairs_cache",
+            ):
+                cache = getattr(edge_lca, attr, None)
+                if hasattr(cache, "clear"):
+                    cache.clear()
         supplier_matrices = _method_supplier_matrices(edge_lca)
         if supplier_matrices != {"biosphere"}:
             raise NotImplementedError(
@@ -771,6 +803,7 @@ def _score_chunked_inventory_with_edges(
     mapping_caches: list[dict[str, Any]] | None = (
         [{} for _method in methods] if reuse_cached_cfs else None
     )
+    evaluator_cache: list[Any | None] = [None for _method in methods]
     progress_total = len(year_indices_seen) * n_methods
     progress_context = (
         tqdm(
@@ -820,6 +853,7 @@ def _score_chunked_inventory_with_edges(
                         strategies=strategies,
                         biosphere_edges=edges_by_year[inventory_year],
                         mapping_caches=mapping_caches,
+                        evaluator_cache=evaluator_cache,
                         progress=progress,
                         suppress_edges_output=True,
                     )
@@ -929,7 +963,7 @@ def _score_finalized_builder_with_edges(
     reuse_cached_cfs: bool,
     show_progress: bool,
 ) -> xr.DataArray:
-    """Score selected finalized runs in one bounded, year-ordered pass."""
+    """Score selected finalized runs with one EDGES evaluation per year."""
     n_methods = len(methods)
     n_activities = int(inv.sizes["activity"])
     n_years = int(inv.sizes["year"])
@@ -958,35 +992,76 @@ def _score_finalized_builder_with_edges(
     mapping_caches: list[dict[str, Any]] | None = (
         [{} for _method in methods] if reuse_cached_cfs else None
     )
+    evaluator_cache: list[Any | None] = [None for _method in methods]
     output_coords: list[np.ndarray] = []
     output_data: list[np.ndarray] = []
 
+    # Factorized inventories emit multiple records whose values can overlap in
+    # calendar years. Collect the complete edge set first so each actual year is
+    # mapped and evaluated exactly once, rather than once per factor/correction
+    # record. This first pass only retains tiny sets of integer edge pairs.
+    edges_by_year_idx: dict[int, set[tuple[int, int]]] = {}
+    for (
+        _year_block,
+        activities,
+        flows,
+        year_indices,
+        _roots,
+        _values,
+    ) in builder.iter_entries_for_flows(eligible_flows, show_progress=False):
+        for year_idx in np.unique(year_indices):
+            year_idx_i = int(year_idx)
+            mask = year_indices == year_idx_i
+            pair_ids = np.unique(
+                flows[mask].astype(np.int64, copy=False) * n_activities
+                + activities[mask].astype(np.int64, copy=False)
+            )
+            edges = edges_by_year_idx.setdefault(year_idx_i, set())
+            edges.update(
+                (int(pair_id // n_activities), int(pair_id % n_activities))
+                for pair_id in pair_ids
+            )
+
     progress_context = (
         tqdm(
-            total=int(getattr(builder, "nnz", 0)),
+            total=len(edges_by_year_idx) * n_methods,
             desc="EDGES LCIA",
-            unit="entry",
-            unit_scale=True,
+            unit="method-year",
             leave=True,
         )
-        if show_progress
+        if show_progress and edges_by_year_idx
         else nullcontext()
     )
 
-    def score_year_block(
-        parts: list[tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]],
-        progress: Any | None,
-    ) -> None:
-        if not parts:
-            return
-        activities = np.concatenate([part[0] for part in parts])
-        flows = np.concatenate([part[1] for part in parts])
-        year_indices = np.concatenate([part[2] for part in parts])
-        roots = np.concatenate([part[3] for part in parts])
-        values = np.concatenate([part[4] for part in parts]).astype(dtype, copy=False)
+    matrices_by_year_idx: dict[int, list[sp.csr_matrix]] = {}
+    with progress_context as progress:
+        for year_idx in sorted(edges_by_year_idx):
+            matrices_by_year_idx[year_idx] = (
+                _build_edges_characterization_matrices_for_year(
+                    trails,
+                    methods,
+                    year=int(years[year_idx]),
+                    additional_topologies=additional_topologies,
+                    strategies=strategies,
+                    biosphere_edges=edges_by_year_idx[year_idx],
+                    mapping_caches=mapping_caches,
+                    evaluator_cache=evaluator_cache,
+                    progress=progress,
+                    suppress_edges_output=True,
+                )
+            )
+
+    for (
+        _year_block,
+        activities,
+        flows,
+        year_indices,
+        roots,
+        values,
+    ) in builder.iter_entries_for_flows(eligible_flows, show_progress=False):
+        values = values.astype(dtype, copy=False)
         block_coords: list[np.ndarray] = []
         block_data: list[np.ndarray] = []
-
         for year_idx in np.unique(year_indices):
             year_idx_i = int(year_idx)
             mask = year_indices == year_idx_i
@@ -994,28 +1069,7 @@ def _score_finalized_builder_with_edges(
             flow_group = flows[mask]
             value_group = values[mask]
             root_group = roots[mask]
-            pair_ids = np.unique(
-                flow_group.astype(np.int64, copy=False) * n_activities
-                + act_group.astype(np.int64, copy=False)
-            )
-            biosphere_edges = {
-                (int(pair_id // n_activities), int(pair_id % n_activities))
-                for pair_id in pair_ids
-            }
-            inventory_year = int(years[year_idx_i])
-            matrices = _build_edges_characterization_matrices_for_year(
-                trails,
-                methods,
-                year=inventory_year,
-                additional_topologies=additional_topologies,
-                strategies=strategies,
-                biosphere_edges=biosphere_edges,
-                mapping_caches=mapping_caches,
-                progress=progress,
-                progress_update=False,
-                suppress_edges_output=True,
-            )
-            for method_idx, matrix in enumerate(matrices):
+            for method_idx, matrix in enumerate(matrices_by_year_idx[year_idx_i]):
                 cf_values = _lookup_sparse_values(matrix, flow_group, act_group)
                 scored = value_group * cf_values.astype(value_group.dtype, copy=False)
                 keep = scored != 0.0
@@ -1052,39 +1106,11 @@ def _score_finalized_builder_with_edges(
                 output_coords.append(canonical.coords.copy())
                 output_data.append(canonical.data.copy())
 
-    current_year_block: int | None = None
-    year_block_parts: list[
-        tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]
-    ] = []
-    with progress_context as progress:
-        for (
-            year_block,
-            activities,
-            flows,
-            year_indices,
-            roots,
-            values,
-        ) in builder.iter_entries_for_flows(
-            eligible_flows,
-            show_progress=False,
-            progress=progress,
-        ):
-            if current_year_block is None:
-                current_year_block = int(year_block)
-            elif int(year_block) != current_year_block:
-                score_year_block(year_block_parts, progress)
-                year_block_parts.clear()
-                current_year_block = int(year_block)
-            year_block_parts.append((activities, flows, year_indices, roots, values))
-        score_year_block(year_block_parts, progress)
-
     if output_coords:
         arr = sparse.COO(
             np.concatenate(output_coords, axis=1),
             np.concatenate(output_data).astype(dtype, copy=False),
             shape=shape,
-            has_duplicates=False,
-            sorted=False,
         )
     else:
         arr = sparse.zeros(shape, dtype=dtype)
@@ -1220,6 +1246,7 @@ def score_inventory_with_edges(
     mapping_caches: list[dict[str, Any]] | None = (
         [{} for _method in methods] if reuse_cached_cfs else None
     )
+    evaluator_cache: list[Any | None] = [None for _method in methods]
 
     for year_idx in np.unique(year_indices):
         inventory_year = int(years[int(year_idx)])
@@ -1257,6 +1284,7 @@ def score_inventory_with_edges(
                 strategies=strategies,
                 biosphere_edges=edges_by_year[inventory_year],
                 mapping_caches=mapping_caches,
+                evaluator_cache=evaluator_cache,
                 progress=progress,
                 suppress_edges_output=True,
             )

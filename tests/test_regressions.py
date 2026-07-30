@@ -97,6 +97,88 @@ def test_run_fair_emissions_serializes_fair_runs(
     assert run_state["max_active"] == 1
 
 
+def test_run_fair_emissions_parallelizes_prepared_runs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    emissions = pd.DataFrame(
+        {
+            "scenario": ["s"],
+            "region": ["World"],
+            "variable": ["CO2"],
+            "unit": ["Gt CO2/yr"],
+            "2000.5": [0.0],
+            "2001.5": [0.0],
+        }
+    )
+    run_state = {"active": 0, "max_active": 0}
+
+    class FakeArray:
+        def __init__(self) -> None:
+            self.values = np.zeros((1, 1, 2, 1), dtype=float)
+            self.data = self.values
+
+        def __deepcopy__(self, memo: dict[int, object]) -> "FakeArray":
+            del memo
+            return FakeArray()
+
+    class FakeFair:
+        _trails_prepared_setup = True
+
+        def __init__(self) -> None:
+            self.forcing = FakeArray()
+
+        def _check_properties(self) -> None:
+            raise AssertionError("prepared setup should be reused")
+
+        def _make_indices(self) -> None:
+            raise AssertionError("prepared setup should be reused")
+
+        def _make_ebms(self) -> None:
+            raise AssertionError("prepared setup should be reused")
+
+        def run(self, progress: bool = False) -> None:
+            del progress
+            run_state["active"] += 1
+            run_state["max_active"] = max(run_state["max_active"], run_state["active"])
+            import time
+
+            time.sleep(0.02)
+            run_state["active"] -= 1
+
+        def __deepcopy__(self, memo: dict[int, object]) -> "FakeFair":
+            del memo
+            return FakeFair()
+
+    monkeypatch.setattr(
+        fair_rf_module,
+        "_build_fair_template_cached",
+        lambda **kwargs: FakeFair(),
+    )
+    monkeypatch.setattr(
+        fair_rf_module,
+        "_fill_emissions_from_df_fast",
+        lambda *args, **kwargs: None,
+    )
+
+    with ThreadPoolExecutor(max_workers=3) as executor:
+        futures = [
+            executor.submit(
+                fair_rf_module._run_fair_emissions,
+                emissions,
+                "s",
+                config_csv="dummy.csv",
+                properties_csv="dummy.csv",
+                config_names=["c1", "c2"],
+                progress=False,
+            )
+            for _ in range(4)
+        ]
+        for future in futures:
+            future.result()
+
+    assert run_state["max_active"] > 1
+
+
 class DummyTrails:
     """Minimal Trails stub for importer tests."""
 
@@ -1700,7 +1782,9 @@ def test_plot_temporal_scores_auto_trims_year_window() -> None:
     assert x[-1] == 2004
 
 
-def test_plot_temporal_scores_prefers_compact_scores_over_characterized_inventory() -> None:
+def test_plot_temporal_scores_prefers_compact_scores_over_characterized_inventory() -> (
+    None
+):
     trails = DummyTrailsScores()
     # This deliberately lacks the dimensions required by the characterized
     # inventory plotting path. Ordinary plots must use the independently

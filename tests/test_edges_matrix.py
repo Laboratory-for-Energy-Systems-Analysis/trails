@@ -8,6 +8,9 @@ import xarray as xr
 
 from trails.edges_matrix import (
     _build_edges_characterization_matrices_for_year,
+    _cache_cf_entries_by_signature,
+    _evaluate_edges_mapping_for_year,
+    _score_finalized_builder_with_edges,
     score_inventory_with_edges,
 )
 
@@ -210,6 +213,53 @@ def test_build_edges_matrices_uses_real_edges_year_expression() -> None:
     assert matrices[0][0, 0] == pytest.approx(3.0)
 
 
+def test_cached_mapping_does_not_recursively_copy_nested_metadata() -> None:
+    class NoRecursiveCopy:
+        def __deepcopy__(self, memo):
+            raise AssertionError("nested mapping metadata must remain shared")
+
+    nested = NoRecursiveCopy()
+    mapped_entry = {
+        "supplier": {"matrix": "biosphere"},
+        "consumer": {"matrix": "technosphere"},
+        "direction": "biosphere-technosphere",
+        "positions": ((0, 0),),
+        "value": 2.0,
+        "nested": nested,
+    }
+    cache = {}
+    processed = _cache_cf_entries_by_signature(
+        cache,
+        [mapped_entry],
+        {0: {"name": "flow"}},
+        {0: {"name": "activity"}},
+    )
+    template = next(iter(cache["entries_by_signature"].values()))[0]
+
+    class FakeEdgeLCIA:
+        def __init__(self):
+            self.cfs_mapping = []
+            self.characterization_matrix = None
+
+        def evaluate_cfs(self, scenario_idx):
+            assert self.cfs_mapping[0]["nested"] is nested
+            assert self.cfs_mapping[0]["positions"] == ((0, 0),)
+            self.characterization_matrix = sp.csr_matrix([[2.0]])
+
+    matrix = _evaluate_edges_mapping_for_year(
+        FakeEdgeLCIA(),
+        year=2000,
+        shape=(1, 1),
+        cached_entries_by_edge={(0, 0): [template]},
+        mapped_entries=[],
+    )
+
+    assert processed == {(0, 0)}
+    assert "positions" not in template
+    assert mapped_entry["positions"] == ((0, 0),)
+    assert matrix[0, 0] == pytest.approx(2.0)
+
+
 @pytest.mark.parametrize("use_named_method", [False, True])
 def test_edges_method_maps_one_representative_per_matching_signature(
     monkeypatch: pytest.MonkeyPatch,
@@ -328,9 +378,11 @@ def test_score_inventory_with_edges_reuses_cached_mappings_for_next_year(
     trails = DummyScoringTrails(inventory)
     mapped_edge_sets = []
     evaluated_expressions = []
+    constructor_calls = []
 
     class FakeEdgeLCIA:
         def __init__(self, *args, **kwargs):
+            constructor_calls.append(kwargs["lca"])
             self.lca = kwargs["lca"]
             self.raw_cfs_data = [{"supplier": {"matrix": "biosphere"}}]
             self.cfs_mapping = []
@@ -378,10 +430,79 @@ def test_score_inventory_with_edges_reuses_cached_mappings_for_next_year(
         ["year_specific_cf"],
         ["year_specific_cf", "year_specific_cf"],
     ]
+    assert len(constructor_calls) == 1
     assert np.asarray(scores.data.todense()).tolist() == [
         [5.0, 12.0],
         [0.0, 14.0],
     ]
+
+
+def test_finalized_builder_evaluates_each_year_once_across_factor_blocks(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    inventory = xr.DataArray(
+        sparse.zeros((2, 1, 1, 1), dtype=float),
+        dims=("activity", "flow", "year", "root activity"),
+        coords={
+            "activity": [0, 1],
+            "flow": [0],
+            "year": [2000],
+            "root activity": [0],
+        },
+    )
+    trails = DummyTrails(inventory)
+    build_calls = []
+
+    class FakeBuilder:
+        def __init__(self):
+            self.iteration_count = 0
+
+        def iter_entries_for_flows(self, eligible_flows, *, show_progress):
+            assert eligible_flows.tolist() == [0]
+            assert show_progress is False
+            self.iteration_count += 1
+            yield (
+                0,
+                np.array([0], dtype=np.int64),
+                np.array([0], dtype=np.int64),
+                np.array([0], dtype=np.int64),
+                np.array([0], dtype=np.int64),
+                np.array([2.0]),
+            )
+            yield (
+                1,
+                np.array([0, 1], dtype=np.int64),
+                np.array([0, 0], dtype=np.int64),
+                np.array([0, 0], dtype=np.int64),
+                np.array([0, 0], dtype=np.int64),
+                np.array([1.0, 3.0]),
+            )
+
+    def fake_matrix_builder(trails_arg, methods, *, year, biosphere_edges, **kwargs):
+        build_calls.append((year, set(biosphere_edges)))
+        return [sp.csr_matrix(np.array([[4.0, 5.0]]))]
+
+    monkeypatch.setattr(
+        "trails.edges_matrix._build_edges_characterization_matrices_for_year",
+        fake_matrix_builder,
+    )
+    builder = FakeBuilder()
+
+    scores = _score_finalized_builder_with_edges(
+        trails,
+        inventory,
+        ["edge-method"],
+        builder=builder,
+        eligible_flows=np.array([0], dtype=np.int64),
+        additional_topologies=None,
+        strategies=None,
+        reuse_cached_cfs=True,
+        show_progress=False,
+    )
+
+    assert builder.iteration_count == 2
+    assert build_calls == [(2000, {(0, 0), (0, 1)})]
+    assert np.asarray(scores.data.todense()).tolist() == [[[12.0]], [[15.0]]]
 
 
 def test_score_inventory_with_edges_can_disable_cross_year_cache(
