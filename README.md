@@ -166,8 +166,9 @@ from trails import (
 # Load a Frictionless data package exported by premise (or compatible tooling)
 package = Package("path/to/datapackage.json")
 
-# Choose an LCIA method bundled with TRAILS
-method = get_lcia_method_names(ei_version="3.11")[0]
+# Choose an LCIA method bundled with TRAILS. Trails defaults to ecoinvent 3.12.
+EI_VERSION = "3.12"
+method = get_lcia_method_names(ei_version=EI_VERSION)[0]
 
 # Initialize TRAILS with annual interpolation.
 # By default, annual years are extended by one year on each side
@@ -175,7 +176,7 @@ method = get_lcia_method_names(ei_version="3.11")[0]
 trails = Trails(
     package,
     interpolate_annual=True,
-    ei_version="3.11",
+    ei_version=EI_VERSION,
 )
 
 # Optional: wider padding, e.g., 20 years before/after
@@ -184,7 +185,7 @@ trails = Trails(
 #     interpolate_annual=True,
 #     interpolation_start_year_offset=-20,
 #     interpolation_end_year_offset=20,
-#     ei_version="3.11",
+#     ei_version=EI_VERSION,
 # )
 
 # Pick an activity index from the metadata
@@ -223,13 +224,38 @@ sankey.show()
 
 ---
 
+### Finding activities
+
+Use `search_activity()` to combine activity-name, reference-product, and
+location filters. Filters are combined with AND; each can use substring
+matching (the default) or exact matching.
+
+```python
+from trails import search_activity
+
+matches = search_activity(
+    trails,
+    name="electricity production",
+    reference_product="electricity, high voltage",
+    location="CH",
+)
+print(matches)  # use the index column as start_act_idx
+```
+
+`query` is a positional alias for `name`. Set `scenario_label="2030"` to search
+one metadata slice, or `kind="biosphere"` to search flows; reference-product
+and location filters only apply to technosphere activities.
+
+---
+
 ### Temporal routing modes
 
-`temporal_routing()` is adaptive by default. The default cutoff is a relative
-score-potential cutoff of `1e-4`, meaning that a branch can stop being expanded
-explicitly once its estimated static score potential is at most 0.01% of the
-functional unit's static score potential. Stopped branches remain frontier
-demands and are still included in the year-wise matrix solve.
+When `max_depth` is omitted, `temporal_routing()` uses adaptive routing with a
+default relative score-potential cutoff of `1e-4`; explicit regular
+`adaptive_methods` are required. A branch can stop being expanded once its
+estimated static score potential is at most 0.01% of the functional unit's
+static score potential. Stopped branches remain frontier demands and are still
+included in the year-wise matrix solve.
 
 ```python
 # 1. Default adaptive routing
@@ -370,6 +396,23 @@ are written to the corresponding years in `A`/`B`, and TRAILS interpolates
 between them across annual years as usual. If no year-specific columns are
 present, the importer uses the standard `amount` field.
 
+### Static reference calculation
+
+Use `static_lca()` for a conventional, single-year comparison. The method
+updates `trails.static_score` and returns `None`; scores follow the order of the
+requested methods. A pre-existing temporal inventory and characterized
+inventory are restored after the static calculation.
+
+```python
+trails.static_lca(
+    year=2030,
+    act_idx=start_act_idx,
+    methods=[method],
+    amount=1.0,
+)
+static_scores = trails.static_score
+```
+
 
 ## [FaIR](https://github.com/OMS-NetZero/FAIR) Climate Model Integration
 
@@ -422,6 +465,49 @@ Notes:
   ``run_fair_delta_rf`` (bundled default uses REMIND/FaIR data).
 * If you don't pass ``config_name`` or ``config_names``, TRAILS evaluates all
   available FaIR configurations and stores quantiles across the ensemble.
+
+### Fixed-window CO2 pulse equivalents
+
+`run_fair_co2_pulse_equivalents()` compares the integrated radiative forcing
+and temperature response of the complete temporal inventory with a known CO2
+pulse in the same background scenario. It runs the baseline, inventory, and
+reference-pulse cases, calculates the ratio for every FaIR configuration, and
+then reports ensemble quantiles.
+
+```python
+from trails.fair_rf import run_fair_co2_pulse_equivalents
+
+pulse_result = run_fair_co2_pulse_equivalents(
+    trails,
+    scenario="REMIND|SSP2-PkBudg1000",
+    reference_pulse_year=2035,
+    window_start=2026,
+    window_end=2065,
+    reference_pulse_mass_kg=1.0e9,  # numerical reference: 1 Mt CO2
+)
+
+integrated_rf = pulse_result["co2_pulse_equivalent"]["integrated_rf"]
+median_co2_equivalent_kg = integrated_rf["median"]
+```
+
+A negative equivalent denotes net cooling relative to the background. For a
+linearly scalable system, invert the ratio to ask how much gross DACCS is needed
+for a target RF-equivalent removal:
+
+```python
+target_equivalent_kg = 1_000.0  # one tonne CO2
+modelled_daccs_kg = 20.0e9      # gross capture represented by this inventory
+
+required_daccs_kg = (
+    target_equivalent_kg
+    * modelled_daccs_kg
+    / abs(median_co2_equivalent_kg)
+)
+```
+
+This is specific to the selected scenario, reference-pulse year, assessment
+window, inventory timing, and FaIR configuration ensemble. It is not a physical
+storage-efficiency or GWP100 result.
 
 ## Method Overview
 
@@ -506,9 +592,10 @@ Core modules and responsibilities:
 
 * `trails/datapackage.py`: load matrices, indices, and temporal metadata.
 * `trails/trails.py`: main wrapper, temporal traversal, inventory/score accumulation.
-* `trails/lca.py`: orchestration of traversal + per-year solves (`iterative`,
-  `direct`, or `bw2calc`; default is `iterative`).
-* `trails/lcia.py`: bundled LCIA methods and characterization factor matrices.
+* `trails/lca.py`: temporal inventory construction and per-year solves
+  (`iterative`, `direct`, or `bw2calc`; default is `iterative`).
+* `trails/lcia.py`: reusable regular/EDGES characterization of finalized
+  inventories and bundled LCIA method utilities.
 * `trails/plotting.py`: time-series visualization helpers.
 
 ## FAQ
@@ -532,15 +619,19 @@ exist in the package, the nearest available scenario year is used.
 for regular methods, exposes a lazy or sparse ``trails.characterized_inventory``.
 Repeated ``lcia()`` calls reuse the same inventory.
 
-Large root-attributed direct or iterative inventories automatically use the
-factorized backend when their predicted eager allocation exceeds the memory
-budget. Other large inventories use bounded, disk-backed sparse storage.
-``trails.inventory`` and ``trails.characterized_inventory`` remain
-``xarray.DataArray`` objects; their data can be a Dask array of sparse COO blocks.
-Buffered partitions are written into a fixed set of binary shard buckets, which
-are compacted independently as they grow. Adjacent inventory years share both
-storage partitions and Dask chunks. This bounds file count, reclaims duplicates
-without a whole-inventory copy, and reduces scheduler overhead.
+With ``inventory_backend="auto"``, small results remain eager sparse COO arrays.
+When a root-attributed direct or iterative inventory is predicted to exceed the
+memory budget, TRAILS automatically selects the factorized backend. It stores
+annual activity-by-root supply matrices, biosphere coefficient vectors, and
+compact kernels for ported temporal exchanges, then materializes bounded sparse
+Dask blocks only when consumers request them. Matrix-sourced temporal exchanges
+and direct biosphere corrections remain explicit sparse corrections.
+
+Large calculations that are not eligible for factorization use the chunked
+backend. Its buffered partitions are written into a fixed set of binary shard
+buckets and compacted independently. In every mode, ``trails.inventory`` and
+``trails.characterized_inventory`` remain ``xarray.DataArray`` objects with the
+same dimensions and coordinates.
 The default 256 MiB inventory working-memory budget can be changed explicitly:
 
 ```python

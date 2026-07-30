@@ -28,14 +28,15 @@ Loading TRAILS
     from trails import Trails, get_lcia_method_names
 
     package = Package("path/to/datapackage.json")
-    method = get_lcia_method_names(ei_version="3.11")[0]
+    EI_VERSION = "3.12"
+    method = get_lcia_method_names(ei_version=EI_VERSION)[0]
 
     # interpolate_annual=True expands scenario slices to annual resolution.
     # Default annual bounds are [min_year-1, max_year+1].
     trails = Trails(
         package,
         interpolate_annual=True,
-        ei_version="3.11",
+        ei_version=EI_VERSION,
     )
 
     # Optional: widen interpolation bounds for endpoint duplication
@@ -44,7 +45,7 @@ Loading TRAILS
     #     interpolate_annual=True,
     #     interpolation_start_year_offset=-20,
     #     interpolation_end_year_offset=20,
-    #     ei_version="3.11",
+    #     ei_version=EI_VERSION,
     # )
 
 After initialization, you can access scenario labels and metadata:
@@ -72,6 +73,28 @@ workflow is to select an activity and store the index for repeated calls:
 
     activity_indices = next(iter(trails.activity_indices.values()))
     start_act_idx = next(iter(activity_indices.keys()))
+
+For real data packages, ``search_activity`` is usually more convenient. Name,
+reference-product, and location filters can be used independently or together;
+when combined, all filters must match:
+
+.. code-block:: python
+
+    from trails import search_activity
+
+    matches = search_activity(
+        trails,
+        name="electricity production",
+        reference_product="electricity, high voltage",
+        location="CH",
+    )
+    print(matches)
+
+Matching is case-insensitive and uses substrings by default. Use
+``match="exact"`` for exact matching and ``scenario_label="2030"`` to restrict
+the search to one scenario metadata slice. ``query`` is a positional alias for
+``name``. Biosphere searches use ``kind="biosphere"`` and do not accept
+reference-product or location filters.
 
 Running temporal LCA
 --------------------
@@ -138,9 +161,9 @@ Adaptive score-potential routing
 For deep temporalized systems, a fixed ``max_depth`` can expand many branches
 whose eventual contribution is negligible. Adaptive routing lets TRAILS use
 static LCIA activity scores as a screening estimate before deciding whether a
-child branch should be routed explicitly. This is the default routing mode:
-when ``max_depth`` is omitted, TRAILS uses ``max_depth=None`` and
-``adaptive_relative_score_cutoff=1e-4``.
+child branch should be routed explicitly. When ``max_depth`` is omitted and
+explicit regular ``adaptive_methods`` are supplied, TRAILS uses
+``max_depth=None`` and ``adaptive_relative_score_cutoff=1e-4``.
 
 .. code-block:: python
 
@@ -168,13 +191,15 @@ There are four common routing configurations:
 
 **1. Default adaptive routing**
     Use this for normal regular-LCIA workflows. ``temporal_routing()`` defaults
-    to ``max_depth=None`` and ``adaptive_relative_score_cutoff=1e-4``.
+    to ``max_depth=None`` and ``adaptive_relative_score_cutoff=1e-4`` when
+    explicit regular ``adaptive_methods`` are supplied.
 
     .. code-block:: python
 
         trails.temporal_routing(
             start_year=2030,
             start_act_idx=start_act_idx,
+            adaptive_methods=[method],
         )
 
 **2. Adaptive routing with another relative cutoff**
@@ -186,6 +211,7 @@ There are four common routing configurations:
         trails.temporal_routing(
             start_year=2030,
             start_act_idx=start_act_idx,
+            adaptive_methods=[method],
             adaptive_relative_score_cutoff=1e-5,
         )
 
@@ -199,6 +225,7 @@ There are four common routing configurations:
             start_year=2030,
             start_act_idx=start_act_idx,
             max_depth=5,
+            adaptive_methods=[method],
             adaptive_relative_score_cutoff=1e-4,
         )
 
@@ -331,7 +358,22 @@ exchange distributions by default:
     trails.lci()
     trails.lcia(methods=[method])
 
-For a non-temporal baseline in a single year, use ``trails.static_lca(...)``.
+For a non-temporal baseline in a single year, use ``trails.static_lca(...)``:
+
+.. code-block:: python
+
+    trails.static_lca(
+        year=2030,
+        act_idx=start_act_idx,
+        methods=[method],
+        amount=1.0,
+    )
+    static_scores = trails.static_score
+
+``static_lca()`` updates ``trails.static_score`` and returns ``None``. With
+multiple methods, scores follow the requested method order. If a temporal
+inventory and characterized inventory already exist, the static calculation
+restores them before returning.
 
 Plotting results
 ----------------
@@ -398,7 +440,7 @@ Troubleshooting and diagnostics
   - For FaIR perturbation parallelism, use
     ``run_fair_delta_rf(..., per_species_workers=<int>)``.
   - For TD biosphere accumulation buffering, set
-    ``trails._bio_inventory_flush_nnz`` before calling ``lca``.
+    ``trails._bio_inventory_flush_nnz`` before calling ``lci``.
     Default is ``2_000_000``. This is an advanced/private knob.
 
 
@@ -453,3 +495,52 @@ Visualization helpers default to the 50th quantile:
 
     plot_rf(trails, year_range=(2000, 2100))
     plot_temp(trails, year_range=(2000, 2100))
+
+Fixed-window CO2 pulse equivalents
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``run_fair_co2_pulse_equivalents`` expresses the integrated radiative forcing
+and temperature response of the full temporal inventory as the mass of a known
+CO2 pulse in the same background scenario. It runs the baseline, the baseline
+plus the inventory, and the baseline plus the reference pulse. Ratios are
+calculated for each FaIR configuration before reporting ensemble quantiles.
+
+.. code-block:: python
+
+    from trails.fair_rf import run_fair_co2_pulse_equivalents
+
+    pulse_result = run_fair_co2_pulse_equivalents(
+        trails,
+        scenario="REMIND|SSP2-PkBudg1000",
+        reference_pulse_year=2035,
+        window_start=2026,
+        window_end=2065,
+        reference_pulse_mass_kg=1.0e9,  # numerical reference pulse: 1 Mt
+    )
+
+    integrated_rf = pulse_result["co2_pulse_equivalent"]["integrated_rf"]
+    median_equivalent_kg = integrated_rf["median"]
+
+A negative equivalent denotes net cooling relative to the background over the
+selected window. The reference pulse mass is a numerical calibration and does
+not set the final equivalent.
+
+For a system whose inventory scales linearly, the ratio can be inverted to ask
+how much gross DACCS is required to match a target CO2-removal pulse:
+
+.. code-block:: python
+
+    target_equivalent_kg = 1_000.0  # 1 tonne CO2
+    modelled_daccs_kg = 20.0e9      # gross capture represented by the inventory
+
+    required_daccs_kg = (
+        target_equivalent_kg
+        * modelled_daccs_kg
+        / abs(median_equivalent_kg)
+    )
+
+This equivalence depends on the background scenario, pulse year, assessment
+window, timing of the life-cycle inventory, and FaIR configuration ensemble. It
+is not a physical storage efficiency or a GWP100 result. To compare with a
+one-tonne removal today, set ``reference_pulse_year`` to the current year; moving
+the pulse changes how many years of its response fall inside the window.

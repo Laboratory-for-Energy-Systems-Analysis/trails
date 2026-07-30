@@ -59,13 +59,14 @@ dimensionless fraction of the functional unit's static score potential. For
 example, ``1e-4`` stops branches whose estimated static potential is at most
 0.01% of the functional unit potential.
 
-By default, ``temporal_routing()`` uses adaptive routing with ``max_depth=None``
-and ``adaptive_relative_score_cutoff=1e-4``. Passing an integer ``max_depth``
-without an adaptive cutoff selects fixed-depth routing. ``max_depth`` can also
-be combined with the adaptive relative cutoff as a hard cap. The static
-activity scores are cached using matrix and LCIA-data fingerprints so repeated
-adaptive runs over the same interpolated data package avoid recomputing the
-upfront screening intensities.
+When ``max_depth`` is omitted, ``temporal_routing()`` uses adaptive routing with
+``max_depth=None`` and ``adaptive_relative_score_cutoff=1e-4``; explicit regular
+``adaptive_methods`` are required. Passing an integer ``max_depth`` without an
+adaptive cutoff selects fixed-depth routing. ``max_depth`` can also be combined
+with the adaptive relative cutoff as a hard cap. The static activity scores are
+cached using matrix and LCIA-data fingerprints so repeated adaptive runs over
+the same interpolated data package avoid recomputing the upfront screening
+intensities.
 
 In the recommended workflow, regular screening methods are passed explicitly as
 ``adaptive_methods``. Final regular or EDGES methods are supplied independently
@@ -105,6 +106,14 @@ stores the current impact time series on ``trails.scores`` and regular methods
 also expose ``trails.characterized_inventory``. Multiple LCIA results are kept
 in ``trails.lcia_results``.
 
+Inventory storage is selected independently from characterization. With
+``inventory_backend="auto"``, small inventories remain eager sparse COO arrays.
+Eligible large root-attributed direct or iterative inventories use a factorized
+representation of annual supply matrices, biosphere coefficients, and temporal
+kernels; other large inventories use bounded chunked sparse storage. Both are
+presented through the same xarray dimensions, and repeated ``lcia()`` calls do
+not rerun the annual linear systems.
+
 Because impacts are booked in impact years, TRAILS provides a direct answer to
 questions such as:
 
@@ -126,5 +135,25 @@ signed emissions for each (flow, root) pair and stored as
 ``trails.instant_radiative_forcing`` and ``trails.delta_temperature``. Both
 arrays are stored across FaIR_ configurations as quantiles (2.5, 25, 50, 75,
 97.5) with dims ``(quantile, year, flow, root activity)``.
+
+Fixed-window CO2 pulse equivalence
+----------------------------------
+
+``run_fair_co2_pulse_equivalents`` compares the complete inventory perturbation
+with a reference CO2 pulse under the same FaIR background scenario. For every
+FaIR configuration, the integrated-radiative-forcing equivalent is
+
+.. math::
+
+   M_{\mathrm{CO2,eq}} = M_{\mathrm{ref}}
+   \frac{\int_{t_0}^{t_1} \Delta RF_{\mathrm{LCA}}(t)\,dt}
+        {\int_{t_0}^{t_1} \Delta RF_{\mathrm{CO2\ pulse}}(t)\,dt}.
+
+The configuration-level ratios are summarized only after the three FaIR runs
+(baseline, inventory perturbation, and reference pulse). A negative equivalent
+means that the inventory produces net cooling relative to the background over
+the selected window. The result is conditional on the background scenario,
+pulse year, and window and is therefore distinct from a GWP metric or a physical
+carbon-storage efficiency.
 
 .. _FaIR: https://github.com/OMS-NetZero/FAIR

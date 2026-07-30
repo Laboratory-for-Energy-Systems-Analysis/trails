@@ -1,9 +1,10 @@
 LCIA Methods
 ============
 
-TRAILS ships built-in LCIA method sets for ecoinvent versions ``3.10`` and
-``3.11``. These methods are bundled with the package data and exposed through
-``trails.lcia`` utilities.
+TRAILS ships built-in LCIA method sets for ecoinvent versions ``3.10``,
+``3.11``, and ``3.12``. These methods are bundled with the package data and
+exposed through ``trails.lcia`` utilities. ``Trails`` uses ``3.12`` as its
+default regular-LCIA and adaptive-screening version.
 
 List available method names
 ---------------------------
@@ -12,10 +13,11 @@ List available method names
 
     from trails import get_lcia_method_names
 
+    methods_312 = get_lcia_method_names(ei_version="3.12")
     methods_311 = get_lcia_method_names(ei_version="3.11")
     methods_310 = get_lcia_method_names(ei_version="3.10")
 
-    print(methods_311[:5])
+    print(methods_312[:5])
 
 Method names are returned as strings joined with ``" - "`` from the original
 LCIA tuple labels.
@@ -27,10 +29,10 @@ Use methods in temporal LCA
 
     from trails import Trails, get_lcia_method_names
 
-    method = get_lcia_method_names(ei_version="3.11")[0]
+    method = get_lcia_method_names(ei_version="3.12")[0]
     trails = Trails(
         package,
-        ei_version="3.11",
+        ei_version="3.12",
     )
 
     trails.temporal_routing(
@@ -106,8 +108,8 @@ keys to characterization factor values:
     from trails import get_lcia_method_names
     from trails.lcia import get_lcia_methods
 
-    method_name = get_lcia_method_names(ei_version="3.11")[0]
-    lcia_data = get_lcia_methods(methods=[method_name], ei_version="3.11")
+    method_name = get_lcia_method_names(ei_version="3.12")[0]
+    lcia_data = get_lcia_methods(methods=[method_name], ei_version="3.12")
     flow_to_cf = lcia_data[method_name]
 
     # Key format: (name, compartment, subcompartment)
@@ -133,3 +135,8 @@ Set ``ei_version`` consistently in:
 * ``trails.lcia.get_lcia_methods``
 
 so method names and factors come from the same bundled dataset.
+
+When ``ei_version`` is omitted from ``Trails(...)``, ``temporal_routing(...)``,
+``lcia(...)``, and ``static_lca(...)``, the instance-level default is ``3.12``.
+Pass an explicit version to the standalone method-listing/loading helpers when
+you need to keep them aligned with the instance.

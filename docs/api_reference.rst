@@ -14,6 +14,15 @@ Core classes
 Core workflows
 --------------
 
+.. autofunction:: trails.lci
+
+.. autofunction:: trails.lcia
+
+The recommended workflow is ``Trails.temporal_routing()``, followed by
+``Trails.lci()`` and one or more ``Trails.lcia()`` calls. The combined
+``lca`` function remains available for callers that need the lower-level
+one-pass orchestration API.
+
 .. autofunction:: trails.lca
 
 LCIA utilities
@@ -57,5 +66,7 @@ FaIR_ integration
 -----------------
 
 .. autofunction:: trails.fair_rf.run_fair_delta_rf
+
+.. autofunction:: trails.fair_rf.run_fair_co2_pulse_equivalents
 
 .. _FaIR: https://github.com/OMS-NetZero/FAIR

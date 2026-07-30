@@ -41,8 +41,9 @@ Run a temporal LCA
     # Load a Frictionless data package exported by premise (or compatible tooling)
     package = Package("path/to/datapackage.json")
 
-    # Choose an LCIA method bundled with TRAILS
-    method = get_lcia_method_names(ei_version="3.11")[0]
+    # Choose an LCIA method bundled with TRAILS. Trails defaults to 3.12.
+    EI_VERSION = "3.12"
+    method = get_lcia_method_names(ei_version=EI_VERSION)[0]
 
     # Initialize TRAILS (annual interpolation is optional).
     # Default interpolation bounds are [min_year-1, max_year+1], where
@@ -50,7 +51,7 @@ Run a temporal LCA
     trails = Trails(
         package,
         interpolate_annual=True,
-        ei_version="3.11",
+        ei_version=EI_VERSION,
     )
 
     # Optional: widen interpolation bounds (e.g., +/-20 years)
@@ -59,7 +60,7 @@ Run a temporal LCA
     #     interpolate_annual=True,
     #     interpolation_start_year_offset=-20,
     #     interpolation_end_year_offset=20,
-    #     ei_version="3.11",
+    #     ei_version=EI_VERSION,
     # )
 
     # Pick an activity index from the metadata
@@ -98,7 +99,8 @@ Run a temporal LCA
     )
     sankey.show()
 
-Adaptive routing is the default. To make the default criterion explicit:
+When ``max_depth`` is omitted, adaptive routing is selected and explicit regular
+``adaptive_methods`` are required. To make the default criterion explicit:
 
 .. code-block:: python
 
@@ -106,6 +108,7 @@ Adaptive routing is the default. To make the default criterion explicit:
         start_year=2030,
         start_act_idx=start_act_idx,
         max_depth=None,
+        adaptive_methods=[method],
         adaptive_relative_score_cutoff=1e-4,
     )
 
@@ -130,8 +133,8 @@ calendar year. Frontier branches that are not explicitly expanded are still
 included in ``lci()`` through the matrix solve, but they are not drawn as
 downstream Sankey paths.
 
-To run fixed-depth routing instead, pass an integer ``max_depth`` and omit
-the adaptive relative cutoff.
+To run fixed-depth routing instead, pass an integer ``max_depth`` and omit both
+``adaptive_methods`` and the adaptive relative cutoff.
 
 What you get
 ------------
@@ -143,11 +146,36 @@ Temporal results are stored on the Trails instance. ``lci()`` always retains
 inventory.
 
 Stored inventories use ``inventory_backend="auto"`` by default. Small results
-remain eager sparse COO arrays; larger results become disk-backed Dask arrays of
-sparse COO blocks while preserving the same xarray dimensions and coordinates.
-The default working-memory budget is 256 MiB. Managed block files are removed by
+remain eager sparse COO arrays. Eligible large, root-attributed direct or
+iterative results automatically use factorized storage: annual supply matrices,
+biosphere coefficients, and temporal kernels are retained on disk and exposed
+lazily as bounded sparse Dask blocks. Other large results use the chunked sparse
+backend. All backends preserve the same xarray dimensions and coordinates. The
+default working-memory budget is 256 MiB. Managed files are removed by
 ``trails.close()``; guarded materialization helpers raise before an eager result
 would exceed the configured budget.
+
+
+Find an activity
+----------------
+
+``search_activity`` can combine name, reference-product, and location filters:
+
+.. code-block:: python
+
+    from trails import search_activity
+
+    matches = search_activity(
+        trails,
+        name="electricity production",
+        reference_product="electricity, high voltage",
+        location="CH",
+    )
+    print(matches)  # select start_act_idx from the index column
+
+The filters use case-insensitive substring matching by default. Pass
+``match="exact"`` for exact matches or ``scenario_label="2030"`` to search one
+metadata slice.
 
 
 Importing Excel inventories
@@ -158,6 +186,7 @@ omit ``year`` and ``scenario_label``, the exchanges are applied to all template
 years and interpolated across annual years.
 
 Sign conventions for Excel imports:
+
 - Technosphere exchanges are sign-flipped on import (positive becomes negative, and vice versa).
 - Production and biosphere exchanges are stored as-is.
 
@@ -170,6 +199,9 @@ Sign conventions for Excel imports:
 
     # Target a single scenario slice instead
     trails.import_excel_inventory("path/to/inventory.xlsx", year=2020)
+
+The method mutates ``trails`` and returns ``None``. Inspect
+``trails.import_diagnostics`` for import counts and target scenario indices.
 
 Excel column meanings (from the exchanges table):
 
@@ -243,3 +275,24 @@ quantile):
 
     plot_rf(trails, year_range=(2000, 2100))
     plot_temp(trails, year_range=(2000, 2100))
+
+For fixed-window comparisons with a CO2 removal pulse, use
+``run_fair_co2_pulse_equivalents``:
+
+.. code-block:: python
+
+    from trails.fair_rf import run_fair_co2_pulse_equivalents
+
+    pulse_result = run_fair_co2_pulse_equivalents(
+        trails,
+        scenario="REMIND|SSP2-PkBudg1000",
+        reference_pulse_year=2035,
+        window_start=2026,
+        window_end=2065,
+        reference_pulse_mass_kg=1.0e9,
+    )
+    integrated_rf = pulse_result["co2_pulse_equivalent"]["integrated_rf"]
+
+A negative pulse equivalent denotes net cooling over the selected window. See
+the user guide for interpretation and for the inverse calculation that converts
+an RF-equivalent removal target into a required gross DACCS amount.
