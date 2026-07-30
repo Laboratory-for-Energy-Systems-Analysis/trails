@@ -377,6 +377,33 @@ def test_static_lca_uses_constructor_method_defaults(example_package: Package) -
     assert len(trails.static_score) == 1
 
 
+def test_static_lca_preserves_factorized_inventory_backend(
+    example_package: Package,
+) -> None:
+    """Static LCA must not reset a root-attributed temporal inventory backend."""
+    methods = get_lcia_method_names(ei_version="3.11")[:1]
+    trails = Trails(example_package, interpolate_annual=False)
+    try:
+        trails.configure_inventory_storage(backend="factorized")
+        trails.reset_inventory(attribute_to_roots=True)
+        builder = trails._inventory_builder
+
+        trails.static_lca(
+            year=2005,
+            act_idx=2,
+            methods=methods,
+            amount=1.0,
+            ei_version="3.11",
+        )
+
+        assert isinstance(trails.static_score, list)
+        assert len(trails.static_score) == 1
+        assert trails._inventory_backend_requested == "factorized"
+        assert trails._inventory_builder is builder
+    finally:
+        trails.close()
+
+
 def test_lca_root_mode_without_inventory_skips_supply_extraction(
     monkeypatch: pytest.MonkeyPatch, example_trails: Trails
 ) -> None:

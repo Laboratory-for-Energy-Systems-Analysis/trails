@@ -605,7 +605,10 @@ def lca_static(
     prev_inventory = trails.inventory
     prev_characterized = trails.characterized_inventory
 
-    trails.reset_inventory(reset_scores=False)
+    # Static LCA builds and installs its own one-year inventory below. Do not
+    # reset the temporal inventory machinery here: a prior large LCI may have
+    # selected the root-attributed factorized backend, which is incompatible
+    # with a non-root reset and should remain available after this calculation.
     trails.static_score = None
 
     dp, _, _, _ = build_datapackage_for_year_from_trails(
