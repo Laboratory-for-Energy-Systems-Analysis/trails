@@ -91,6 +91,7 @@ def search_activity(
     *,
     name: Optional[str] = None,
     reference_product: Optional[str] = None,
+    location: Optional[str] = None,
     kind: str = "technosphere",
     scenario_label: Optional[str] = None,
     match: str = "contains",
@@ -106,6 +107,9 @@ def search_activity(
     :type name: Optional[str]
     :param reference_product: Value for `reference_product`.
     :type reference_product: Optional[str]
+    :param location: Activity location filter. Can be used alone or together
+        with ``query``/``name`` and ``reference_product``.
+    :type location: Optional[str]
     :param kind: Value for `kind`.
     :type kind: str
     :param scenario_label: Value for `scenario_label`.
@@ -118,11 +122,13 @@ def search_activity(
     :rtype: PrettyTable
     :raises ValueError: If an error occurs."""
     needle = name if name is not None else query
-    if needle is None and reference_product is None:
-        raise ValueError("Provide query/name and/or reference_product.")
+    if needle is None and reference_product is None and location is None:
+        raise ValueError("Provide query/name, reference_product, and/or location.")
 
-    if kind == "biosphere" and reference_product is not None:
-        raise ValueError("reference_product is only valid for technosphere searches.")
+    if kind == "biosphere" and (reference_product is not None or location is not None):
+        raise ValueError(
+            "reference_product and location are only valid for technosphere searches."
+        )
 
     results: dict[int, dict] = {}
     for idx, meta in _iter_metadata(trails, kind=kind, scenario_label=scenario_label):
@@ -134,6 +140,14 @@ def search_activity(
         if reference_product is not None and not _match_text(
             meta.get("reference product"),
             reference_product,
+            match=match,
+            case_sensitive=case_sensitive,
+        ):
+            continue
+
+        if location is not None and not _match_text(
+            meta.get("location"),
+            location,
             match=match,
             case_sensitive=case_sensitive,
         ):
