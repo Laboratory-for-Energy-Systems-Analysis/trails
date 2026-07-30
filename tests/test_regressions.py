@@ -1780,6 +1780,10 @@ def test_plot_temporal_scores_auto_trims_year_window() -> None:
     x = list(fig.data[0].x)
     assert x[0] == 2003
     assert x[-1] == 2004
+    assert fig.layout.title.yref == "container"
+    assert fig.layout.title.yanchor == "top"
+    assert fig.layout.title.y == pytest.approx(0.98)
+    assert fig.layout.legend.yanchor == "bottom"
 
 
 def test_plot_temporal_scores_prefers_compact_scores_over_characterized_inventory() -> (

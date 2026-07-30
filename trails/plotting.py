@@ -1427,6 +1427,9 @@ def _apply_base_layout(
             text=title,
             x=0.5,
             xanchor="center",
+            y=0.98,
+            yanchor="top",
+            yref="container",
         ),
         legend=dict(
             orientation="h",
