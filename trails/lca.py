@@ -944,9 +944,9 @@ def lca(
                 roots = data.get("frontier_roots") or {}
                 bucket = provenance.setdefault(key, {})
                 for root_act, amt in roots.items():
-                    bucket[int(root_act)] = float(
-                        bucket.get(int(root_act), 0.0)
-                    ) + float(amt) * production
+                    bucket[int(root_act)] = (
+                        float(bucket.get(int(root_act), 0.0)) + float(amt) * production
+                    )
         # A merged node can contain both expanded and frontier demand. The
         # direct amount belongs only to the expanded portion; the matrix solve
         # supplies biosphere flows for the disjoint frontier portion.

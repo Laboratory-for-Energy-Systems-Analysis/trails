@@ -718,8 +718,7 @@ class ChunkedInventoryBuilder:
             )
             if (
                 not self._finishing
-                and self._bucket_appended_bytes[bucket]
-                >= compaction_threshold
+                and self._bucket_appended_bytes[bucket] >= compaction_threshold
             ):
                 compact_buckets.append(bucket)
 

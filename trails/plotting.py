@@ -1718,9 +1718,7 @@ def _characterized_inventory_to_results(
         raise ValueError("characterized_inventory must include a 'year' dimension.")
 
     if by_flow:
-        summed = _compute_plot_array(
-            characterized_inventory.sum(dim="activity")
-        )
+        summed = _compute_plot_array(characterized_inventory.sum(dim="activity"))
         score_key = "scores_by_flow"
     else:
         summed = _compute_plot_array(characterized_inventory.sum(dim="flow"))
@@ -1784,9 +1782,7 @@ def _characterized_inventory_to_root_results(
             "characterized_inventory must include a 'root activity' dimension."
         )
 
-    summed = _compute_plot_array(
-        characterized_inventory.sum(dim=["activity", "flow"])
-    )
+    summed = _compute_plot_array(characterized_inventory.sum(dim=["activity", "flow"]))
     years = characterized_inventory.coords["year"].values
     roots = characterized_inventory.coords["root activity"].values
     score_key = "scores_by_first_level_child"
@@ -2385,10 +2381,7 @@ def plot_temporal_scores(
     :returns: Return value.
     :rtype: go.Figure | list[go.Figure]
     :raises ValueError: If an error occurs."""
-    if (
-        not show_flow_contributions
-        and getattr(trails, "scores", None) is not None
-    ):
+    if not show_flow_contributions and getattr(trails, "scores", None) is not None:
         # Scores are accumulated incrementally during LCA and are already
         # reduced over elementary flows. Prefer this compact representation for
         # ordinary plots; characterized_inventory remains available for flow
@@ -3834,9 +3827,9 @@ def plot_adaptive_sankey(
         branch = str(row.get("branch") or "")
         if branch not in displayed_branches:
             continue
-        branch_depth_scores_for_scale[
-            (branch, int(row.get("depth", -1)))
-        ] += float(row.get("node_score_abs") or 0.0)
+        branch_depth_scores_for_scale[(branch, int(row.get("depth", -1)))] += float(
+            row.get("node_score_abs") or 0.0
+        )
     depth_density_scale = max(branch_depth_scores_for_scale.values(), default=0.0)
 
     density_shapes: list[dict[str, Any]] = []
@@ -4316,9 +4309,7 @@ def _node_scores_from_characterized_inventory(
     reduce_dims = ["flow"]
     if "root activity" in characterized_inventory.dims:
         reduce_dims.append("root activity")
-    reduced = characterized_inventory.sum(dim=reduce_dims).transpose(
-        "activity", "year"
-    )
+    reduced = characterized_inventory.sum(dim=reduce_dims).transpose("activity", "year")
     data = _compute_plot_array(reduced)
     if isinstance(data, sparse.COO):
         for ai, yi, v in zip(data.coords[0], data.coords[1], data.data):
