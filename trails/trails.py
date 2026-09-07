@@ -1797,7 +1797,12 @@ class Trails:
 
     @staticmethod
     def _child_amount(parent_amount: float, exchange_value: float) -> float:
-        """child amount.
+        """Convert a signed off-diagonal matrix entry into product demand.
+
+        Matrix inputs are negative; substitution outputs are positive. Negate
+        the coefficient without discarding its sign, including when the parent
+        itself represents avoided production. Diagonal production is handled
+        separately by callers.
 
         :param parent_amount: Value for `parent_amount`.
         :type parent_amount: float
@@ -1805,9 +1810,7 @@ class Trails:
         :type exchange_value: float
         :returns: Return value.
         :rtype: float"""
-        if exchange_value < 0.0:
-            return parent_amount * (-exchange_value)
-        return parent_amount * exchange_value
+        return -parent_amount * exchange_value
 
     def _production_amount(self, t: int, act_idx: int) -> float:
         """Return the absolute production amount for an activity in a scenario."""

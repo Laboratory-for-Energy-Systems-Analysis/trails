@@ -932,14 +932,21 @@ def lca(
             functional_unit_is_frontier = True
         if frontier_amt:
             key = (year, act)
-            frontier[key] = float(frontier.get(key, 0.0)) + frontier_amt
+            # Routing amounts scale activities, whereas the matrix RHS demands
+            # reference products. Undo the routing production normalization at
+            # this boundary, retaining the sign of avoided production.
+            context = trails._get_scenario_context(year)
+            if context is None:
+                raise RuntimeError(f"No scenario context for frontier year={year}.")
+            production = trails._production_amount(int(context[2]), act)
+            frontier[key] = float(frontier.get(key, 0.0)) + frontier_amt * production
             if attribute_to_roots:
                 roots = data.get("frontier_roots") or {}
                 bucket = provenance.setdefault(key, {})
                 for root_act, amt in roots.items():
                     bucket[int(root_act)] = float(
                         bucket.get(int(root_act), 0.0)
-                    ) + float(amt)
+                    ) + float(amt) * production
         # A merged node can contain both expanded and frontier demand. The
         # direct amount belongs only to the expanded portion; the matrix solve
         # supplies biosphere flows for the disjoint frontier portion.
