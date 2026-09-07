@@ -940,8 +940,10 @@ def lca(
                     bucket[int(root_act)] = float(
                         bucket.get(int(root_act), 0.0)
                     ) + float(amt)
-        # Inject direct biosphere only for expanded nodes (not frontier nodes).
-        if direct_bio_amt and not frontier_amt:
+        # A merged node can contain both expanded and frontier demand. The
+        # direct amount belongs only to the expanded portion; the matrix solve
+        # supplies biosphere flows for the disjoint frontier portion.
+        if direct_bio_amt:
             key = (year, act)
             injected_supply_by_year_act[key] = (
                 float(injected_supply_by_year_act.get(key, 0.0)) + direct_bio_amt
