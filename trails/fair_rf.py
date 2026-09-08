@@ -606,6 +606,17 @@ def _fill_emissions_from_df_fast(
     f.emissions.data = emissions_data
 
 
+def _as_atmospheric_emissions(values: Any, direction_factors: Any) -> np.ndarray:
+    """Convert signed inventory amounts to signed atmospheric perturbations.
+
+    Resource uptake has direction -1; an atmospheric emission has direction +1.
+    The inventory amount already includes signed activity supply and substitution
+    credits. In particular, negative resource uptake is avoided uptake, not an
+    additional removal. Never take absolute values here or in attribution.
+    """
+    return np.asarray(values, dtype=float) * np.asarray(direction_factors, dtype=float)
+
+
 def _inventory_emissions_by_fair_species(
     inv_data: sparse.COO,
     inv_years: list[int],
@@ -680,9 +691,7 @@ def _inventory_emissions_by_fair_species(
         year_valid = year_idx[valid]
         vals_valid = vals[valid]
         signs_valid = flow_to_sign[flow_idx[valid]]
-        signed_vals = np.where(
-            signs_valid == 1.0, vals_valid, np.abs(vals_valid) * signs_valid
-        )
+        signed_vals = _as_atmospheric_emissions(vals_valid, signs_valid)
         flat_idx = specie_valid * n_year + year_valid
         flat = agg.reshape(-1)
         np.add.at(flat, flat_idx, signed_vals)
@@ -1927,7 +1936,7 @@ def run_fair_delta_rf(
                 sign_val = 1.0 if sign_value is None else float(sign_value)
                 if sign_val != 1.0:
                     sign_arr[i] = sign_val
-            vals = np.abs(vals) * sign_arr
+            vals = _as_atmospheric_emissions(vals, sign_arr)
 
         # Map inventory year index -> fair year index
         fair_idx = []
@@ -2032,7 +2041,7 @@ def run_fair_delta_rf(
                 sign_val = 1.0 if sign_value is None else float(sign_value)
                 if sign_val != 1.0:
                     sign_arr[i] = sign_val
-            vals = np.abs(vals) * sign_arr
+            vals = _as_atmospheric_emissions(vals, sign_arr)
 
         fair_idx = []
         for yi in y_idx:
