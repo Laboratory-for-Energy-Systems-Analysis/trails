@@ -1,0 +1,42 @@
+cff-version: 1.2.0
+message: "If you use TRAILS, please cite the software and the associated manuscript."
+title: "TRAILS: Temporal Routing and Aggregation of Impacts across Life-cycle Systems"
+version: "1.0.1"
+date-released: "2026-06-14"
+license: MIT
+repository-code: "https://github.com/Laboratory-for-Energy-Systems-Analysis/trails"
+url: "https://trails.readthedocs.io/"
+authors:
+  - family-names: Sacchi
+    given-names: Romain
+    email: "romain.sacchi@psi.ch"
+  - family-names: Terlouw
+    given-names: Tom
+  - family-names: Jakobs
+    given-names: Arthur
+  - family-names: Treyer
+    given-names: Karin
+  - family-names: Hahn-Menacho
+    given-names: Alvaro
+  - family-names: Bauer
+    given-names: Christian
+preferred-citation:
+  type: unpublished
+  title: "A graph-matrix hybrid approach for deep temporalisation in time-explicit LCA"
+  year: 2026
+  status: in-preparation
+  notes: "Unpublished manuscript."
+  authors:
+    - family-names: Sacchi
+      given-names: Romain
+      email: "romain.sacchi@psi.ch"
+    - family-names: Terlouw
+      given-names: Tom
+    - family-names: Jakobs
+      given-names: Arthur
+    - family-names: Treyer
+      given-names: Karin
+    - family-names: Hahn-Menacho
+      given-names: Alvaro
+    - family-names: Bauer
+      given-names: Christian
