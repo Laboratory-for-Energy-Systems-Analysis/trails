@@ -58,6 +58,17 @@ Plotting
 Cache and Search
 ----------------
 
+Importing TRAILS checks the interpolation cache once per Python session and
+emits a ``UserWarning`` if it occupies more than 5 GiB. The check reads file
+metadata only, skips symlinks, and never deletes data. Missing or unreadable
+caches do not prevent import. Size uses allocated bytes where the platform
+provides them, otherwise file lengths.
+
+When no TRAILS calculations are running, call ``trails.clear_cache()`` to
+reclaim space. Cached interpolation data will be rebuilt when needed; source
+datapackages are preserved. Cleanup failures raise ``OSError`` rather than
+silently reporting success.
+
 .. autofunction:: trails.clear_cache
 .. autofunction:: trails.search_activity
 

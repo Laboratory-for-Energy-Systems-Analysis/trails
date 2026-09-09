@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Warn once per Python session on import when the interpolation cache exceeds
+  5 GiB, showing its size and instructions for using `trails.clear_cache()`.
+  The check reads file metadata only and never removes data automatically.
+
+### Fixed
+
+- Report filesystem errors from `clear_cache()` instead of silently ignoring
+  incomplete deletion.
+
 ## 1.0.1 - 2026-06-14
 
 ### Changed

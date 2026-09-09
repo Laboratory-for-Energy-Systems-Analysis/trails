@@ -29,5 +29,7 @@ from .plotting import (
     plot_temp,
     plot_adaptive_sankey,
 )
-from .cache import clear_cache
+from .cache import clear_cache, _warn_if_cache_large
 from .search import search_activity
+
+_warn_if_cache_large()
