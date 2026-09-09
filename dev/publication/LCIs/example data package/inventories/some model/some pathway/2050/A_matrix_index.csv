@@ -16,3 +16,7 @@ transport, passenger car, ICEV;transport, passenger car, ICE;vkm;GLO;13
 oil refinery plant;oil refinery plant;unit;GLO;14
 biofuel plant;biofuel plant;unit;GLO;15
 biofuel production;biofuel;kilogram;GLO;16
+gasoline vehicle chassis, production;gasoline vehicle chassis;unit;GLO;17
+gasoline engine, production;gasoline engine;unit;GLO;18
+gasoline gearbox, production;gasoline gearbox;unit;GLO;19
+steel production;steel;kilogram;GLO;20
