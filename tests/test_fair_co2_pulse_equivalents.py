@@ -1,7 +1,9 @@
 from __future__ import annotations
 
-from typing import Any
+from threading import Lock
+import time
 import types
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -9,6 +11,7 @@ import pytest
 import sparse
 import xarray as xr
 
+import trails.fair_rf as fair_rf_module
 from trails.fair_rf import (
     calculate_co2_pulse_equivalents,
     integrate_window,
@@ -192,9 +195,58 @@ class DummyPulseTrails:
         self.debug = False
 
 
+def test_pulse_equivalents_reuses_selected_flow_reduction(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    trails = DummyPulseTrails()
+    builder = object()
+    trails._inventory_builder = builder
+    calls: list[dict[str, object]] = []
+
+    def fake_reduce(
+        inv: xr.DataArray,
+        *,
+        flow_positions: list[int] | None = None,
+        builder: object | None = None,
+        show_progress: bool = False,
+    ) -> sparse.COO:
+        calls.append(
+            {
+                "inventory": inv,
+                "flow_positions": flow_positions,
+                "builder": builder,
+                "show_progress": show_progress,
+            }
+        )
+        return sparse.COO(
+            coords=np.array([[0], [0], [0]], dtype=int),
+            data=np.array([1.0e9], dtype=float),
+            shape=(1, 1, 1),
+        )
+
+    monkeypatch.setattr(fair_rf_module, "_inventory_flow_year_root", fake_reduce)
+    delta, years = fair_rf_module._inventory_delta_by_fair_species_for_trails(
+        trails,
+        {("Carbon dioxide, fossil", "air", ""): "CO2 FFI"},
+        {},
+        show_progress=True,
+    )
+
+    assert len(calls) == 1
+    assert calls[0]["inventory"] is trails.inventory
+    assert calls[0]["flow_positions"] == [0]
+    assert calls[0]["builder"] is builder
+    assert calls[0]["show_progress"] is True
+    assert years == [2050]
+    assert delta.loc[2050, "CO2 FFI"] == pytest.approx(1.0e9)
+
+
 def test_run_fair_co2_pulse_equivalents_summarizes_by_config(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    run_lock = Lock()
+    run_state = {"calls": 0, "active": 0, "max_active": 0}
+
     def fake_load_emissions_csv(*args: Any, **kwargs: Any) -> pd.DataFrame:
         return pd.DataFrame(
             {
@@ -213,6 +265,14 @@ def test_run_fair_co2_pulse_equivalents_summarizes_by_config(
         return {("Carbon dioxide, fossil", "air", ""): "CO2 FFI"}, {}
 
     def fake_run_fair_emissions(*args: Any, **kwargs: Any) -> Any:
+        with run_lock:
+            run_state["calls"] += 1
+            run_state["active"] += 1
+            run_state["max_active"] = max(run_state["max_active"], run_state["active"])
+        time.sleep(0.03)
+        with run_lock:
+            run_state["active"] -= 1
+
         emissions_df = args[0]
         scenario = args[1]
         config_names = kwargs.get("config_names") or ["c1", "c2"]
@@ -267,6 +327,7 @@ def test_run_fair_co2_pulse_equivalents_summarizes_by_config(
         window_end=2052,
         reference_pulse_mass_kg=1.0e9,
         scale_factor=1.0,
+        show_progress=False,
     )
 
     indicator = result["co2_pulse_equivalent"]
@@ -276,3 +337,5 @@ def test_run_fair_co2_pulse_equivalents_summarizes_by_config(
     )
     assert indicator["integrated_rf"]["median"] == pytest.approx(1.0e9)
     assert trails.co2_pulse_equivalent is indicator
+    assert run_state["calls"] == 3
+    assert run_state["max_active"] == 2

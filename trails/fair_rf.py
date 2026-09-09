@@ -1101,6 +1101,8 @@ def _inventory_delta_by_fair_species_for_trails(
     trails: Any,
     species_map: dict[object, str],
     signs: dict[object, float],
+    *,
+    show_progress: bool = False,
 ) -> tuple[pd.DataFrame, list[int]]:
     """Map a Trails inventory to annual kg perturbations by FaIR species."""
     inv = trails.inventory
@@ -1115,7 +1117,6 @@ def _inventory_delta_by_fair_species_for_trails(
     dims = list(inv.dims)
     if "activity" not in dims or "flow" not in dims or "year" not in dims:
         raise ValueError("Trails.inventory must include activity/flow/year dimensions.")
-    inv_data = _inventory_flow_year_root(inv)
 
     flow_coord = inv.coords["flow"].values
     coord_value_to_pos = {int(v): i for i, v in enumerate(flow_coord)}
@@ -1151,6 +1152,20 @@ def _inventory_delta_by_fair_species_for_trails(
                 continue
             flow_pos_to_key.setdefault(pos, flow_key)
 
+    mapped_flow_positions = sorted(
+        int(position)
+        for position, flow_key in flow_pos_to_key.items()
+        if _resolve_flow_mapping(species_map, flow_key) is not None
+    )
+    # Match the optimized delta-RF path: reduce only mapped atmospheric flows
+    # and let a finalized factorized builder reuse its cached reduction.
+    inv_data = _inventory_flow_year_root(
+        inv,
+        flow_positions=mapped_flow_positions,
+        builder=getattr(trails, "_inventory_builder", None),
+        show_progress=bool(show_progress),
+    )
+
     inv_years = [int(y) for y in inv.coords["year"].values.tolist()]
     delta_by_species = _inventory_emissions_by_fair_species(
         inv_data,
@@ -1183,6 +1198,7 @@ def run_fair_co2_pulse_equivalents(
     window_end: int = 2100,
     reference_pulse_mass_kg: float = 1.0e9,
     co2_species_name: str = "CO2 FFI",
+    show_progress: bool = True,
 ) -> dict[str, Any]:
     """Run FaIR and calculate fixed-window CO2 pulse-equivalent indicators.
 
@@ -1228,6 +1244,9 @@ def run_fair_co2_pulse_equivalents(
     :type reference_pulse_mass_kg: float
     :param co2_species_name: Preferred CO2 emissions row for the reference pulse.
     :type co2_species_name: str
+    :param show_progress: Show selected-flow inventory reduction and FaIR run
+        progress.
+    :type show_progress: bool
     :returns: Structured CO2 pulse-equivalent result.
     :rtype: dict[str, Any]
     """
@@ -1251,6 +1270,7 @@ def run_fair_co2_pulse_equivalents(
         trails,
         species_map,
         signs,
+        show_progress=show_progress,
     )
     no_perturbation = delta_by_species.empty
     if no_perturbation and scale_factor is None:
@@ -1263,19 +1283,6 @@ def run_fair_co2_pulse_equivalents(
             drivers=[str(s) for s in delta_by_species.columns.tolist()],
             debug=debug,
         )
-
-    f_base = _run_fair_emissions(
-        df,
-        scenario,
-        config_csv=config_csv,
-        properties_csv=properties_csv,
-        config_name=config_name,
-        config_names=config_names,
-        ghg_method=ghg_method,
-        temperature_prescribed=temperature_prescribed,
-        debug=debug,
-        progress=False,
-    )
 
     base_year_cols, base_year_vals = _extract_year_columns(df)
     has_half_years = any(abs(v - round(v)) > 1e-9 for v in base_year_vals)
@@ -1340,36 +1347,59 @@ def run_fair_co2_pulse_equivalents(
                 df_pert_local.loc[idx, ycol] = df_pert_local.loc[idx, ycol] + add
         return df_pert_local
 
-    f_lca = _run_fair_emissions(
-        _build_lca_perturbed_df(df),
-        scenario,
-        config_csv=config_csv,
-        properties_csv=properties_csv,
-        config_name=config_name,
-        config_names=config_names,
-        ghg_method=ghg_method,
-        temperature_prescribed=temperature_prescribed,
-        debug=debug,
-        progress=False,
+    lca_emissions = _build_lca_perturbed_df(df)
+    reference_emissions = make_reference_co2_pulse_emissions(
+        df,
+        scenario=scenario,
+        pulse_year=reference_pulse_year,
+        pulse_mass_kg=reference_pulse_mass_kg,
+        co2_species_name=co2_species_name,
     )
-    f_ref = _run_fair_emissions(
-        make_reference_co2_pulse_emissions(
-            df,
-            scenario=scenario,
-            pulse_year=reference_pulse_year,
-            pulse_mass_kg=reference_pulse_mass_kg,
-            co2_species_name=co2_species_name,
-        ),
-        scenario,
-        config_csv=config_csv,
-        properties_csv=properties_csv,
-        config_name=config_name,
-        config_names=config_names,
-        ghg_method=ghg_method,
-        temperature_prescribed=temperature_prescribed,
-        debug=debug,
-        progress=False,
-    )
+    run_kwargs = {
+        "config_csv": config_csv,
+        "properties_csv": properties_csv,
+        "config_name": config_name,
+        "config_names": config_names,
+        "ghg_method": ghg_method,
+        "temperature_prescribed": temperature_prescribed,
+        "debug": debug,
+        "progress": False,
+    }
+
+    with tqdm(
+        total=3,
+        desc="FaIR CO2 pulse equivalents",
+        unit="run",
+        disable=not show_progress,
+    ) as pbar:
+        # Prepare and cache FaIR's invariant setup once before allowing the two
+        # independent perturbation runs to execute concurrently.
+        f_base = _run_fair_emissions(df, scenario, **run_kwargs)
+        pbar.set_postfix_str("baseline")
+        pbar.update(1)
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            futures = {
+                executor.submit(
+                    _run_fair_emissions,
+                    emissions,
+                    scenario,
+                    **run_kwargs,
+                ): label
+                for label, emissions in (
+                    ("inventory perturbation", lca_emissions),
+                    ("reference pulse", reference_emissions),
+                )
+            }
+            fair_runs: dict[str, fair.FAIR] = {}
+            for future in as_completed(futures):
+                label = futures[future]
+                fair_runs[label] = future.result()
+                pbar.set_postfix_str(label)
+                pbar.update(1)
+
+        f_lca = fair_runs["inventory perturbation"]
+        f_ref = fair_runs["reference pulse"]
 
     rf_base = _total_response_by_config(
         f_base.forcing,
