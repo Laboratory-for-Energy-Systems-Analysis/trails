@@ -2,11 +2,30 @@
 
 ## Unreleased
 
+## 1.1.0 - 2026-09-10
+
 ### Added
 
+- Factorized and chunked inventory backends for large temporal LCI and LCIA
+  calculations, with bounded temporal inventory memory.
+- Ecoinvent 3.12 defaults, versioned LCIA method data, and improved
+  characterization-cache scoping.
+- Signed routing and biosphere-credit preservation through LCI, LCIA and FaIR
+  calculations.
+- Location-aware activity search and expanded publication examples, figures,
+  and supplementary-information scripts.
 - Warn once per Python session on import when the interpolation cache exceeds
   5 GiB, showing its size and instructions for using `trails.clear_cache()`.
   The check reads file metadata only and never removes data automatically.
+
+### Changed
+
+- EDGES characterization factors are evaluated by inventory year.
+- FaIR CO2 pulse-equivalent and per-species calculations were optimized.
+- Static LCA now preserves temporal inventory state, and interpolation caches
+  are stable for ZIP datapackages.
+- Documentation and numerical examples were aligned with the current API and
+  workflows.
 
 ### Fixed
 
