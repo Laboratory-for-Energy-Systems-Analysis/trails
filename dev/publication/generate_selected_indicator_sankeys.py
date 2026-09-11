@@ -12,7 +12,6 @@ from datapackage import Package
 from trails import Trails
 from trails.plotting import plot_adaptive_sankey
 
-
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PUBLICATION_DIR = Path(__file__).resolve().parent
 DATAPACKAGE = PUBLICATION_DIR / "trails_remind_SSP2-PkBudg1000.zip"

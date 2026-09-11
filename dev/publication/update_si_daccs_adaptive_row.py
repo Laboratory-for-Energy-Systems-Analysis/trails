@@ -4,7 +4,6 @@ from pathlib import Path
 
 from docx import Document
 
-
 DOCX = Path(
     "/Users/romain/Library/CloudStorage/OneDrive-PaulScherrerInstitut/"
     "trails/manuscript/Supplementary Information.docx"

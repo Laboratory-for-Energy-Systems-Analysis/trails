@@ -10,7 +10,6 @@ from pathlib import Path
 from lxml import etree
 from PIL import Image
 
-
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DOCX_PATH = Path(
     "/Users/romain/Library/CloudStorage/OneDrive-PaulScherrerInstitut/trails/"
@@ -82,16 +81,21 @@ def _update_document_xml(package: zipfile.ZipFile) -> tuple[bytes, dict[str, int
     if missing:
         raise RuntimeError("Did not find document drawings for: " + ", ".join(missing))
 
-    return etree.tostring(
-        document,
-        xml_declaration=True,
-        encoding="UTF-8",
-        standalone="yes",
-    ), update_counts
+    return (
+        etree.tostring(
+            document,
+            xml_declaration=True,
+            encoding="UTF-8",
+            standalone="yes",
+        ),
+        update_counts,
+    )
 
 
 def _replace_docx() -> Path:
-    missing = [path for path in [DOCX_PATH, *REPLACEMENTS.values()] if not path.exists()]
+    missing = [
+        path for path in [DOCX_PATH, *REPLACEMENTS.values()] if not path.exists()
+    ]
     if missing:
         raise FileNotFoundError("Missing files:\n" + "\n".join(map(str, missing)))
 

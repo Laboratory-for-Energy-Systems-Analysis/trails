@@ -15,7 +15,6 @@ from openpyxl import load_workbook
 
 from trails import Trails, get_lcia_method_names
 
-
 PUBLICATION_DIR = Path(__file__).resolve().parent
 DATAPACKAGE = PUBLICATION_DIR / "trails_remind_SSP2-PkBudg1000.zip"
 LCI_DIR = PUBLICATION_DIR / "LCIs"
@@ -148,9 +147,13 @@ def inventory_activity_names(path: Path) -> set[str]:
 
 
 def validate_configuration(inventory_paths: list[Path]) -> None:
-    missing_paths = [path for path in [DATAPACKAGE, *inventory_paths] if not path.exists()]
+    missing_paths = [
+        path for path in [DATAPACKAGE, *inventory_paths] if not path.exists()
+    ]
     if missing_paths:
-        raise FileNotFoundError("Missing input files:\n" + "\n".join(map(str, missing_paths)))
+        raise FileNotFoundError(
+            "Missing input files:\n" + "\n".join(map(str, missing_paths))
+        )
 
     paths_by_name = {path.name: path for path in inventory_paths}
     missing_files = sorted(set(EXPECTED_INVENTORY_ACTIVITIES) - set(paths_by_name))
@@ -272,7 +275,9 @@ def annual_total_series(scores: Any, method: str) -> pd.Series:
 
 
 def root_activity_frame(scores: Any, method: str) -> pd.DataFrame:
-    by_root_year = reduce_scores(select_method(scores, method), ("root activity", "year"))
+    by_root_year = reduce_scores(
+        select_method(scores, method), ("root activity", "year")
+    )
     root_ids = np.asarray(by_root_year.coords["root activity"].values, dtype=int)
     years = np.asarray(by_root_year.coords["year"].values, dtype=int)
     values = np.asarray(
@@ -576,12 +581,20 @@ def write_case_png(
         if stacked:
             next_baseline = baseline + annual
             axis.fill_between(
-                years, baseline, next_baseline, color=rgba_tuple(color, 0.38), linewidth=0
+                years,
+                baseline,
+                next_baseline,
+                color=rgba_tuple(color, 0.38),
+                linewidth=0,
             )
             baseline = next_baseline
         else:
-            axis.fill_between(years, 0, annual, color=rgba_tuple(color, 0.38), linewidth=0)
-        legend_handles.append(Patch(facecolor=rgba_tuple(color, 0.75), edgecolor="none"))
+            axis.fill_between(
+                years, 0, annual, color=rgba_tuple(color, 0.38), linewidth=0
+            )
+        legend_handles.append(
+            Patch(facecolor=rgba_tuple(color, 0.75), edgecolor="none")
+        )
         legend_labels.append(short_label(label))
 
     for result in [foreground, adaptive]:

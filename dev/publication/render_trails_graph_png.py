@@ -27,7 +27,6 @@ import matplotlib.pyplot as plt
 from matplotlib.path import Path as MplPath
 from matplotlib.patches import PathPatch
 
-
 DEPTH_BAND_COLORS = [
     "#f1f3f5",
     "#eaf2fb",
@@ -139,7 +138,9 @@ def _build_rows(nodes: list[dict[str, Any]]) -> list[tuple[int, str]]:
     for node in nodes:
         grouped[_row_key(node)].append(node)
 
-    def sort_key(item: tuple[tuple[int, str], list[dict[str, Any]]]) -> tuple[int, float]:
+    def sort_key(
+        item: tuple[tuple[int, str], list[dict[str, Any]]],
+    ) -> tuple[int, float]:
         (depth, _band_key), group_nodes = item
         # In pyvis export, larger y values are visually higher.
         return depth, -mean(float(n.get("y", 0.0)) for n in group_nodes)
@@ -189,8 +190,8 @@ def _infer_node_weight_coefficients(
     because they are the only child of their parent.
     """
     node_by_id = {str(node["id"]): node for node in nodes}
-    band_groups: dict[tuple[str, tuple[int, str]], list[dict[str, Any]]] = (
-        defaultdict(list)
+    band_groups: dict[tuple[str, tuple[int, str]], list[dict[str, Any]]] = defaultdict(
+        list
     )
     fuel_year_groups: dict[tuple[str, float], list[dict[str, Any]]] = defaultdict(list)
     product_year_groups: dict[tuple[str, float, str], list[dict[str, Any]]] = (
@@ -199,9 +200,10 @@ def _infer_node_weight_coefficients(
 
     def is_fuel_production(node: dict[str, Any]) -> bool:
         name, ref_product, _location = _band_parts(node)
-        return name.strip().lower() in {"gasoline production", "biofuel production"} and (
-            ref_product.strip().lower() in {"gasoline", "biofuel"}
-        )
+        return name.strip().lower() in {
+            "gasoline production",
+            "biofuel production",
+        } and (ref_product.strip().lower() in {"gasoline", "biofuel"})
 
     for edge in edges:
         source_id = str(edge.get("from"))
@@ -297,7 +299,9 @@ def _infer_node_weight_coefficients(
     return coefficients
 
 
-def _draw_curved_edge(ax: plt.Axes, x0: float, y0: float, x1: float, y1: float, **kwargs: Any) -> None:
+def _draw_curved_edge(
+    ax: plt.Axes, x0: float, y0: float, x1: float, y1: float, **kwargs: Any
+) -> None:
     """Draw a smooth cubic Bezier edge."""
     dx = x1 - x0
     c1 = (x0 + 0.45 * dx, y0)
@@ -329,9 +333,7 @@ def render_graph(
     if max_depth is not None:
         max_depth = int(max_depth)
         kept_ids = {
-            str(node["id"])
-            for node in nodes
-            if int(node.get("depth", 0)) <= max_depth
+            str(node["id"]) for node in nodes if int(node.get("depth", 0)) <= max_depth
         }
         nodes = [node for node in nodes if str(node["id"]) in kept_ids]
         edges = [
@@ -509,8 +511,12 @@ def main() -> None:
         type=Path,
         help="Output PNG path.",
     )
-    parser.add_argument("--width", default=13.5, type=float, help="Figure width in inches.")
-    parser.add_argument("--height", default=None, type=float, help="Figure height in inches.")
+    parser.add_argument(
+        "--width", default=13.5, type=float, help="Figure width in inches."
+    )
+    parser.add_argument(
+        "--height", default=None, type=float, help="Figure height in inches."
+    )
     parser.add_argument("--dpi", default=300, type=int, help="Output resolution.")
     parser.add_argument(
         "--max-depth",

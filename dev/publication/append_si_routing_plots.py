@@ -10,7 +10,6 @@ from docx.enum.table import WD_CELL_VERTICAL_ALIGNMENT
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.shared import Emu, Inches, Pt
 
-
 REPO_ROOT = Path(__file__).resolve().parents[2]
 RUN_DIR = (
     REPO_ROOT
@@ -63,7 +62,9 @@ def image_paths(case: str, method: str) -> tuple[Path, Path]:
     stacked = case_dir / f"{stem}_stacked.png"
     missing = [path for path in [unstacked, stacked] if not path.exists()]
     if missing:
-        raise FileNotFoundError("Missing routing plot(s):\n" + "\n".join(map(str, missing)))
+        raise FileNotFoundError(
+            "Missing routing plot(s):\n" + "\n".join(map(str, missing))
+        )
     return unstacked, stacked
 
 
@@ -138,13 +139,13 @@ def append_routing_plot_appendix(document: Document) -> None:
     section.top_margin = Inches(0.45)
     section.bottom_margin = Inches(0.45)
 
-    usable_width = (
-        section.page_width - section.left_margin - section.right_margin
-    )
+    usable_width = section.page_width - section.left_margin - section.right_margin
     column_width = Emu(int(usable_width / 2))
     picture_width = Emu(int(usable_width / 2 * 0.94))
 
-    document.add_heading("Routing-comparison plots for all case-study indicators", level=1)
+    document.add_heading(
+        "Routing-comparison plots for all case-study indicators", level=1
+    )
     paragraph = document.add_paragraph()
     paragraph.add_run(
         "This appendix reports the routing-comparison plots generated for all "
