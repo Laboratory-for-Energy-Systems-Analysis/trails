@@ -133,13 +133,30 @@ BASE_COLS_B = [
 ]
 
 
-def _read_matrix_csv_fast(csv_path: Any, kind: Any = "A") -> Any:
+def _to_numeric_with_whitespace_fallback(values: pd.Series) -> pd.Series:
+    """Parse numbers directly, retrying failures with Unicode whitespace stripped."""
+    result = pd.to_numeric(values, errors="coerce")
+    if result.hasnans:
+        retry = result.isna() & values.notna()
+        if retry.any():
+            result.loc[retry] = pd.to_numeric(
+                values.loc[retry].str.strip(), errors="coerce"
+            )
+    return result
+
+
+def _read_matrix_csv_fast(
+    csv_path: Any, kind: Any = "A", *, inventory_only: bool = False
+) -> Any:
     """read matrix csv fast.
 
     :param csv_path: Value for `csv_path`.
     :type csv_path: Any
     :param kind: Value for `kind`.
     :type kind: Any
+    :param inventory_only: Read matrix values and timing, omitting unused
+        uncertainty columns and flags (used for biosphere inventory loading).
+    :type inventory_only: bool
     :returns: Return value.
     :rtype: Any
     :raises ValueError: If an error occurs."""
@@ -160,6 +177,12 @@ def _read_matrix_csv_fast(csv_path: Any, kind: Any = "A") -> Any:
         missing = [c for c in base if c not in cols_present]
         raise ValueError(f"Missing required columns in {csv_path}: {missing}")
 
+    if inventory_only:
+        # LCI loading consumes no uncertainty parameters or flags from B.
+        # Keep the required-header validation and the existing value parsing.
+        cols_to_read = [
+            c for c in cols_to_read if c.startswith("index of ") or c == "value"
+        ]
     cols_to_read += [c for c in TEMPORAL_COLS if c in cols_present]
 
     # Read selected columns, but as strings (object) so we can control casting
@@ -173,9 +196,11 @@ def _read_matrix_csv_fast(csv_path: Any, kind: Any = "A") -> Any:
         engine="c",
     )
 
-    # Strip whitespace everywhere (cheap insurance)
-    for c in df.columns:
-        df[c] = df[c].astype(str).str.strip()
+    # Numeric conversion below already accepts surrounding whitespace. Only
+    # text fields need a separate strip; avoid Python string calls per number.
+    for c in ("temporal_amount_source", "temporal_offsets", "temporal_weights"):
+        if c in df.columns:
+            df[c] = df[c].str.strip()
 
     # ---- Cast index columns (must be integer-like) ----
     index_cols = ["index of activity"]
@@ -187,7 +212,7 @@ def _read_matrix_csv_fast(csv_path: Any, kind: Any = "A") -> Any:
     for col in index_cols:
         # Blank indices are not allowed; treat "" as NaN then fail with a useful error
         s = df[col].replace("", np.nan)
-        arr = pd.to_numeric(s, errors="coerce").to_numpy(dtype=np.float64)
+        arr = _to_numeric_with_whitespace_fallback(s).to_numpy(dtype=np.float64)
 
         if np.isnan(arr).any():
             bad_rows = np.where(np.isnan(arr))[0][:10]
@@ -224,7 +249,7 @@ def _read_matrix_csv_fast(csv_path: Any, kind: Any = "A") -> Any:
             continue
         s = df[col]
         s = s.where(s != "", np.nan)
-        df[col] = pd.to_numeric(s, errors="coerce").astype(np.float64)
+        df[col] = _to_numeric_with_whitespace_fallback(s).astype(np.float64)
 
     # ---- Cast int-like parameter columns where appropriate ----
     int_cols = ["uncertainty type"]
@@ -239,7 +264,7 @@ def _read_matrix_csv_fast(csv_path: Any, kind: Any = "A") -> Any:
         s = df[col]
         s = s.where(s != "", 0)
 
-        x = pd.to_numeric(s, errors="coerce")
+        x = _to_numeric_with_whitespace_fallback(s)
         if x.isna().any():
             # keep your current permissive behavior
             x = x.fillna(0)
@@ -254,7 +279,7 @@ def _read_matrix_csv_fast(csv_path: Any, kind: Any = "A") -> Any:
         s = df[col]
         s = s.where(s != "", 0)
 
-        x = pd.to_numeric(s, errors="coerce").fillna(0).astype(np.int64)
+        x = _to_numeric_with_whitespace_fallback(s).fillna(0).astype(np.int64)
         df[col] = x
 
     return df
@@ -590,6 +615,23 @@ def load_matrices_from_package(
     max_activity_B = -1
     max_flow = -1
 
+    # Many exchanges repeat the same explicit timing. Cache parsed tuples only
+    # for this load, and return fresh lists so exchanges remain independently mutable.
+    pulse_cache: dict[tuple[str, bool], tuple | None] = {}
+
+    def _parse_pulses(value: Any, *, integer: bool) -> list | None:
+        if not isinstance(value, str):
+            return _parse_json_number_list(value, integer=integer)
+        key = (value, integer)
+        if key not in pulse_cache:
+            parsed = _parse_json_number_list(value, integer=integer)
+            # Bound memory for packages containing many unique distributions.
+            if len(pulse_cache) >= 4096:
+                pulse_cache.clear()
+            pulse_cache[key] = None if parsed is None else tuple(parsed)
+        result = pulse_cache[key]
+        return None if result is None else list(result)
+
     # ---- Small helper: parse TD row fields without dict construction ----
     def _parse_td_fields(
         dist: Any,
@@ -739,8 +781,8 @@ def load_matrices_from_package(
             offset_min=off_min_value,
             offset_max=off_max_value,
             amount_source=src,
-            offsets=_parse_json_number_list(offsets, integer=True),
-            weights=_parse_json_number_list(weights, integer=False),
+            offsets=_parse_pulses(offsets, integer=True),
+            weights=_parse_pulses(weights, integer=False),
         )
 
     # ---------- Load all A_matrix.csv ----------
@@ -777,12 +819,12 @@ def load_matrices_from_package(
         if "temporal_distribution" in df.columns:
             td = df["temporal_distribution"].to_numpy(copy=False)
 
-            # Works with your robust reader: td is int64 (blanks -> 0), so filter on != 0.
-            # If you ever switch to string TDs, this still behaves well for object dtype.
+            # The typed reader represents blank distributions as NaN. Both
+            # NaN and zero mean that no temporal distribution needs parsing.
             if td.dtype.kind in ("U", "S", "O"):
                 mask_td = td != ""
             else:
-                mask_td = td != 0
+                mask_td = (td != 0) & ~pd.isna(td)
 
             if mask_td.any():
                 act_td = df.loc[mask_td, "index of activity"].to_numpy(
@@ -850,7 +892,7 @@ def load_matrices_from_package(
         t = get_scenario_idx(scenario_label)
 
         csv_path = _resource_abspath(package, res)
-        df = _read_matrix_csv_fast(csv_path, kind="B")
+        df = _read_matrix_csv_fast(csv_path, kind="B", inventory_only=True)
 
         n = int(len(df))
         if n:
@@ -872,7 +914,7 @@ def load_matrices_from_package(
             if td.dtype.kind in ("U", "S", "O"):
                 mask_td = td != ""
             else:
-                mask_td = td != 0
+                mask_td = (td != 0) & ~pd.isna(td)
 
             if mask_td.any():
                 act_td = df.loc[mask_td, "index of activity"].to_numpy(
@@ -1138,13 +1180,15 @@ def interpolate_to_annual(
         B0 = B[i0]
         B1 = B[i1]
 
+        A_union = _prepare_interpolation_union(A0, A1, idx_dtype)
+        B_union = _prepare_interpolation_union(B0, B1, idx_dtype)
         for y in range(y0 + 1, y1 + 1):
             w = float(y - y0) / float(dt)
             new_As.append(
-                _interp_slice_union_vectorized(A0, A1, w, idx_dtype, value_dtype)
+                _interpolate_prepared_union(A_union, w, A0.shape, value_dtype)
             )
             new_Bs.append(
-                _interp_slice_union_vectorized(B0, B1, w, idx_dtype, value_dtype)
+                _interpolate_prepared_union(B_union, w, B0.shape, value_dtype)
             )
             new_labels.append(str(y))
 
@@ -1256,55 +1300,44 @@ def _interp_slice_union_vectorized(
     :type val_dtype: np.dtype
     :returns: Return value.
     :rtype: sparse.COO"""
+    prepared = _prepare_interpolation_union(M0, M1, idx_dtype)
+    return _interpolate_prepared_union(prepared, w, M0.shape, val_dtype)
+
+
+def _prepare_interpolation_union(
+    M0: sparse.COO, M1: sparse.COO, idx_dtype: np.dtype
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Align two anchors once for all annual weights in their interval."""
     ncols = int(M0.shape[1])
+    k0 = M0.coords[0].astype(np.int64) * ncols + M0.coords[1]
+    k1 = M1.coords[0].astype(np.int64) * ncols + M1.coords[1]
+    ku = np.union1d(k0, k1)
+    v0 = np.zeros(ku.size, dtype=np.float64)
+    v1 = np.zeros(ku.size, dtype=np.float64)
+    # Search the union for each input key: valid also for empty or disjoint anchors.
+    v0[np.searchsorted(ku, k0)] = M0.data
+    v1[np.searchsorted(ku, k1)] = M1.data
+    coords = np.array([ku // ncols, ku % ncols], dtype=idx_dtype)
+    return coords, v0, v1
 
-    i0 = M0.coords[0].astype(np.int64, copy=False)
-    j0 = M0.coords[1].astype(np.int64, copy=False)
-    v0 = M0.data.astype(np.float64, copy=False)
 
-    i1 = M1.coords[0].astype(np.int64, copy=False)
-    j1 = M1.coords[1].astype(np.int64, copy=False)
-    v1 = M1.data.astype(np.float64, copy=False)
-
-    # Encode (i,j) -> key so union/intersection are cheap
-    k0 = i0 * ncols + j0
-    k1 = i1 * ncols + j1
-
-    # Sort once
-    o0 = np.argsort(k0)
-    o1 = np.argsort(k1)
-    k0s, v0s = k0[o0], v0[o0]
-    k1s, v1s = k1[o1], v1[o1]
-
-    # Union of keys
-    ku = np.union1d(k0s, k1s)
-
-    # Align v0 and v1 on union positions (missing -> 0)
-    pos0 = np.searchsorted(k0s, ku)
-    pos1 = np.searchsorted(k1s, ku)
-
-    v0u = np.zeros(ku.shape[0], dtype=np.float64)
-    v1u = np.zeros(ku.shape[0], dtype=np.float64)
-
-    m0 = (pos0 < k0s.size) & (k0s[pos0] == ku)
-    m1 = (pos1 < k1s.size) & (k1s[pos1] == ku)
-
-    v0u[m0] = v0s[pos0[m0]]
-    v1u[m1] = v1s[pos1[m1]]
-
-    # Interpolate
-    vv = (1.0 - w) * v0u + w * v1u
-
-    # Prune exact zeros to keep sparsity
-    nz = vv != 0.0
-    ku = ku[nz]
-    vv = vv[nz].astype(val_dtype, copy=False)
-
-    # Decode keys back to (i,j)
-    ii = (ku // ncols).astype(idx_dtype, copy=False)
-    jj = (ku % ncols).astype(idx_dtype, copy=False)
-
-    return sparse.COO(coords=[ii, jj], data=vv, shape=M0.shape)
+def _interpolate_prepared_union(
+    prepared: tuple[np.ndarray, np.ndarray, np.ndarray],
+    w: float,
+    shape: tuple[int, ...],
+    val_dtype: np.dtype,
+) -> sparse.COO:
+    """Evaluate one year without rebuilding or sorting the anchor union."""
+    coords, v0, v1 = prepared
+    values = (1.0 - w) * v0 + w * v1
+    nz = values != 0.0
+    return sparse.COO(
+        coords=coords[:, nz],
+        data=values[nz].astype(val_dtype, copy=False),
+        shape=shape,
+        sorted=True,
+        has_duplicates=False,
+    )
 
 
 def _load_activity_indices(package: Any) -> Dict[str, Dict[int, dict]]:
