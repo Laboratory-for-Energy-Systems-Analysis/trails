@@ -10,6 +10,7 @@ from pathlib import Path
 from threading import Lock
 from typing import Any, Dict, Tuple
 import warnings
+from types import SimpleNamespace
 
 import pandas as pd
 import numpy as np
@@ -481,6 +482,46 @@ def _ensure_response_species_rows(
     return out
 
 
+def _override_fair_defaults(f: fair.FAIR, filename: str) -> None:
+    """Fill each calibrated parameter for the full ensemble in one assignment."""
+    if not isinstance(
+        getattr(f, "species_configs", None), xr.Dataset
+    ) or not isinstance(getattr(f, "climate_configs", None), xr.Dataset):
+        f.override_defaults(filename)
+        return
+    from fair.io.param_sets import energy_balance_parameters
+    from fair.interface import fill
+
+    frame = pd.read_csv(filename, index_col=0).loc[f.configs]
+    for column in frame.columns:
+        parts = column.split("[")
+        name = parts[0]
+        index = parts[1][:-1] if len(parts) > 1 else None
+        selectors = {}
+        if name in energy_balance_parameters:
+            target = f.climate_configs[name]
+            if index is not None:
+                selectors["layer"] = int(index)
+        else:
+            if index is not None:
+                if index not in f.species:
+                    continue
+                selectors["specie"] = index
+            target = f.species_configs[name]
+        # FaIR stores calibrated parameters with config first; singleton axes
+        # reproduce its scalar-per-config broadcast over any unselected axes.
+        remaining_dims = [d for d in target.dims if d not in selectors]
+        if remaining_dims[0] != "config":
+            f.override_defaults(filename)
+            return
+        values = (
+            frame[column]
+            .to_numpy()
+            .reshape((len(f.configs),) + (1,) * (len(remaining_dims) - 1))
+        )
+        fill(target, values, **selectors)
+
+
 @lru_cache(maxsize=2)
 def _build_fair_template_cached(
     *,
@@ -511,7 +552,7 @@ def _build_fair_template_cached(
     f.define_species(species, properties)
     f.allocate()
     f.fill_species_configs(filename=properties_csv)
-    f.override_defaults(config_csv)
+    _override_fair_defaults(f, config_csv)
 
     # Initialize arrays to stable values before each deep-copied run.
     f.emissions.data[...] = 0
@@ -701,6 +742,216 @@ def _inventory_emissions_by_fair_species(
     return out
 
 
+def _fair_reuse_supported(f: fair.FAIR) -> bool:
+    """Use the optimized state layout only with the validated FaIR engine."""
+    return (
+        isinstance(f, fair.FAIR)
+        and fair.__version__ == "2.2.4"
+        and not f.temperature_prescribed
+        and f.ch4_method == "leach2021"
+        and not f._routine_flags["eesc"]
+        and not np.any(f._ghg_inverse_indices)
+    )
+
+
+def _slice_fair_time(f: fair.FAIR, start: int, stop: int | None = None) -> fair.FAIR:
+    """Copy a time window, including the matching stochastic EBM increments."""
+    g = copy.copy(f)
+    for name, value in vars(f).items():
+        if name.startswith("_trails_") and name != "_trails_prepared_setup":
+            continue
+        if isinstance(value, (xr.DataArray, xr.Dataset)):
+            dims = value.dims
+            selectors = {}
+            if "timebounds" in dims:
+                selectors["timebounds"] = slice(
+                    start, None if stop is None else stop + 1
+                )
+            if "timepoints" in dims:
+                selectors["timepoints"] = slice(start, stop)
+            setattr(g, name, value.isel(selectors).copy(deep=True))
+        else:
+            setattr(g, name, copy.deepcopy(value))
+    g.timebounds = f.timebounds[start : None if stop is None else stop + 1].copy()
+    g.timepoints = f.timepoints[start:stop].copy()
+    g._n_timebounds = len(g.timebounds)
+    g._n_timepoints = len(g.timepoints)
+    return g
+
+
+def _prepare_fair_checkpoint(base: fair.FAIR, first_year: float) -> None:
+    """Save an exact initial state for perturbations starting at or after a year.
+
+    Integrate the shared history with native FaIR. The checkpoint includes gas
+    partitions, cumulative and airborne emissions, all temperature layers, and
+    the stochastic forcing state. Earlier perturbations retain the full run.
+    """
+    template = getattr(base, "_trails_template", None)
+    if template is None or not _fair_reuse_supported(base):
+        return
+    index = int(np.searchsorted(base.timepoints, float(first_year) - 1.0))
+    if index < 1 or index >= base._n_timepoints:
+        return
+    checkpoint = _slice_fair_time(template, 0, index)
+    checkpoint.emissions.data[...] = base.emissions.data[:index]
+    _run_prepared_fair(checkpoint, progress=False)
+    tail = _slice_fair_time(template, index)
+    for name, value in vars(tail).items():
+        if isinstance(value, xr.DataArray) and "timebounds" in value.dims:
+            value.data[0] = getattr(checkpoint, name).data[-1]
+    tail.gas_partitions.data = checkpoint.gas_partitions.data.copy()
+    tail._trails_restart_stochastic = checkpoint.stochastic_forcing.data[-1].copy()
+    base._trails_checkpoint_first_year = first_year
+    base._trails_perturbation_template = tail
+    # A read-only time view supplies the unchanged baseline response channels.
+    reference = copy.copy(base)
+    for name, value in vars(base).items():
+        if isinstance(value, (xr.DataArray, xr.Dataset)):
+            selectors = {}
+            if "timebounds" in value.dims:
+                selectors["timebounds"] = slice(index, None)
+            if "timepoints" in value.dims:
+                selectors["timepoints"] = slice(index, None)
+            setattr(reference, name, value.isel(selectors))
+    base._trails_perturbation_baseline = reference
+
+
+def _reuse_independent_baseline(f, base, changed):
+    """Reuse states whose drivers and feedback coefficients cannot change.
+
+    NaN lifetime parameters imply alpha=1 in FaIR 2.2.4, so they cannot transmit
+    a temperature feedback. The major gases remain in the forcing calculation
+    to preserve spectral overlaps. Every temperature feedback is reapplied.
+    """
+    if not _fair_reuse_supported(f):
+        return f
+    p = f.species_configs
+    dynamic = np.isin(f.species, changed)
+    if np.any(dynamic & (f._co2_ffi_indices | f._co2_afolu_indices)):
+        dynamic |= f._co2_indices
+    responds = p.iirf_temperature.values != 0
+    for name in (
+        "g0",
+        "g1",
+        "iirf_0",
+        "iirf_temperature",
+        "iirf_airborne",
+        "iirf_uptake",
+    ):
+        responds &= ~np.isnan(p[name].values)
+    temp_sensitive = np.any(responds, axis=0)
+    active_cycle = f._ghg_indices & (dynamic | temp_sensitive)
+    active_force = active_cycle | f._co2_indices | f._ch4_indices | f._n2o_indices
+    frozen_cycle = f._ghg_indices & ~active_cycle
+    f.concentration.data[..., frozen_cycle] = base.concentration.data[..., frozen_cycle]
+    f._ghg_forward_indices &= active_cycle
+    f._ghg_inverse_indices &= active_cycle
+    f._ghg_indices = active_force
+    f._minor_ghg_indices &= active_force
+    # Forcing channels whose emissions/concentration inputs are identical.
+    mapping = {
+        "ari": ("erfari_radiative_efficiency", "_ari_indices"),
+        "aci": ("aci_shape", "_aci_indices"),
+        "ozone": ("ozone_radiative_efficiency", "_ozone_indices"),
+        "lapsi": ("lapsi_radiative_efficiency", "_lapsi_indices"),
+        "contrails": ("contrails_radiative_efficiency", "_contrails_indices"),
+        "land use": ("land_use_cumulative_emissions_to_forcing", "_landuse_indices"),
+        "h2o stratospheric": ("h2o_stratospheric_factor", "_h2ostrat_indices"),
+    }
+    frozen_forcing = base._ghg_indices & ~active_force
+    for flag, (param, index) in mapping.items():
+        if not f._routine_flags[flag]:
+            continue
+        drivers = dynamic | active_cycle
+        if np.all(p[param].values[:, drivers] == 0):
+            f._routine_flags[flag] = False
+            frozen_forcing |= getattr(f, index)
+    f.forcing.data[..., frozen_forcing] = base.forcing.data[..., frozen_forcing]
+    feedback = p.forcing_temperature_feedback.values[:, frozen_forcing]
+    f.forcing.data[1:, ..., frozen_forcing] -= (
+        base.temperature.data[:-1, ..., 0, None] * feedback
+    )
+    return f
+
+
+def _compact_perturbation(template, base, changed):
+    """Keep invariant gases as prescribed background forcing in FaIR.
+
+    Only unchanged minor gases with no temperature response, no downstream
+    chemistry contribution, and unit forcing efficacy may be combined. Their
+    baseline forcing is summed into a prescribed channel; every affected gas
+    remains explicit. This reduces array sizes without removing climate forcing.
+    The channel borrows an inactive species label that cannot be a requested
+    perturbation response and is used only inside this private calculation.
+    """
+    if not _fair_reuse_supported(template):
+        return copy.deepcopy(template), base
+    p = template.species_configs
+    responds = p.iirf_temperature.values != 0
+    for name in (
+        "g0",
+        "g1",
+        "iirf_0",
+        "iirf_temperature",
+        "iirf_airborne",
+        "iirf_uptake",
+    ):
+        responds &= ~np.isnan(p[name].values)
+    removable = (
+        template._minor_ghg_indices
+        & ~np.isin(template.species, changed)
+        & ~np.any(responds, axis=0)
+        & ~template._aerosol_chemistry_from_concentration_indices
+    )
+    for name in (
+        "forcing_temperature_feedback",
+        "contrails_radiative_efficiency",
+        "lapsi_radiative_efficiency",
+        "land_use_cumulative_emissions_to_forcing",
+        "h2o_stratospheric_factor",
+    ):
+        removable &= np.all((p[name].values == 0) | np.isnan(p[name].values), axis=0)
+    removable &= np.all(p.forcing_temperature_feedback.values == 0, axis=0)
+    removable &= np.all(p.forcing_efficacy.values == 1, axis=0)
+    indices = np.flatnonzero(removable)
+    if len(indices) < 2:
+        return copy.deepcopy(template), base
+    aggregate_index = indices[0]
+    keep = np.flatnonzero(
+        ~removable | (np.arange(template._n_species) == aggregate_index)
+    )
+    aggregate_name = template.species[aggregate_index]
+    f = copy.copy(template)
+    for name, value in vars(template).items():
+        if isinstance(value, xr.DataArray) and "specie" in value.dims:
+            # Integer-array indexing already owns an independent data buffer.
+            setattr(f, name, value.isel(specie=keep))
+        elif isinstance(value, (xr.DataArray, xr.Dataset)):
+            selected = value.isel(specie=keep) if "specie" in value.dims else value
+            setattr(f, name, selected.copy(deep=True))
+        else:
+            setattr(f, name, copy.deepcopy(value))
+    f.species = [template.species[i] for i in keep]
+    f._n_species = len(keep)
+    f.properties_df = template.properties_df.iloc[keep].copy()
+    f.properties_df.loc[aggregate_name, "greenhouse_gas"] = False
+    f.properties_df.loc[aggregate_name, "input_mode"] = "forcing"
+    f._make_indices()
+    reference = SimpleNamespace(
+        forcing=base.forcing.isel(specie=keep),
+        concentration=base.concentration.isel(specie=keep),
+        temperature=base.temperature,
+        forcing_sum=base.forcing_sum,
+        _ghg_indices=f._ghg_indices.copy(),
+    )
+    f._trails_background_species = aggregate_name
+    aggregate_position = f.species.index(aggregate_name)
+    f.forcing.data[..., aggregate_position] = np.nansum(
+        base.forcing.data[..., indices], axis=-1
+    )
+    return f, reference
+
+
 def _run_fair_emissions(
     emissions_df: pd.DataFrame,
     scenario: str,
@@ -713,6 +964,9 @@ def _run_fair_emissions(
     temperature_prescribed: bool | None = None,
     debug: bool = False,
     progress: bool = False,
+    _baseline: fair.FAIR | None = None,
+    _changed_species: tuple[str, ...] = (),
+    _perturbation_start_year: float | None = None,
 ) -> fair.FAIR:
     """run fair emissions.
 
@@ -848,7 +1102,21 @@ def _run_fair_emissions(
         ghg_method=ghg_method,
         temperature_prescribed=temperature_prescribed,
     )
-    f = copy.deepcopy(template)
+    if (
+        _baseline is not None
+        and hasattr(_baseline, "_trails_perturbation_template")
+        and (
+            _perturbation_start_year is not None
+            and _perturbation_start_year >= _baseline._trails_checkpoint_first_year
+        )
+    ):
+
+        template = _baseline._trails_perturbation_template
+        _baseline = _baseline._trails_perturbation_baseline
+    if _baseline is not None:
+        f, _baseline = _compact_perturbation(template, _baseline, _changed_species)
+    else:
+        f = copy.deepcopy(template)
     _fill_emissions_from_df_fast(
         f,
         df,
@@ -856,11 +1124,25 @@ def _run_fair_emissions(
         year_cols=year_cols,
         year_vals=year_vals,
     )
+    if _baseline is not None:
+        _reuse_independent_baseline(f, _baseline, _changed_species)
+    if hasattr(f, "_trails_restart_stochastic"):
+        # FaIR initializes the first EBM state from forcing_sum, which differs
+        # from the stored stochastic state at a restart. Supply that state only
+        # during initialization, then restore the physical boundary forcing.
+        restart_forcing = f.forcing.data[0].copy()
+        f.forcing.data[0] = 0
+        f.forcing.data[0, ..., 0] = f._trails_restart_stochastic
     if getattr(f, "_trails_prepared_setup", False):
         _run_prepared_fair(f, progress=progress)
     else:
         with _FAIR_RUN_LOCK:
             _run_prepared_fair(f, progress=progress)
+    if hasattr(f, "_trails_restart_stochastic"):
+        f.forcing.data[0] = restart_forcing
+        f.forcing_sum.data[0] = _baseline.forcing_sum.data[0]
+    if _baseline is None:
+        f._trails_template = template
     if not np.isfinite(f.forcing.values).any():
         forcing = _compute_ghg_forcing_from_concentration(f)
         if forcing is not None:
@@ -1722,6 +2004,15 @@ def run_fair_delta_rf(
         progress=False,
     )
 
+    if per_species_runs and not no_perturbation and isinstance(f_base, fair.FAIR):
+        starts = [
+            float(series[series != 0].index.min())
+            for _, series in delta_by_species.items()
+            if np.any(series.values != 0)
+        ]
+        if starts:
+            _prepare_fair_checkpoint(f_base, float(np.median(starts)))
+
     # Determine if the emissions baseline uses half-year columns (e.g., 1750.5)
     base_year_cols, base_year_vals = _extract_year_columns(df)
     has_half_years = any(abs(v - round(v)) > 1e-9 for v in base_year_vals)
@@ -2148,6 +2439,18 @@ def run_fair_delta_rf(
             temperature_prescribed=temperature_prescribed,
             debug=debug,
             progress=False,
+            **(
+                {
+                    "_baseline": f_base,
+                    "_changed_species": (specie,),
+                    "_perturbation_start_year": float(
+                        delta_series[delta_series != 0].index.min()
+                    ),
+                }
+                if isinstance(f_base, fair.FAIR)
+                and getattr(f_base, "_trails_prepared_setup", False)
+                else {}
+            ),
         )
         if config_names is not None and len(config_names) > 1:
             forcing_pert = f_pert.forcing.sel(scenario=scenario)
@@ -2203,7 +2506,7 @@ def run_fair_delta_rf(
             temp_series = _extract_fair_timeseries_by_config(delta_temp)
             temp_quant = _safe_nanpercentile(temp_series, quantiles)
         else:
-            rf_series = np.zeros(len(fair_years), dtype=float)
+            rf_series = np.zeros(delta_forcing.sizes["timebounds"], dtype=float)
             for target in target_species:
                 part = np.asarray(delta_forcing.sel(specie=target).values, dtype=float)
                 part = np.nan_to_num(part, nan=0.0)
@@ -2213,6 +2516,10 @@ def run_fair_delta_rf(
             temp_series = _extract_fair_timeseries(delta_temp)
             temp_series = np.nan_to_num(temp_series, nan=0.0)
             temp_quant = np.tile(temp_series[None, :], (n_quant, 1))
+        if rf_quant.shape[1] != len(fair_years):
+            count = len(fair_years) - rf_quant.shape[1]
+            rf_quant = np.pad(rf_quant, ((0, 0), (count, 0)))
+            temp_quant = np.pad(temp_quant, ((0, 0), (count, 0)))
         return rf_quant, temp_quant
 
     if no_perturbation:
@@ -2236,7 +2543,8 @@ def run_fair_delta_rf(
         if work_items:
             if per_species_workers is None:
                 auto_workers = os.cpu_count() or 1
-                max_workers = min(4, auto_workers, len(work_items))
+                worker_limit = 2 if _fair_reuse_supported(f_base) else 4
+                max_workers = min(worker_limit, auto_workers, len(work_items))
             else:
                 max_workers = min(per_species_workers, len(work_items))
             max_workers = max(1, int(max_workers))
