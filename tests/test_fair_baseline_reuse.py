@@ -20,6 +20,27 @@ SCENARIO = "REMIND|SSP2-PkBudg1000"
     "species", ["CO2 FFI", "CO2 AFOLU", "CH4", "N2O", "CF4", "Sulfur", "NOx", "VOC"]
 )
 def test_native_reuse_matches_full_history(count, species, ghg_method):
+    _assert_native_reuse_matches_full_history(count, species, ghg_method)
+
+
+@pytest.mark.parametrize("species", ["CO2 FFI", "Sulfur"])
+def test_native_reuse_accepts_read_only_indices(monkeypatch, species):
+    make_indices = rf.fair.FAIR._make_indices
+
+    def make_read_only_indices(model):
+        make_indices(model)
+        for name in (
+            "_ghg_forward_indices",
+            "_ghg_inverse_indices",
+            "_minor_ghg_indices",
+        ):
+            getattr(model, name).setflags(write=False)
+
+    monkeypatch.setattr(rf.fair.FAIR, "_make_indices", make_read_only_indices)
+    _assert_native_reuse_matches_full_history(1, species, "myhre1998")
+
+
+def _assert_native_reuse_matches_full_history(count, species, ghg_method):
     frame = rf.load_emissions_csv(rf.DEFAULT_EMISSIONS_CSV)
     frame = rf._ensure_response_species_rows(
         frame, scenario=SCENARIO, drivers=["NOx", "Sulfur", "BC", "OC"]

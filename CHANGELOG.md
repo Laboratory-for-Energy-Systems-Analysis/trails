@@ -29,6 +29,8 @@
 ### Fixed
 
 - Handle empty and disjoint sparse anchor supports during annual interpolation.
+- Support read-only FaIR species masks with pandas copy-on-write, including
+  pandas 3, in optimized climate-response calculations.
 
 ### Added
 

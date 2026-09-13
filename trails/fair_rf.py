@@ -844,10 +844,11 @@ def _reuse_independent_baseline(f, base, changed):
     active_force = active_cycle | f._co2_indices | f._ch4_indices | f._n2o_indices
     frozen_cycle = f._ghg_indices & ~active_cycle
     f.concentration.data[..., frozen_cycle] = base.concentration.data[..., frozen_cycle]
-    f._ghg_forward_indices &= active_cycle
-    f._ghg_inverse_indices &= active_cycle
+    # FaIR's pandas-derived masks can be read-only under copy-on-write.
+    f._ghg_forward_indices = f._ghg_forward_indices & active_cycle
+    f._ghg_inverse_indices = f._ghg_inverse_indices & active_cycle
     f._ghg_indices = active_force
-    f._minor_ghg_indices &= active_force
+    f._minor_ghg_indices = f._minor_ghg_indices & active_force
     # Forcing channels whose emissions/concentration inputs are identical.
     mapping = {
         "ari": ("erfari_radiative_efficiency", "_ari_indices"),
