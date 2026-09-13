@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 1.1.1 - 2026-09-13
+
 ### Changed
 
 - Reduce cold datapackage initialization overhead by avoiding unused CSV fields,
@@ -9,10 +11,29 @@
   annual slices. The BrightCon DACCS benchmark improves from 112.3 s to 45.9 s
   (59%) with identical matrices and cache metadata; see
   [benchmark details](dev/cold_initialization.md).
+- Accelerate FaIR climate-response calculations by loading calibrated
+  parameters in bulk, reusing the shared pre-perturbation model state, and
+  avoiding repeated calculations for independent gases and forcing channels.
+  The BrightCon FaIR cell improves from 113.2 s to 36.6 s (68%) while
+  retaining all 841 configurations, signed emissions and removals, the full
+  output horizon, and flow/root attribution; see
+  [benchmark and numerical validation](dev/fair_runtime_optimization.md).
+  These optimizations apply across inventory types; the runtime benefit
+  depends on the emission mix and timing.
+- Use up to two workers by default for the optimized FaIR 2.2.4 path;
+  explicit `per_species_workers` values remain supported. Other FaIR
+  versions and unsupported model configurations retain the full
+  calculation path.
 
 ### Fixed
 
 - Handle empty and disjoint sparse anchor supports during annual interpolation.
+
+### Added
+
+- Regression tests for cold-cache round trips, sparse interpolation and
+  independent temporal pulse lists, plus FaIR baseline reuse, unsupported
+  versions, early perturbations and seeded stochastic continuation.
 
 ## 1.1.0 - 2026-09-10
 

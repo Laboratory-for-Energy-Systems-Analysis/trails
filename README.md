@@ -447,7 +447,7 @@ rf = run_fair_delta_rf(
     scenario="REMIND|SSP2-PkBudg650",
     # defaults shown explicitly:
     per_species_runs=True,
-    per_species_workers=None,  # auto: min(4, cpu_count, n_work_items)
+    per_species_workers=None,  # auto: up to 2 optimized workers, otherwise 4
 )
 
 # Quantile outputs are stored on the Trails instance
@@ -468,6 +468,14 @@ Notes:
   ``run_fair_delta_rf`` (bundled default uses REMIND/FaIR data).
 * If you don't pass ``config_name`` or ``config_names``, TRAILS evaluates all
   available FaIR configurations and stores quantiles across the ensemble.
+
+Starting with TRAILS 1.1.1, supported FaIR 2.2.4 configurations reuse
+the shared model history and independent forcing channels. This applies
+across inventory types and scenarios; the speedup depends on the
+emission mix and timing. Other FaIR versions and unsupported configurations
+retain the full calculation path. See the
+[user guide](docs/user_guide.rst#fair-radiative-forcing) for the eligibility
+conditions.
 
 ### Fixed-window CO2 pulse equivalents
 

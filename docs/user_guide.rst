@@ -470,7 +470,7 @@ across all FaIR_ configurations as quantiles (2.5, 25, 50, 75, 97.5).
         scenario="REMIND|SSP2-PkBudg650",
         # defaults shown explicitly:
         per_species_runs=True,
-        per_species_workers=None,  # auto: min(4, cpu_count, n_work_items)
+        per_species_workers=None,  # auto: up to 2 optimized workers, otherwise 4
     )
 
 The outputs are stored on:
@@ -486,6 +486,23 @@ Notes:
   ``run_fair_delta_rf``.
 * If ``config_name`` and ``config_names`` are omitted, TRAILS evaluates all
   available FaIR configurations and stores quantiles across the ensemble.
+
+The optimized per-species path introduced in 1.1.1 applies across LCA
+inventories and scenarios. Selection depends on model settings and
+perturbation timing. State reuse and species compaction require FaIR
+2.2.4, a non-prescribed temperature, the ``leach2021`` methane method,
+and no inverse greenhouse-gas calculation or EESC coupling. Other
+versions and unsupported configurations retain the full calculation path.
+Perturbations beginning before the shared checkpoint retain their full
+historical simulation.
+
+Automatic parallelism uses up to two workers for this optimized path
+and up to four otherwise, also limited by CPU count and the number of
+perturbations. Set ``per_species_workers`` explicitly to override this
+selection. The configured ensemble, output years, signed emissions and
+removals, and flow/root attribution are preserved. The reported DACCS
+benchmark speedup is specific to that workload; other cases can benefit
+by different amounts.
 
 Visualization helpers default to the 50th quantile:
 

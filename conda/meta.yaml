@@ -1,6 +1,6 @@
 package:
   name: trails-lca
-  version: {{ environ.get('VERSION', '1.1.0') }}
+  version: {{ environ.get('VERSION', '1.1.1') }}
 
 source:
   path: ..
