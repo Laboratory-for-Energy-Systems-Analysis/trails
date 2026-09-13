@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+### Changed
+
+- Reduce cold datapackage initialization overhead by avoiding unused CSV fields,
+  reusing parsed temporal pulses, and sharing sparse interpolation work between
+  annual slices. The BrightCon DACCS benchmark improves from 112.3 s to 45.9 s
+  (59%) with identical matrices and cache metadata; see
+  [benchmark details](dev/cold_initialization.md).
+
+### Fixed
+
+- Handle empty and disjoint sparse anchor supports during annual interpolation.
+
 ## 1.1.0 - 2026-09-10
 
 ### Added

@@ -1,0 +1,178 @@
+{
+  "package": "trails_remind_SSP2-PkBudg1000.zip",
+  "baseline_commit": "df831a4",
+  "validation": {
+    "matrix_bitwise_equality": true,
+    "metadata_file_sha256": {
+      "temporal.pkl": "96c323a1e73c6174ffb604d5472610f672303db58d14874e172c995e74b3e19f",
+      "indices.pkl": "59f672428ed69f126777df94c9f7f2d885433b961d480f4f2eb033fa9751cd60",
+      "meta.json": "5c4ae5007967f0ff1c0e3eae7ed327ff377eaeee257e44bbb069779f56a85f4a"
+    },
+    "package_sha256": "90ba5671a2d1c7e08614095b5eb2f7721d021fc1bde02099b96ee7c90b062078",
+    "source_sha256": "4659d43a669399d1200ee015315ccdffd64cfbeaa988b780c10a7bb7ee045039",
+    "platform": "macOS-26.6.2-arm64-arm-64bit",
+    "python": "3.11.14",
+    "python_note": "Benchmark interpreter version; original report-generation script ran separately under Python 3.10.12."
+  },
+  "runs": {
+    "baseline_1": {
+      "stages": {
+        "Package": 3.305555958999321,
+        "load_cached_interpolation": 0.0011273330310359597,
+        "load_matrices_from_package": 61.401507542002946,
+        "load_indices_from_package": 2.3447849169606343,
+        "interpolate_to_annual": 40.71078562492039,
+        "save_cached_interpolation": 4.117649249965325,
+        "Trails": 108.5763987909304,
+        "total": 111.88200916710775
+      },
+      "version": "1.1.0",
+      "cache_bytes": 4117310945,
+      "profiled": false,
+      "cold": true,
+      "matrix_hashes": {
+        "A": {
+          "coords": "30daafa851fd472addb9b8ad48cb41f75a8e8d0a0d3714d2c8ebcad3125eda7c",
+          "data": "1bc76ab4630db302db60918fc624da90dd15062f0c1b21356aabf10db10cd6b9"
+        },
+        "B": {
+          "coords": "80d56a7d22e631c147d017bdaa32982af4113e5d9d3d7d237fa28a51ce27205a",
+          "data": "323b572378f9459b83d742ea3859ea2d8feb8c1315ff495bafa5172b03bcfdff"
+        }
+      }
+    },
+    "baseline_2": {
+      "stages": {
+        "Package": 3.3251000830205157,
+        "load_cached_interpolation": 0.0011132500367239118,
+        "load_matrices_from_package": 61.079948666039854,
+        "load_indices_from_package": 2.3094492090167478,
+        "interpolate_to_annual": 41.870971958036534,
+        "save_cached_interpolation": 4.193318667006679,
+        "Trails": 109.45893129101023,
+        "total": 112.78407520800829
+      },
+      "version": "1.1.0",
+      "cache_bytes": 4117310945,
+      "profiled": false,
+      "cold": true,
+      "datapackage_sha256": "7f404c5f061701e1c3be7e7136b20e1875f52e40995cbf1a4365fd67f39a0e62",
+      "matrix_hashes": {
+        "A": {
+          "coords": "30daafa851fd472addb9b8ad48cb41f75a8e8d0a0d3714d2c8ebcad3125eda7c",
+          "data": "1bc76ab4630db302db60918fc624da90dd15062f0c1b21356aabf10db10cd6b9"
+        },
+        "B": {
+          "coords": "80d56a7d22e631c147d017bdaa32982af4113e5d9d3d7d237fa28a51ce27205a",
+          "data": "323b572378f9459b83d742ea3859ea2d8feb8c1315ff495bafa5172b03bcfdff"
+        }
+      }
+    },
+    "final_1": {
+      "stages": {
+        "Package": 3.2891907920129597,
+        "load_cached_interpolation": 0.0011581670260056853,
+        "load_matrices_from_package": 24.105779000092298,
+        "load_indices_from_package": 2.357991874916479,
+        "interpolate_to_annual": 13.069205333013088,
+        "save_cached_interpolation": 4.065708250040188,
+        "Trails": 43.6004349590512,
+        "total": 46.889676208025776
+      },
+      "version": "1.1.0",
+      "cache_bytes": 4117310945,
+      "profiled": false,
+      "cold": true,
+      "datapackage_sha256": "4659d43a669399d1200ee015315ccdffd64cfbeaa988b780c10a7bb7ee045039",
+      "matrix_hashes": {
+        "A": {
+          "coords": "30daafa851fd472addb9b8ad48cb41f75a8e8d0a0d3714d2c8ebcad3125eda7c",
+          "data": "1bc76ab4630db302db60918fc624da90dd15062f0c1b21356aabf10db10cd6b9"
+        },
+        "B": {
+          "coords": "80d56a7d22e631c147d017bdaa32982af4113e5d9d3d7d237fa28a51ce27205a",
+          "data": "323b572378f9459b83d742ea3859ea2d8feb8c1315ff495bafa5172b03bcfdff"
+        }
+      }
+    },
+    "final_2": {
+      "stages": {
+        "Package": 3.3223257909994572,
+        "load_cached_interpolation": 0.0011085830628871918,
+        "load_matrices_from_package": 23.657947625033557,
+        "load_indices_from_package": 2.3284016250399873,
+        "interpolate_to_annual": 11.768486417015083,
+        "save_cached_interpolation": 3.9087805000599474,
+        "Trails": 41.667104416992515,
+        "total": 44.98948237497825
+      },
+      "version": "1.1.0",
+      "cache_bytes": 4117310945,
+      "profiled": false,
+      "cold": true,
+      "datapackage_sha256": "4659d43a669399d1200ee015315ccdffd64cfbeaa988b780c10a7bb7ee045039",
+      "matrix_hashes": {
+        "A": {
+          "coords": "30daafa851fd472addb9b8ad48cb41f75a8e8d0a0d3714d2c8ebcad3125eda7c",
+          "data": "1bc76ab4630db302db60918fc624da90dd15062f0c1b21356aabf10db10cd6b9"
+        },
+        "B": {
+          "coords": "80d56a7d22e631c147d017bdaa32982af4113e5d9d3d7d237fa28a51ce27205a",
+          "data": "323b572378f9459b83d742ea3859ea2d8feb8c1315ff495bafa5172b03bcfdff"
+        }
+      }
+    },
+    "warm_old_cache": {
+      "stages": {
+        "Package": 3.226129874936305,
+        "load_cached_interpolation": 3.1526847920613363,
+        "Trails": 3.1528183330083266,
+        "total": 6.3790215000044554
+      },
+      "version": "1.1.0",
+      "cache_bytes": 0,
+      "profiled": false,
+      "cold": false,
+      "datapackage_sha256": "4659d43a669399d1200ee015315ccdffd64cfbeaa988b780c10a7bb7ee045039",
+      "matrix_hashes": {
+        "A": {
+          "coords": "30daafa851fd472addb9b8ad48cb41f75a8e8d0a0d3714d2c8ebcad3125eda7c",
+          "data": "1bc76ab4630db302db60918fc624da90dd15062f0c1b21356aabf10db10cd6b9"
+        },
+        "B": {
+          "coords": "80d56a7d22e631c147d017bdaa32982af4113e5d9d3d7d237fa28a51ce27205a",
+          "data": "323b572378f9459b83d742ea3859ea2d8feb8c1315ff495bafa5172b03bcfdff"
+        }
+      }
+    }
+  },
+  "reference_matrices": {
+    "A": {
+      "shape": [
+        98,
+        42300,
+        42300
+      ],
+      "nnz": 49162344,
+      "dtype": "float32",
+      "coords": "30daafa851fd472addb9b8ad48cb41f75a8e8d0a0d3714d2c8ebcad3125eda7c",
+      "data": "1bc76ab4630db302db60918fc624da90dd15062f0c1b21356aabf10db10cd6b9"
+    },
+    "B": {
+      "shape": [
+        98,
+        42300,
+        9847
+      ],
+      "nnz": 84513567,
+      "dtype": "float32",
+      "coords": "80d56a7d22e631c147d017bdaa32982af4113e5d9d3d7d237fa28a51ce27205a",
+      "data": "323b572378f9459b83d742ea3859ea2d8feb8c1315ff495bafa5172b03bcfdff"
+    }
+  },
+  "scenario_years": {
+    "first": 2004,
+    "last": 2101,
+    "count": 98
+  }
+}
