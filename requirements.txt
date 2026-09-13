@@ -13,6 +13,6 @@ xarray
 dask[array]>=2024.8,<2027
 networkx
 prettytable
-fair
+fair>=2.2.4
 platformdirs
 pyvis

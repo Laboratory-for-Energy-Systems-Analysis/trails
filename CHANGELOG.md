@@ -20,6 +20,7 @@
   [benchmark and numerical validation](dev/fair_runtime_optimization.md).
   These optimizations apply across inventory types; the runtime benefit
   depends on the emission mix and timing.
+- Require FaIR 2.2.4 or newer in both pip and Conda installations.
 - Use up to two workers by default for the optimized FaIR 2.2.4 path;
   explicit `per_species_workers` values remain supported. Other FaIR
   versions and unsupported model configurations retain the full
