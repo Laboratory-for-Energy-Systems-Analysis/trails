@@ -17,6 +17,7 @@ from scipy.sparse.linalg import spsolve
 from trails import Trails
 from trails.stock_vintage import StockVintageProfiles
 from trails.importer import import_excel_inventory
+from trails.temporal_distributions import TemporalExchange
 
 CALLER = {
     "name": "transport, passenger car, BEV",
@@ -198,6 +199,59 @@ def test_stock_resource_hash_is_checked_on_warm_cache(
     Path(resource.source).write_text(json.dumps(payload()) + " ")
     with pytest.raises(ValueError, match="hash mismatch"):
         Trails(stock_package, stock_vintage=True, value_dtype=np.float64)
+
+
+def test_successive_offsets_extend_storage_and_keep_expanded_direct_biosphere(
+    stock_package,
+):
+    with make_model(stock_package) as model:
+        data = payload()
+        for record in data["profiles"][0]["years"]:
+            record.update(event_years=[1900], weights=[1.0])
+        model.stock_vintage_profiles = StockVintageProfiles(
+            data, model.activity_indices, sha256="synthetic-cascade"
+        )
+        a = np.eye(model.A.shape[1])
+        a[2, 0], a[0, 1] = -0.1, -0.5
+        model.A = sparse.stack([sparse.COO.from_numpy(a)] * len(model.scenario_labels))
+        b = np.zeros(model.B.shape)
+        b[:, 2, 0], b[:, 0, 0], b[:, 1, 0] = 0.3, 2.0, 4.0
+        model.B = sparse.COO.from_numpy(b)
+        # A deliberately long component lead time makes the combined route
+        # older than either single offset. It is a numerical boundary test.
+        model.temporal_technosphere_exchanges = {
+            (label, 0, 1): TemporalExchange(
+                distribution=6,
+                loc=None,
+                scale=None,
+                offset_min=-200,
+                offset_max=-200,
+                offsets=[-200],
+                weights=[1.0],
+                amount_source="port",
+            )
+            for label in model.template_labels
+        }
+        model.temporal_biosphere_exchanges = {}
+        assert model.min_year + model._inventory_offset_bounds()[0] > 1700
+        for year in (2022, 2020):
+            model.temporal_routing(
+                start_year=year,
+                start_act_idx=2,
+                max_depth=3,
+                adaptive_relative_score_cutoff=None,
+                min_amount=0,
+                show_progress=False,
+            )
+            inventory = model.lci(show_progress=False, solver_mode="direct")
+            annual = inventory.sum(dim=[d for d in inventory.dims if d != "year"])
+            result = {
+                int(y): v
+                for y, v in zip(annual.year.values, annual.data.todense())
+                if v != 0
+            }
+            assert result == pytest.approx({year: 0.3, 1900: 0.2, 1700: 0.2})
+            assert model._score_years[0] <= 1700
 
 
 @pytest.mark.parametrize(

@@ -504,13 +504,13 @@ class Trails:
 
         :param attribute_to_roots: Value for `attribute_to_roots`.
         :type attribute_to_roots: bool"""
-        min_offset, max_offset = self._inventory_offset_bounds()
+        first_year, last_year = self._inventory_calendar_bounds()
         # Extend the inventory time axis to allow biosphere emissions to spread/decay
         # beyond the matrix years (e.g., for long-lived gases).
         tail_years = 500
         years = np.arange(
-            int(self.min_year) + int(min_offset),
-            int(self.max_year) + int(max_offset) + int(tail_years) + 1,
+            first_year,
+            last_year + int(tail_years) + 1,
             dtype=int,
         )
 
@@ -686,11 +686,11 @@ class Trails:
                 )
             self.min_year = int(years_int.min())
             self.max_year = int(years_int.max())
-        min_offset, max_offset = self._inventory_offset_bounds()
+        first_year, last_year = self._inventory_calendar_bounds()
         tail_years = 500
         years = np.arange(
-            int(self.min_year) + int(min_offset),
-            int(self.max_year) + int(max_offset) + int(tail_years) + 1,
+            first_year,
+            last_year + int(tail_years) + 1,
             dtype=int,
         )
 
@@ -1051,8 +1051,27 @@ class Trails:
         profiles = getattr(self, "stock_vintage_profiles", None)
         if profiles is not None:
             stock_min, stock_max = profiles.offset_bounds()
-            min_offset, max_offset = min(min_offset, stock_min), max(max_offset, stock_max)
+            min_offset, max_offset = min(min_offset, stock_min), max(
+                max_offset, stock_max
+            )
         return min_offset, max_offset
+
+    def _inventory_calendar_bounds(self) -> tuple[int, int]:
+        """Include routed stock events and their biosphere support in storage.
+
+        Successive component offsets can reach beyond the largest individual
+        offset. Recompute from the current graph so repeated runs cannot reuse
+        a narrower calendar from an earlier functional unit.
+        """
+        minimum, maximum = self._inventory_offset_bounds()
+        first, last = int(self.min_year) + minimum, int(self.max_year) + maximum
+        graph = getattr(self, "graph", None)
+        if getattr(self, "stock_vintage_profiles", None) is not None and graph:
+            years = [int(data["year"]) for _, data in graph.nodes(data=True)]
+            bio_min, bio_max = self._biosphere_offset_bounds()
+            first = min(first, min(years) + bio_min)
+            last = max(last, max(years) + bio_max)
+        return first, last
 
     def _biosphere_offset_bounds(self) -> tuple[int, int]:
         """biosphere offset bounds.
@@ -2430,14 +2449,19 @@ class Trails:
         adaptive_cutoff_nodes: set[tuple[int, int, int]] = set()
         adaptive_cutoff_potentials: dict[tuple[int, int, int], float] = {}
 
-        def map_year(y: int) -> int:
-            """Map year.
+        preserve_calendar_years = (
+            getattr(self, "stock_vintage_profiles", None) is not None
+        )
 
-            :param y: Value for `y`.
-            :type y: int
-            :returns: Return value.
-            :rtype: int"""
+        def map_event_year(y: int) -> int:
+            """Keep stock events on their calendar, retaining legacy routing otherwise.
+
+            Matrix selection is separate: the nearest available scenario can
+            supply coefficients for an event outside the scenario horizon.
+            """
             yi = int(y)
+            if preserve_calendar_years:
+                return yi
             if yi in year_cache:
                 return year_cache[yi]
             mapped = int(self._map_year_to_scenario_year(yi))
@@ -2476,7 +2500,7 @@ class Trails:
             if cached is not None:
                 return cached
             year, depth, act_idx = key
-            scenario_year = map_year(year)
+            scenario_year = self._map_year_to_scenario_year(year)
             label = str(scenario_year)
             meta = _get_activity_meta(label, int(act_idx))
             name = meta.get("name") or ""
@@ -2668,7 +2692,7 @@ class Trails:
                 }
 
         queue = deque()
-        start_year_int = int(self._map_year_to_scenario_year(start_year_int))
+        start_year_int = map_event_year(start_year_int)
         start_context = self._get_scenario_context(start_year_int)
         if start_context is None:
             return
@@ -2783,7 +2807,7 @@ class Trails:
 
         while queue:
             year, act, amt, depth, root_act = queue.popleft()
-            year = map_year(year)
+            year = map_event_year(year)
 
             if amt == 0.0:
                 continue
@@ -2808,7 +2832,7 @@ class Trails:
                     node_key, 0.0
                 ) + _score_product_amount_abs(year=year, act_idx=act, amt=amt)
 
-            scenario_year = year
+            scenario_year = self._map_year_to_scenario_year(year)
             has_direct_bio = self._has_direct_biosphere(scenario_year, act, bio_cache)
 
             if max_depth_int is not None and depth >= max_depth_int:
@@ -2849,7 +2873,7 @@ class Trails:
                 if child_amt == 0.0:
                     continue
 
-                child_year = map_year(child_year)
+                child_year = map_event_year(child_year)
                 child_act = int(child_act)
                 child_depth = depth + 1
                 child_node = (child_year, child_depth, child_act)
@@ -6895,7 +6919,12 @@ class Trails:
 
             year, act_idx = key
             y = int(year)
-            if self._inventory_years is not None and self._inventory_years.size:
+            if getattr(self, "stock_vintage_profiles", None) is not None:
+                # These vectors precede reset_inventory() in lca(). Clamping
+                # here could both move events and orphan their raw-year root
+                # demands. The solve selects its scenario matrix separately.
+                pass
+            elif self._inventory_years is not None and self._inventory_years.size:
                 y = max(
                     int(self._inventory_years[0]),
                     min(int(self._inventory_years[-1]), y),

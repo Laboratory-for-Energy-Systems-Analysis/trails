@@ -22,6 +22,12 @@ manufacture date. Historical technology outside the inventory range still uses
 the existing inventory boundary behaviour; precise cohort dates do not create
 historical LCI evidence.
 
+For these packages, the routing graph and final demand vectors retain calendar
+years outside the matrix horizon. Matrix selection alone uses the nearest
+available scenario. Inventory and score storage cover the routed dates and
+biosphere support, including successive component shifts. Legacy packages keep
+their previous year-mapping behaviour.
+
 ## Consumer and resource contract
 
 Load an explicitly corrected package with:
@@ -101,6 +107,33 @@ signed amount conservation, explicit opt-in and failure cases. A routed static
 limiting case compares summed biosphere results with an independent sparse
 matrix solve. The producer tests exercise compact/legacy stores, checkpoint
 reloads, matrix writing, global index reordering and package/resource hashes.
+
+`tests/data/stock_lifecycle` contains a synthetic fixture made by the actual
+premise exporter. Its manufacturing years are 2005/2015/2021/2022 and retirement
+years 2025/2035/2041/2042, with inventory anchors only in 2020/2022. Tests check
+the exact biosphere calendar and a negative recycling credit in 32 cases across
+signed functional units, repeated/reversed years, root attribution, annual
+interpolation and direct/Brightway solvers. A separate cascade test checks that
+direct biosphere flows and successive component offsets survive outside the
+matrix horizon. These tests caught both graph-year clamping and lost frontier
+demands caused by clamping before storage was initialised.
+
+Premise's new `stock_cohorts` and `stock_lifecycle` modules provide conditional
+survival and scoped separation of embedded disposal. The companion document
+`docs/development/stock-asset-temporal/lifecycle-and-cohort-method.md` specifies
+end-year stocks, retirement conditional on service-year survival, deterministic
+coefficient preservation and the condition for using lifecycle marginals:
+lifted lifecycle quantities per capital unit must be invariant across anchors.
+Variable quantities require cohort-specific attribution. The implementation
+does not claim to preserve Monte Carlo correlations.
+
+`dev/stock_vintage/check_lifecycle_inventory.py` verifies the car-chassis and
+lorry rewrites against the complete local ecoinvent 3.12 cut-off matrix. All
+3,297 biosphere flows agree within numerical precision (maximum absolute errors
+`2.22e-15` and `2.22e-16`). This establishes static structural equivalence, not
+empirical lifetime validity or a completed temporal pilot. The check consistently
+uses processed matrix coefficients rather than mixing dataset metadata with
+their lower-precision processed values.
 
 These checks establish software behaviour only. The five empirical pilots still
 need reviewed caller/supplier boundaries, cohort and service reconciliation,

@@ -1,0 +1,235 @@
+{
+  "scope": "synthetic",
+  "caller": {
+    "name": "synthetic lifecycle service [stock context lifecycle-fixture: service]",
+    "reference product": "synthetic lifecycle service",
+    "unit": "unit",
+    "location": "GLO"
+  },
+  "original_caller": {
+    "name": "synthetic lifecycle service",
+    "reference product": "synthetic lifecycle service",
+    "unit": "unit",
+    "location": "GLO"
+  },
+  "manufacture": [
+    {
+      "service_year": 2020,
+      "event_years": [
+        2005,
+        2015
+      ],
+      "weights": [
+        0.75,
+        0.25
+      ]
+    },
+    {
+      "service_year": 2021,
+      "event_years": [
+        2005,
+        2015,
+        2021
+      ],
+      "weights": [
+        0.6,
+        0.2,
+        0.2
+      ]
+    },
+    {
+      "service_year": 2022,
+      "event_years": [
+        2005,
+        2015,
+        2021,
+        2022
+      ],
+      "weights": [
+        0.5,
+        0.16666666666666666,
+        0.16666666666666666,
+        0.16666666666666666
+      ]
+    }
+  ],
+  "retirement": [
+    {
+      "service_year": 2020,
+      "event_years": [
+        2025,
+        2035
+      ],
+      "weights": [
+        0.75,
+        0.25
+      ],
+      "tail_mass_folded_into_last_year": 0.0,
+      "tail_policy": "fold_below_tolerance_into_terminal_event",
+      "projection_end_year": 2022,
+      "beyond_projection": "natural_survival_without_further_forced_exits"
+    },
+    {
+      "service_year": 2021,
+      "event_years": [
+        2025,
+        2035,
+        2041
+      ],
+      "weights": [
+        0.6,
+        0.2,
+        0.2
+      ],
+      "tail_mass_folded_into_last_year": 0.0,
+      "tail_policy": "fold_below_tolerance_into_terminal_event",
+      "projection_end_year": 2022,
+      "beyond_projection": "natural_survival_without_further_forced_exits"
+    },
+    {
+      "service_year": 2022,
+      "event_years": [
+        2025,
+        2035,
+        2041,
+        2042
+      ],
+      "weights": [
+        0.5,
+        0.16666666666666669,
+        0.16666666666666666,
+        0.16666666666666666
+      ],
+      "tail_mass_folded_into_last_year": 0.0,
+      "tail_policy": "fold_below_tolerance_into_terminal_event",
+      "projection_end_year": 2022,
+      "beyond_projection": "natural_survival_without_further_forced_exits"
+    }
+  ],
+  "stock_balances": [
+    {
+      "year": 2021,
+      "opening_stock": 4.0,
+      "natural_retirements": 0.0,
+      "early_exits": 0,
+      "gross_additions": 1.0,
+      "closing_stock": 5.0,
+      "balance_residual": 0.0,
+      "mode": "stock_target",
+      "early_exit_kind": null,
+      "early_exit_allocation": null
+    },
+    {
+      "year": 2022,
+      "opening_stock": 5.0,
+      "natural_retirements": 0.0,
+      "early_exits": 0,
+      "gross_additions": 1.0,
+      "closing_stock": 6.0,
+      "balance_residual": 0.0,
+      "mode": "stock_target",
+      "early_exit_kind": null,
+      "early_exit_allocation": null
+    }
+  ],
+  "co2_per_service": 0.45,
+  "capital_per_service": 0.1,
+  "recycling_credit_per_service": -0.1,
+  "rewrite": {
+    "context_id": "lifecycle-fixture",
+    "uncertainty_mode": "deterministic",
+    "original_root": {
+      "name": "capital market",
+      "reference product": "capital market",
+      "unit": "unit",
+      "location": "GLO"
+    },
+    "capital_root": {
+      "name": "capital market [stock context lifecycle-fixture: capital]",
+      "reference product": "capital market",
+      "unit": "unit",
+      "location": "GLO"
+    },
+    "original_caller": {
+      "name": "synthetic lifecycle service",
+      "reference product": "synthetic lifecycle service",
+      "unit": "unit",
+      "location": "GLO"
+    },
+    "caller": {
+      "name": "synthetic lifecycle service [stock context lifecycle-fixture: service]",
+      "reference product": "synthetic lifecycle service",
+      "unit": "unit",
+      "location": "GLO"
+    },
+    "preserved_capital_amount": 0.1,
+    "lifted_exchanges": [
+      {
+        "original_caller": {
+          "name": "asset manufacture",
+          "reference product": "asset manufacture",
+          "unit": "unit",
+          "location": "GLO"
+        },
+        "original_supplier": {
+          "name": "recycling credit",
+          "reference product": "recycling credit",
+          "unit": "unit",
+          "location": "GLO"
+        },
+        "original_amount": -1.0,
+        "activity_scale_per_caller": 0.1,
+        "coefficient_per_capital_unit": -1.0,
+        "amount_per_calling_dataset": -0.1,
+        "amount_per_service_unit": -0.1,
+        "caller": {
+          "name": "synthetic lifecycle service [stock context lifecycle-fixture: service]",
+          "reference product": "synthetic lifecycle service",
+          "unit": "unit",
+          "location": "GLO"
+        },
+        "supplier": {
+          "name": "recycling credit [stock context lifecycle-fixture: lifecycle-90b79e406e]",
+          "reference product": "recycling credit",
+          "unit": "unit",
+          "location": "GLO"
+        },
+        "original_uncertainty_type": 0
+      }
+    ],
+    "zero_shift_bindings": [
+      {
+        "caller": {
+          "name": "capital market [stock context lifecycle-fixture: capital]",
+          "reference product": "capital market",
+          "unit": "unit",
+          "location": "GLO"
+        },
+        "supplier": {
+          "name": "asset manufacture [stock context lifecycle-fixture: capital]",
+          "reference product": "asset manufacture",
+          "unit": "unit",
+          "location": "GLO"
+        }
+      },
+      {
+        "caller": {
+          "name": "recycling credit [stock context lifecycle-fixture: lifecycle-90b79e406e]",
+          "reference product": "recycling credit",
+          "unit": "unit",
+          "location": "GLO"
+        },
+        "supplier": {
+          "name": "recycling credit",
+          "reference product": "recycling credit",
+          "unit": "unit",
+          "location": "GLO"
+        }
+      }
+    ],
+    "copied_capital_activities": 2,
+    "lifecycle_adapters": 1,
+    "scope": "Explicit path rewrite only; no timing, cohort, or scientific-role inference",
+    "uncertainty_limit": "Lifted coefficient products preserve deterministic amounts, not Monte Carlo correlations"
+  }
+}
