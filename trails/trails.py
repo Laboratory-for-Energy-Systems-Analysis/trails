@@ -27,6 +27,7 @@ from .datapackage import (
 )
 
 from .temporal_distributions import TemporalDistribution, TemporalExchange
+from .stock_vintage import load_stock_vintage_profiles
 from .lca import lca_static
 from .static_activity_scores import (
     _activity_score_potential,
@@ -133,6 +134,7 @@ class Trails:
         edges_methods: list[Any] | None = None,
         ei_version: str = "3.12",
         debug: bool = False,
+        stock_vintage: bool = False,
     ) -> None:
         """Initialize a Trails data package wrapper.
 
@@ -165,7 +167,10 @@ class Trails:
             methods and adaptive routing.
         :type ei_version: str
         :param debug: Enable diagnostic logging.
-        :type debug: bool"""
+        :type debug: bool
+        :param stock_vintage: Opt in to declared annual stock-vintage resources.
+            Legacy packages retain their existing temporal behaviour.
+        :type stock_vintage: bool"""
         self.package = package
         self.value_dtype = value_dtype
         self.index_dtype = index_dtype
@@ -407,6 +412,9 @@ class Trails:
         self.import_diagnostics: dict[str, object] = {}
         self.lcia_results: dict[str, dict[str, Any]] = {}
         self.current_lcia_result: str | None = None
+        self.stock_vintage_profiles = load_stock_vintage_profiles(
+            self.package, self.activity_indices, enabled=stock_vintage
+        )
 
     def configure_inventory_storage(
         self,
@@ -1040,6 +1048,10 @@ class Trails:
                     min_offset = min(min_offset, int(offset_min))
                 if offset_max is not None:
                     max_offset = max(max_offset, int(offset_max))
+        profiles = getattr(self, "stock_vintage_profiles", None)
+        if profiles is not None:
+            stock_min, stock_max = profiles.offset_bounds()
+            min_offset, max_offset = min(min_offset, stock_min), max(max_offset, stock_max)
         return min_offset, max_offset
 
     def _biosphere_offset_bounds(self) -> tuple[int, int]:
@@ -1954,7 +1966,7 @@ class Trails:
         :type debug: bool
         :returns: Return value.
         :rtype: tuple[Optional[TemporalExchange], list[tuple[int, float]]]"""
-        y_tpl = self._map_year_to_template_year(year)
+        y_tpl = self._tech_profile_cache_year(year)
         key = (int(y_tpl), int(act_idx), int(prod_idx))
         cached = self._tech_td_expanded_cache.get(key)
         if cached is not None:
@@ -2009,7 +2021,7 @@ class Trails:
         if self.A is None:
             return ()
 
-        template_year = int(self._map_year_to_template_year(int(year)))
+        template_year = self._tech_profile_cache_year(year)
         cache_key = (
             int(template_year),
             int(t),
@@ -2221,6 +2233,13 @@ class Trails:
         :type prod_idx: int
         :returns: Return value.
         :rtype: TemporalExchange | None"""
+        profiles = getattr(self, "stock_vintage_profiles", None)
+        if profiles is not None:
+            tex = profiles.get(
+                year, self._map_year_to_template_year(year), act_idx, prod_idx
+            )
+            if tex is not None:
+                return tex
         return self._interpolate_temporal_exchange(
             year,
             act_idx,
@@ -2241,12 +2260,7 @@ class Trails:
         :type prod_idx: int
         :returns: Return value.
         :rtype: TemporalDistribution | None"""
-        tex = self._interpolate_temporal_exchange(
-            year,
-            act_idx,
-            prod_idx,
-            self.temporal_technosphere_exchanges,
-        )
+        tex = self.get_temporal_exchange(year, act_idx, prod_idx)
         if tex is None:
             return None
         return TemporalDistribution(tex)
@@ -3200,6 +3214,12 @@ class Trails:
 
         return demand
 
+    def _tech_profile_cache_year(self, year: int) -> int:
+        """Annual stock profiles cannot share a template-year expansion cache."""
+        if getattr(self, "stock_vintage_profiles", None) is not None:
+            return int(year)
+        return int(self._map_year_to_template_year(year))
+
     def _get_tech_temporal_exchange(
         self, year: int, act_idx: int, prod_idx: int
     ) -> Optional[TemporalExchange]:
@@ -3213,13 +3233,19 @@ class Trails:
         :type prod_idx: int
         :returns: Return value.
         :rtype: Optional[TemporalExchange]"""
-        if not self.temporal_technosphere_exchanges:
-            return None
-
         y_tpl = self._map_year_to_template_year(year)
-        key = (int(y_tpl), int(act_idx), int(prod_idx))
+        key = (self._tech_profile_cache_year(year), int(act_idx), int(prod_idx))
         if key in self._tech_td_cache:
             return self._tech_td_cache[key]
+        profiles = getattr(self, "stock_vintage_profiles", None)
+        if profiles is not None:
+            tex = profiles.get(year, y_tpl, act_idx, prod_idx)
+            if tex is not None:
+                self._tech_td_cache[key] = tex
+                return tex
+        if not self.temporal_technosphere_exchanges:
+            self._tech_td_cache[key] = None
+            return None
         tex = self.temporal_technosphere_exchanges.get((str(y_tpl), key[1], key[2]))
         self._tech_td_cache[key] = tex
         return tex

@@ -37,7 +37,9 @@ def import_excel_inventory(
     :type year: int | None
     :param scenario_label: Value for `scenario_label`.
     :type scenario_label: str | None
-    :param cache_import: Value for `cache_import`.
+    :param cache_import: Cache imported matrices for legacy packages. For packages
+        with stock-vintage bindings, imports remain local to this instance:
+        foreground overrides must not overwrite the base package cache.
     :type cache_import: bool
     :returns: Return value.
     :rtype: dict[str, object]
@@ -637,6 +639,9 @@ def import_excel_inventory(
 
     # Clear existing temporal exchanges for affected activities/targets first.
     target_t = {int(t) for _, t in targets}
+    stock_profiles = getattr(trails, "stock_vintage_profiles", None)
+    if stock_profiles is not None:
+        stock_profiles.remove_callers([label for label, _ in targets], affected_acts)
     for label, _t in targets:
         for act in affected_acts:
             for key in list(trails.temporal_technosphere_exchanges.keys()):
@@ -678,7 +683,7 @@ def import_excel_inventory(
                     prod_ref_product,
                     prod_location,
                 )
-                prod_idx = activity_lookup.get(key) or dataset_act_indices.get(key)
+                prod_idx = activity_lookup.get(key, dataset_act_indices.get(key))
                 if prod_idx is None:
                     unlinked_rows.append(
                         {
@@ -700,7 +705,7 @@ def import_excel_inventory(
                     exchange.get("reference product") or exchange.get("product"),
                     exchange.get("location"),
                 )
-                prod_idx = activity_lookup.get(key) or dataset_act_indices.get(key)
+                prod_idx = activity_lookup.get(key, dataset_act_indices.get(key))
                 if prod_idx is None:
                     unlinked_rows.append(
                         {
@@ -983,6 +988,9 @@ def import_excel_inventory(
     if apply_to_all_template_years:
         years_all = trails.years_int
         if years_all.size:
+            # Imported anchor values replace this activity throughout the annual
+            # series; retaining old intermediate rows would add both inventories.
+            target_t = set(range(len(trails.scenario_labels)))
             _apply_interpolation(a_template_values, years_all, a_coords, a_data)
             _apply_interpolation(b_template_values, years_all, b_coords, b_data)
 
@@ -1112,7 +1120,11 @@ def import_excel_inventory(
     if hasattr(trails, "_static_activity_score_fingerprint"):
         trails._static_activity_score_fingerprint = None
 
-    if cache_import:
+    # The package cache describes the original package. Stock bindings removed
+    # by a foreground override are instance state, not part of that descriptor.
+    # Persisting the modified matrices alone would restore the original bindings
+    # against a different inventory on the next load.
+    if cache_import and stock_profiles is None:
         save_cached_interpolation(
             trails.package,
             value_dtype=str(trails.value_dtype),
