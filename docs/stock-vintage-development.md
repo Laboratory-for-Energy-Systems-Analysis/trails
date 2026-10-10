@@ -211,8 +211,12 @@ figure was inspected; it is restricted local IAM-derived evidence.
 `check_truck_pilot.py` uses the shared complete-matrix, signed annual pulse and
 streamed LCI verifier for the new truck exporter. The producer scopes maintenance
 and used-lorry markets so their event providers cannot add another lifetime
-spread or disposal lag. The actual truck export is running; no real vehicle
-consumer result is claimed at this checkpoint.
+spread or disposal lag. The actual truck export adds six scoped activities to
+the complete 26,533-activity source. Matrix equivalence passes with relative A/B
+residuals below `4.88e-17`/`4.49e-17`; 30 signed annual pulses and all six internal
+zero shifts pass. A subsequent annual-cache reload is confirmed. Full 2023
+warm-cache and 2030 no-interpolation LCIs and the legacy comparison are running;
+the third truck release requirement remains open.
 
 ## Real CCGT evidence
 
