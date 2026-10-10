@@ -217,3 +217,37 @@ its relevant boundaries and event chronology have been demonstrated.
 Local helper `dev/stock_vintage/audit_inventory.py` reads an existing Brightway
 database and writes only candidate identities and selected capital-exchange
 metadata. Raw licensed inventories and IAM inputs remain outside version control.
+
+## Water-network evidence in progress
+
+Premise commit `ef2b1720` adds the Quebec water pilot with separate pipe and
+storage cohorts. Its `water-pilot-method.md` records the source bins, missing
+dates, 13 sensitivities, provisional survival and replacement-only future stock
+scenario. Water storage has 25.56% unknown dates, so its sensitivity is material.
+The primary scenario does not claim an IAM water forecast.
+
+The actual export adds 36 scoped activities to the complete source inventory.
+It separates nine tank-material inputs and 24 disposal ports from pipe/network
+construction, preserving their original amounts and geographic suppliers.
+The caller's own-product loss remains 0.191, leaving 0.809 kg net output.
+The full matrix rewrite proof passes, with maximum relative technosphere
+residual `5.18e-14` and biosphere residual `2.60e-17`. There are 340 signed annual
+pulse checks and 34 internal zero-shift bindings. The old raw network-construction
+distribution has mean age 35 years, independently of legacy calendar clamping.
+
+`check_water_pilot.py` records cache requests separately from confirmed cache
+loads. Full corrected temporal LCI checks remain in progress at this checkpoint.
+The first complete solve returned, but its all-flow activity reduction was
+killed during verification: even a reduced sparse cube can require enormous
+intermediate arrays across many retirement years and roots. The verifier now
+streams native inventory entries in bounded windows, accumulating every flow
+total and only four dated fossil-CO2 summaries. Its independent reference also
+keeps year/root demands sparse until each solve. Six analytical checks cover
+the operator proof and streaming with both storage backends and both signs;
+85 focused profile/verifier tests pass. The model and exported profiles did not
+change as a result of this verifier fix.
+
+`report_water_sensitivity.py` writes 234 scenario/asset/year records and a
+PNG/SVG/PDF figure. Mean ages are labelled as service weighted, since one case
+tests age-dependent utilisation. The generated source and package artifacts
+remain outside the repository.

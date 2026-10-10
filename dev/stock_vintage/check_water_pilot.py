@@ -5,8 +5,10 @@ derived inventory time series remain local; no Brightway database is modified.
 """
 
 import argparse
+from contextlib import redirect_stdout
 import gc
 import hashlib
+import io
 import json
 import math
 from pathlib import Path
@@ -18,9 +20,9 @@ from scipy.sparse.linalg import splu
 from trails import Trails
 
 try:
-    from .check_ccgt_pilot import dense, identity, independent_graph_reference
+    from .check_ccgt_pilot import identity, independent_graph_reference
 except ImportError:
-    from check_ccgt_pilot import dense, identity, independent_graph_reference
+    from check_ccgt_pilot import identity, independent_graph_reference
 
 
 def prove_scoped_rewrite(a, b, indices, audit):
@@ -61,6 +63,35 @@ def prove_scoped_rewrite(a, b, indices, audit):
     }
 
 
+def stream_inventory_totals(builder, flows, fossil, root_roles, n_years):
+    """Bound memory while checking all flows and retaining four dated summaries.
+
+    An activity-reduced sparse cube can still require billions of intermediate
+    entries for many roots and retirement years. Consume native bounded windows
+    and discard each one after updating the required aggregates.
+    """
+    n_flows = max(flows) + 1
+    totals = np.zeros(n_flows)
+    labels = sorted(set(root_roles.values()))
+    root_lookup = np.full(builder.n_activities, -1, dtype=int)
+    for root, role in root_roles.items():
+        root_lookup[root] = labels.index(role)
+    summaries = np.zeros(len(labels) * n_years)
+    count = 0
+    for _, _, batch_flows, years, roots, values in builder.iter_entries_for_flows(
+        flows, window_entries=100_000, show_progress=False
+    ):
+        totals += np.bincount(batch_flows, weights=values, minlength=n_flows)
+        selected = (batch_flows == fossil) & (root_lookup[roots] >= 0)
+        if np.any(selected):
+            keys = root_lookup[roots[selected]] * n_years + years[selected]
+            summaries += np.bincount(
+                keys, weights=values[selected], minlength=len(summaries)
+            )
+        count += len(values)
+    return totals, dict(zip(labels, summaries.reshape(len(labels), n_years))), count
+
+
 def validate(
     directory,
     *,
@@ -78,13 +109,17 @@ def validate(
         raise ValueError("Exported package changed")
     corrected = variant == "corrected"
     audit = evidence["rewrite"]
-    with Trails(
-        Package(str(path)),
-        stock_vintage=corrected,
-        cache_interpolation=cache,
-        interpolate_annual=interpolate,
-        value_dtype=np.float64,
-    ) as model:
+    loading_log = io.StringIO()
+    with redirect_stdout(loading_log):
+        model = Trails(
+            Package(str(path)),
+            stock_vintage=corrected,
+            cache_interpolation=cache,
+            interpolate_annual=interpolate,
+            value_dtype=np.float64,
+        )
+    print(loading_log.getvalue(), end="", flush=True)
+    with model:
         indices = model.activity_indices[model.template_labels[0]]
         lookup = {identity(d): i for i, d in indices.items()}
         caller = lookup[identity(audit["caller" if corrected else "original_caller"])]
@@ -116,6 +151,8 @@ def validate(
             "case": evidence["case"],
             "interpolate_annual": interpolate,
             "cache_interpolation": cache,
+            "cache_loaded": "Loaded interpolated matrices from cache:"
+            in loading_log.getvalue(),
             "solver": solver,
             "activity_count": a.shape[0],
             "biosphere_flow_count": b.shape[0],
@@ -250,13 +287,6 @@ def validate(
                 )
                 print(f"Water LCI returned: {variant}, {year}, {amount}", flush=True)
                 flows = np.asarray(inventory.coords["flow"].values, dtype=int)
-                reduced = model._inventory_builder.reduce_activity_for_flows(
-                    flows, show_progress=False
-                )
-                actual = dense(reduced.sum(axis=(1, 2)))[flows]
-                target, operator = independent_graph_reference(model, a, caller, amount)
-                error = abs(actual - target[flows])
-                passed = bool(np.allclose(actual, target[flows], rtol=1e-7, atol=1e-12))
                 biosphere = model.biosphere_indices[model.template_labels[0]]
                 fossil = next(
                     i
@@ -265,18 +295,29 @@ def validate(
                     and r["compartment"] == "air"
                     and r["subcompartment"] == "unspecified"
                 )
-                categories = {}
-                if corrected:
-                    for row in expected:
-                        root = lookup[identity(row["supplier"])]
-                        series = dense(reduced[fossil, :, root])
-                        categories.setdefault(
-                            row["physical_role"], np.zeros(series.shape)
-                        )[:] += series
-                else:
-                    categories["embedded_network_capital"] = dense(
-                        reduced[fossil, :, capital]
-                    )
+                root_roles = (
+                    {
+                        lookup[identity(row["supplier"])]: row["physical_role"]
+                        for row in expected
+                    }
+                    if corrected
+                    else {capital: "embedded_network_capital"}
+                )
+                totals, categories, streamed_entries = stream_inventory_totals(
+                    model._inventory_builder,
+                    flows,
+                    fossil,
+                    root_roles,
+                    len(inventory.coords["year"]),
+                )
+                actual = totals[flows]
+                print(
+                    f"Streamed {streamed_entries} inventory entries: {year}, {amount}",
+                    flush=True,
+                )
+                target, operator = independent_graph_reference(model, a, caller, amount)
+                error = abs(actual - target[flows])
+                passed = bool(np.allclose(actual, target[flows], rtol=1e-7, atol=1e-12))
                 time_series = {
                     k: {
                         int(y): float(v)
@@ -295,6 +336,7 @@ def validate(
                         and operator["operator_conservation_passed"],
                         "max_absolute_flow_error": float(error.max()),
                         "biosphere_flows_checked": len(flows),
+                        "streamed_inventory_entries": streamed_entries,
                         "fossil_co2_kg_by_role_and_year": time_series,
                         "calendar_bounds": [
                             int(inventory.coords["year"].min()),

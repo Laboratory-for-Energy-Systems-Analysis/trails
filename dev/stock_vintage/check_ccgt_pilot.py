@@ -42,7 +42,9 @@ def independent_graph_reference(model, reference_a, caller, amount):
     lca_module = importlib.import_module("trails.lca")
     n = reference_a.shape[0]
     expanded = defaultdict(lambda: np.zeros(n))
-    demands = defaultdict(lambda: np.zeros(n))
+    # Long retirement calendars have thousands of year/root pairs. Keep their
+    # mostly empty demand vectors sparse until each independent solve.
+    demands = defaultdict(lambda: defaultdict(float))
     frontier = np.zeros(n)
     factors, matrices = {}, {}
     for node, data in model.graph.nodes(data=True):
@@ -84,9 +86,12 @@ def independent_graph_reference(model, reference_a, caller, amount):
                 factors[t] = splu(a)
         a, b = matrices[t]
         supply = expanded[year].copy()
-        for (demand_year, _), demand in demands.items():
+        for (demand_year, _), entries in demands.items():
             if demand_year != year:
                 continue
+            demand = np.zeros(n)
+            for index, value in entries.items():
+                demand[index] = value
             if backend == "umfpack":
                 supply += factors[t].solve(UMFPACK_A, a, demand)
             else:

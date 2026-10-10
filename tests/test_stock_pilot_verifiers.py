@@ -4,7 +4,12 @@ import numpy as np
 import pytest
 from scipy.sparse import csc_matrix
 
-from dev.stock_vintage.check_water_pilot import prove_scoped_rewrite
+from dev.stock_vintage.check_water_pilot import (
+    prove_scoped_rewrite,
+    stream_inventory_totals,
+)
+from trails.factorized_inventory import FactorizedInventoryBuilder
+from trails.chunked_inventory import ChunkedInventoryBuilder
 
 
 def example():
@@ -59,3 +64,59 @@ def test_scoped_operator_proof_rejects_lost_distribution_loss_and_biosphere():
     b[0, 4] = 0
     with pytest.raises(AssertionError):
         prove_scoped_rewrite(csc_matrix(a), csc_matrix(b), indices, audit)
+
+
+@pytest.mark.parametrize("backend", ["factorized", "chunked"])
+@pytest.mark.parametrize("sign", [1, -2])
+def test_streamed_full_flow_totals_and_dated_roles_match_analytical_inventory(
+    backend, sign
+):
+    cls = (
+        FactorizedInventoryBuilder
+        if backend == "factorized"
+        else ChunkedInventoryBuilder
+    )
+    builder = cls(
+        n_activities=3,
+        n_flows=3,
+        n_years=2,
+        has_root=True,
+        value_dtype=np.float64,
+        memory_budget=2**20,
+    )
+    try:
+        if backend == "factorized":
+            builder.append_factor(
+                year_index=0,
+                activities=np.array([0, 1, 1]),
+                flows=np.array([0, 0, 1]),
+                biosphere_values=np.array([2, 3, 4]) * sign,
+                supply_matrix=np.array([[1, 2], [0.5, 0], [0, 1]]),
+                roots=np.array([0, 2]),
+            )
+        else:
+            builder.append(
+                np.array([0, 0, 1, 1]),
+                np.array([0, 0, 0, 1]),
+                np.array([0, 0, 0, 0]),
+                np.array([2, 4, 1.5, 2]) * sign,
+                roots=np.array([0, 2, 0, 0]),
+            )
+        builder.append(
+            np.array([1]),
+            np.array([1]),
+            np.array([1]),
+            np.array([-7.0]) * sign,
+            roots=np.array([2]),
+        )
+        builder.finalize()
+        totals, roles, entries = stream_inventory_totals(
+            builder, np.array([0, 1, 2]), 1, {0: "construction", 2: "disposal"}, 2
+        )
+        assert totals == pytest.approx(np.array([7.5, -5, 0]) * sign)
+        assert roles["construction"] == pytest.approx(np.array([2, 0]) * sign)
+        assert roles["disposal"] == pytest.approx(np.array([0, -7]) * sign)
+        assert entries == 5
+        assert builder._activity_reduction_cache == {}
+    finally:
+        builder.close()
