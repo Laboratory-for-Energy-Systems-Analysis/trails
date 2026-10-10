@@ -226,8 +226,14 @@ spread or disposal lag. The actual truck export adds six scoped activities to
 the complete 26,533-activity source. Matrix equivalence passes with relative A/B
 residuals below `4.88e-17`/`4.49e-17`; 30 signed annual pulses and all six internal
 zero shifts pass. A subsequent annual-cache reload is confirmed. Full 2023
-warm-cache and 2030 no-interpolation LCIs and the legacy comparison are running;
-the third truck release requirement remains open.
+warm-cache and 2030 no-interpolation LCIs now pass for both demand signs. All
+9,847 biosphere rows agree with the independent year-wise calculation, with
+maximum absolute error `4.00e-15` and operator relative residual `3.04e-16`.
+Parent manufacture plus disposal retains the legacy parent-attributed selected
+fossil-CO2 total `0.001759251805 kg/tkm`; service-year maintenance contributes
+`0.000459593998 kg/tkm` separately. The legacy negative-reference operator error
+is retained as a diagnostic. All three bounded truck requirements now have
+evidence; final campaign review remains open.
 
 The companion BEV exporter now separates 17 parent disposal ports, battery
 manufacture/end and service-year maintenance. It scopes six event markets and

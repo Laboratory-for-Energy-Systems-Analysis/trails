@@ -1,8 +1,8 @@
 # Review of the five bounded stock-vintage pilots
 
 Review in progress, 10 October 2026. Both implementation repositories use
-`feat/stock-vintage-pilots`. CCGT and PV have evidence for all three requirements.
-Passenger cars, trucks and water have passed their complete matrix rewrites and
+`feat/stock-vintage-pilots`. CCGT, PV and trucks have evidence for all three requirements.
+Passenger cars and water have passed their complete matrix rewrites and
 annual event checks; their corrected full-LCI comparisons are still running.
 The autonomous goal is not complete. No public defaults have changed.
 
@@ -68,7 +68,7 @@ reconstruction or an IAM-transformed background LCA.
 | CCGT | Pass | Pass, all 9,847 biosphere rows | Annual interpolation and warm cache; exact parent dates |
 | PV | Pass; 510 port checks, 58 zero shifts | Pass, plus both 2030 waste-timing endpoints | Confirmed warm cache; direct occupation at service; component manufacture/end chronology |
 | Passenger BEV | Pass; 210 port checks, 30 zero shifts | Running | Confirmed warm cache; parent, battery, disposal and maintenance calendars checked |
-| Heavy truck | Pass; 30 port checks, six zero shifts | Running | Confirmed warm cache; parent/disposal and service-year maintenance checked |
+| Heavy truck | Pass; 30 port checks, six zero shifts | Pass, all 9,847 biosphere rows | Confirmed warm cache; parent/disposal and service-year maintenance checked |
 | Water | Pass; 340 port checks, 34 zero shifts | Running | Separate confirmed warm-cache pulse check; pipe/tank and disposal calendars checked |
 
 Full-LCI checks compare the summed biosphere inventory against an independently
@@ -113,7 +113,7 @@ capital. The full lifecycle and sign checks remain necessary.
 
 ## Remaining completion work
 
-1. Finish and review the running corrected water, truck and BEV full-LCI reports,
+1. Finish and review the running corrected water and BEV full-LCI reports,
    including both demand signs and legacy quantity/timing diagnostics.
 2. Update this decision table from the completed evidence; do not infer a pass
    from a running process or a successful parent-calendar check.
