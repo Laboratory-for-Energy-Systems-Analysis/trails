@@ -193,6 +193,27 @@ The legacy negative-reference sign error is reported separately from timing.
 Endpoint comparisons remain release work. The previous focused profile/verifier
 suite passed 89 tests; the three PV requirements are not yet claimed complete.
 
+## Vehicle reconstruction and consumer checks
+
+The premise companion now generates 2022–2030 cohorts for bounded UK passenger
+BEVs and articulated 32–40 tonne diesel trucks, using the two pinned REMIND EUR
+scenario trajectories as relative proxies. Its vehicle method documents first
+use versus manufacture, unknown dates, service-index weighting, annual Sales
+semantics, survival support and separate territorial/physical exits. Battery
+timing preserves the source coefficient of 1.5 equivalent packs without claiming
+a physical pack-count forecast.
+
+`report_vehicle_sensitivity.py` writes 468 local case/year rows, an input-hash
+manifest and PNG/SVG/PDF figures. The table retains parent/battery ages,
+conditional disposal timing and both stock/sales constraint residuals. The
+figure was inspected; it is restricted local IAM-derived evidence.
+
+`check_truck_pilot.py` uses the shared complete-matrix, signed annual pulse and
+streamed LCI verifier for the new truck exporter. The producer scopes maintenance
+and used-lorry markets so their event providers cannot add another lifetime
+spread or disposal lag. The actual truck export is running; no real vehicle
+consumer result is claimed at this checkpoint.
+
 ## Real CCGT evidence
 
 Premise commit `e2989248` provides the EIA block audit, exact REMIND leaf-variable
