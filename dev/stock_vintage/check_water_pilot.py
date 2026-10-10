@@ -91,6 +91,18 @@ def validate(
         capital = lookup[
             identity(audit["capital_root" if corrected else "original_root"])
         ]
+        constructor = dict(
+            next(
+                row["supplier"]
+                for row in audit["zero_shift_bindings"]
+                if identity(row["caller"]) == identity(audit["capital_root"])
+            )
+        )
+        if not corrected:
+            constructor["name"] = constructor["name"].removesuffix(
+                f" [stock context {audit['context_id']}: capital]"
+            )
+        construction = lookup[identity(constructor)]
         a = model.A[0].to_scipy_sparse().T.tocsc()
         b = model.B[0].to_scipy_sparse().T.tocsc()
         net = float(a[caller, caller])
@@ -160,6 +172,26 @@ def validate(
                             "pulses": pulses,
                         }
                     )
+                    if row["physical_role"] == "pipe_construction":
+                        raw = {}
+                        for event, value in pulses.items():
+                            nested = model.expand_temporal_exchanges(
+                                year=event, act_idx=capital, amount=value
+                            )
+                            for y, values in nested.items():
+                                if values.get(construction, 0) != 0:
+                                    raw[y] = raw.get(y, 0) + values[construction]
+                        if not math.isclose(
+                            math.fsum(raw.values()), target, rel_tol=1e-10
+                        ):
+                            raise AssertionError(
+                                "Raw network construction amount changed"
+                            )
+                        report["pulse_checks"][-1]["raw_construction_pulses"] = raw
+                        report["pulse_checks"][-1]["raw_construction_mean_age"] = (
+                            math.fsum((year - y) * value for y, value in raw.items())
+                            / target
+                        )
         if corrected:
             # Every wrapper is instantaneous over the entire relevant support,
             # including retirement outside inventory anchors. Negative-reference

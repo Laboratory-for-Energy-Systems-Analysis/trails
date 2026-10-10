@@ -60,7 +60,7 @@ def main():
         future = [r for r in rows if r["asset"] == asset and r["service_year"] == 2030]
         axes[0, column].barh(labels, [r["mean_age"] for r in observed], color="#377eb8")
         axes[0, column].invert_yaxis()
-        axes[0, column].set_xlabel("Reconstructed mean age in 2022 (years)")
+        axes[0, column].set_xlabel("Service-weighted mean age in 2022 (years)")
         axes[0, column].set_title(
             f"Quebec {asset}: {100*observed[0]['unknown_share_2022']:.1f}% unknown dates"
         )
@@ -68,7 +68,7 @@ def main():
             [r["mean_age"] for r in future],
             labels,
             "o",
-            label="Mean stock age in 2030",
+            label="Service-weighted age in 2030",
             color="#377eb8",
         )
         axes[1, column].plot(
