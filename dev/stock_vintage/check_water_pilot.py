@@ -92,6 +92,55 @@ def stream_inventory_totals(builder, flows, fossil, root_roles, n_years):
     return totals, dict(zip(labels, summaries.reshape(len(labels), n_years))), count
 
 
+def check_direct_biosphere_dates(model, inventory, b, lookup, audit, year, amount, net):
+    """Check pure biosphere adapters, including lifetime occupation at service."""
+    result = []
+    years = np.asarray(inventory.coords["year"].values, dtype=int)
+    for row in audit.get("lifted_biosphere", []):
+        supplier = lookup[identity(row["supplier"])]
+        column = b[:, supplier].tocoo()
+        if len(column.data) != 1 or not math.isclose(float(column.data[0]), 1.0):
+            raise AssertionError("Direct biosphere adapter changed its unit output")
+        flow = int(column.row[0])
+        actual = np.zeros(len(years))
+        for (
+            _,
+            _,
+            _,
+            dates,
+            roots,
+            values,
+        ) in model._inventory_builder.iter_entries_for_flows(
+            [flow], window_entries=100_000, show_progress=False
+        ):
+            selected = roots == supplier
+            actual += np.bincount(
+                dates[selected], weights=values[selected], minlength=len(years)
+            )
+        expected = np.zeros(len(years))
+        if np.count_nonzero(years == year) != 1:
+            raise AssertionError(
+                "Requested service year is absent from biosphere calendar"
+            )
+        expected[years == year] = amount * row["amount_per_calling_dataset"] / net
+        if not np.allclose(actual, expected, rtol=1e-10, atol=1e-13):
+            raise AssertionError(
+                "Service-year biosphere burden was dated outside service"
+            )
+        result.append(
+            {
+                "supplier": row["supplier"],
+                "service_year": year,
+                "amount": amount,
+                "flow_index": flow,
+                "unit": row["supplier"]["unit"],
+                "events": {int(y): float(v) for y, v in zip(years, actual) if v != 0},
+                "passed": True,
+            }
+        )
+    return result
+
+
 def validate(
     directory,
     *,
@@ -209,7 +258,10 @@ def validate(
                             "pulses": pulses,
                         }
                     )
-                    if row["physical_role"] == "pipe_construction":
+                    if row["physical_role"] in {
+                        "pipe_construction",
+                        "parent_construction",
+                    }:
                         raw = {}
                         for event, value in pulses.items():
                             nested = model.expand_temporal_exchanges(
@@ -286,6 +338,12 @@ def validate(
                     inventory_backend="factorized" if solver == "direct" else "chunked",
                 )
                 print(f"Water LCI returned: {variant}, {year}, {amount}", flush=True)
+                if corrected and audit.get("lifted_biosphere"):
+                    report.setdefault("direct_biosphere_checks", []).extend(
+                        check_direct_biosphere_dates(
+                            model, inventory, b, lookup, audit, year, amount, net
+                        )
+                    )
                 flows = np.asarray(inventory.coords["flow"].values, dtype=int)
                 biosphere = model.biosphere_indices[model.template_labels[0]]
                 fossil = next(

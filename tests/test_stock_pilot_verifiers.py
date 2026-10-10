@@ -2,12 +2,15 @@
 
 import numpy as np
 import pytest
+from types import SimpleNamespace
 from scipy.sparse import csc_matrix
 
 from dev.stock_vintage.check_water_pilot import (
+    check_direct_biosphere_dates,
     prove_scoped_rewrite,
     stream_inventory_totals,
 )
+from dev.stock_vintage.check_ccgt_pilot import identity
 from trails.factorized_inventory import FactorizedInventoryBuilder
 from trails.chunked_inventory import ChunkedInventoryBuilder
 
@@ -39,6 +42,56 @@ def example():
     b = np.array([[0, 3, 0, 0, 3, 0], [0, 0, 5, 0, 0, 0]])
     audit = {"context_id": "water", "caller": indices[3], "original_caller": indices[0]}
     return a, b, indices, audit
+
+
+@pytest.mark.parametrize("amount", [1, -2])
+@pytest.mark.parametrize("event_index", [0, 1])
+def test_land_occupation_is_checked_at_service_year_with_own_product_loss(
+    amount, event_index
+):
+    supplier = {
+        "name": "occupation",
+        "reference product": "occupation",
+        "unit": "square meter-year",
+        "location": "GLO",
+    }
+    builder = ChunkedInventoryBuilder(
+        n_activities=3,
+        n_flows=2,
+        n_years=2,
+        has_root=True,
+        value_dtype=np.float64,
+        memory_budget=2**20,
+    )
+    try:
+        # Unrelated background occupation is deliberately at another date/root.
+        builder.append(
+            np.array([0, 2]),
+            np.array([1, 1]),
+            np.array([0, event_index]),
+            np.array([0.7, 0.3 * amount]),
+            roots=np.array([0, 2]),
+        )
+        builder.finalize()
+        model = SimpleNamespace(_inventory_builder=builder)
+        inventory = SimpleNamespace(
+            coords={"year": SimpleNamespace(values=np.array([2000, 2023]))}
+        )
+        b = csc_matrix(np.array([[0, 0, 0], [1, 0, 1]]))
+        audit = {
+            "lifted_biosphere": [
+                {"supplier": supplier, "amount_per_calling_dataset": 0.24}
+            ]
+        }
+        args = (model, inventory, b, {identity(supplier): 2}, audit, 2023, amount, 0.8)
+        if event_index == 0:
+            with pytest.raises(AssertionError, match="dated outside service"):
+                check_direct_biosphere_dates(*args)
+        else:
+            result = check_direct_biosphere_dates(*args)
+            assert result[0]["events"] == pytest.approx({2023: 0.3 * amount})
+    finally:
+        builder.close()
 
 
 def test_scoped_operator_proof_checks_own_product_losses_and_lifted_sign():

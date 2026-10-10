@@ -170,9 +170,21 @@ scope tests also prevent lifted manufacture from reintroducing embedded disposal
 `dev/stock_vintage/report_pv_sensitivity.py` writes a 144-row local CSV, input-hash
 manifest and PNG/SVG/PDF figure from the two cohort outputs. The figure explicitly
 distinguishes observed parent dates from assumed inverter dates. IAM-derived
-figures and tables remain restricted local evidence. Full real PV export/LCI,
-panel replacement/handling losses and the detailed waste/land-use boundary remain
-release work; these cohort results alone do not pass all three requirements.
+figures and tables remain restricted local evidence.
+
+The actual PV export now separates 47 waste ports, inverter and panel manufacture,
+and lifetime land occupation. Fifty lifted ports plus twelve copied capital nodes
+and one service caller add 63 activities. The complete matrix proof passes with
+relative A/B residuals below `2.62e-13`/`1.83e-15`; all 510 signed annual port
+checks and 58 internal zero shifts pass. `check_pv_pilot.py` reuses the matrix and
+streamed LCI verifier, adding a direct occupation check at the requested service
+year. Its analytical tests include both functional-unit signs and caller losses.
+
+The producer documents expected service-year panel maintenance, installation
+handling loss, and explicit factory/end-of-life polymer and mounting-packaging
+timing endpoints. Full temporal LCI, cache/no-interpolation, legacy and endpoint
+comparisons remain release work. There are 89 passing focused profile/verifier
+tests; the three PV requirements are not yet claimed complete.
 
 ## Real CCGT evidence
 
