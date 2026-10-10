@@ -190,8 +190,16 @@ All 9,847 biosphere rows agree with the independent year-wise calculation within
 Capital-attributed fossil CO2 remains `0.00855912127 kg/kWh`. Corrected 2030 parent
 mean age is 5.69750 years; legacy raw/clamped means are 13.50179/7.31900 years.
 The legacy negative-reference sign error is reported separately from timing.
-Endpoint comparisons remain release work. The previous focused profile/verifier
-suite passed 89 tests; the three PV requirements are not yet claimed complete.
+Both waste-timing endpoints also pass full 2030 LCI for demand +1 and −2,
+with maximum all-flow error `2.67e-14` and operator relative residual `2.57e-16`.
+`report_pv_endpoints.py` verifies unchanged totals for every role and unchanged
+calendars for unaffected roles. Moving mixed panel-polymer waste to manufacture
+moves its fossil-CO2 mean date from 2053.54 to 2024.41; moving ambiguous mounting
+packaging to retirement moves its mean from 2024.30 to 2054.30. The respective
+unchanged burdens are `6.03418e-6` and `1.48751e-8 kg CO2/kWh`. These are upstream
+emission dates, not disposal measurements or climate scores. The local CSV and
+PNG/SVG/PDF figure retain this distinction. The bounded PV case now has evidence
+for all three requirements; final campaign review remains outstanding.
 
 ## Vehicle reconstruction and consumer checks
 
@@ -224,7 +232,11 @@ preserves the negative reference production of used-battery treatment through a
 positive-unit timing adapter. `check_bev_pilot.py` uses the shared verifier;
 legacy comparisons also retain the direct battery and maintenance roots instead
 of omitting their attributed burdens. The 14 shared lifecycle/verifier tests
-pass. The actual BEV export is running; its full consumer evidence remains open.
+pass. The actual BEV export adds 31 activities to the 26,533-activity source.
+Its full matrix identity passes with A/B relative residuals below
+`2.08e-13`/`3.01e-17`; 210 signed annual port checks and all 30 internal zero
+shifts pass. The annual cache has been built and its subsequent reload confirmed.
+Full 2023/2030 signed LCI and legacy comparisons remain in progress.
 
 ## Real CCGT evidence
 
@@ -326,3 +338,28 @@ change as a result of this verifier fix.
 PNG/SVG/PDF figure. Mean ages are labelled as service weighted, since one case
 tests age-dependent utilisation. The generated source and package artifacts
 remain outside the repository.
+
+## Private evidence preservation
+
+`dev/stock_vintage/archive_private_evidence.py` creates a fresh private directory
+outside Git. It requires the twelve signed full-LCI reports for the five primary
+pilots and two PV endpoints to pass, and verifies source/package/cohort hashes.
+It copies the restricted inputs, packages, diagnostics and figures, saves both
+clean Git revisions as source archives, and records interpreter and dependency
+versions. It preserves original export records while writing archive-local
+package paths in separate copies. Legacy failures remain diagnostic evidence.
+The archive gate verifies conservation; scientific approval still requires the
+documented boundary, cohort and uncertainty review. It never overwrites an
+existing archive. A dry run performs the input and provenance checks without
+copying data.
+
+```sh
+python dev/stock_vintage/archive_private_evidence.py \
+  --research-dir /private/tmp/stock-vintage-pilots \
+  --public-sources-dir /private/tmp/stock-data-campaign \
+  --iam-root '/local/IAM-ecoinvent' \
+  --premise-repo /local/premise-stock-vintage-pilots \
+  --premise-python /local/premise-environment/bin/python \
+  --trails-python /local/trails-environment/bin/python \
+  --destination '/local/private-evidence/stock-vintage-pilots' --dry-run
+```
