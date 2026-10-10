@@ -181,6 +181,7 @@ def main():
         "water-sensitivity",
         "vehicle-sensitivity",
         "pv-endpoints",
+        "parent-calendars",
     ):
         directory = root / name
         for path in sorted(directory.iterdir()):

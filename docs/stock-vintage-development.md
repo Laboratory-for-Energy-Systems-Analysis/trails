@@ -5,6 +5,9 @@ It is not a reviewed stock dataset or a change to public defaults. The scientifi
 plan lives in the premise planning worktree under
 `docs/development/stock-asset-temporal/`.
 
+The [five-pilot review](stock-vintage-pilot-review.md) consolidates the three
+requirements, current evidence, applicability limits and remaining work.
+
 ## Purpose and allocation convention
 
 For a service in calendar year `t`, split the existing capital exchange amount
