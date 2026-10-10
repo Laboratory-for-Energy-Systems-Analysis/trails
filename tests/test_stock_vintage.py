@@ -18,6 +18,7 @@ from trails import Trails
 from trails.stock_vintage import StockVintageProfiles
 from trails.importer import import_excel_inventory
 from trails.temporal_distributions import TemporalExchange
+from dev.stock_vintage.check_ccgt_pilot import independent_graph_reference
 
 CALLER = {
     "name": "transport, passenger car, BEV",
@@ -182,6 +183,92 @@ def test_router_and_lci_conserve_static_inventory_with_annual_profiles(stock_pac
             assert np.allclose(
                 totals.todense(), expected_biosphere, rtol=1e-9, atol=1e-10
             )
+
+
+@pytest.mark.parametrize("solver_mode", ["direct", "bw2calc"])
+@pytest.mark.parametrize("attribute_to_roots", [False, True])
+@pytest.mark.parametrize("depth", [2, 3])
+@pytest.mark.parametrize("amount", [1.0, -2.0])
+@pytest.mark.parametrize(
+    "legacy,amount_source",
+    [(False, "none"), (False, "port"), (False, "matrix"), (True, "none")],
+)
+def test_negative_reference_waste_chain_under_stock_and_legacy_routing(
+    stock_package, solver_mode, attribute_to_roots, depth, amount, legacy, amount_source
+):
+    """Waste product signs must become positive treatment activity supplies.
+
+    A capital supplier generates waste through a market with reference output
+    -2 and a treatment with reference output -1. Both contribute biosphere
+    flows. Check the waste market both at and before the routing frontier.
+    Retain the historical legacy discrepancy as an explicit compatibility check.
+    """
+    if legacy:
+        stock_package.descriptor.pop("stock_vintage")
+    with make_model(stock_package) as model:
+        a = np.eye(4)
+        a[2, 0] = -0.1
+        a[0, 1] = 0.5
+        a[1, 1], a[1, 3], a[3, 3] = -2, 2, -1
+        b = np.zeros((4, model.B.shape[2]))
+        b[:, 0] = [2, 0.4, 0.3, 3]
+        model.A = sparse.stack([sparse.COO.from_numpy(a)] * len(model.scenario_labels))
+        model.B = sparse.stack([sparse.COO.from_numpy(b)] * len(model.scenario_labels))
+        for label in model.activity_indices:
+            model.activity_indices[label][3] = {
+                "name": "synthetic negative-reference treatment",
+                "reference product": "synthetic waste",
+                "unit": "unit",
+                "location": "GLO",
+            }
+        model.temporal_technosphere_exchanges = {}
+        model.temporal_biosphere_exchanges = {}
+        if amount_source != "none":
+            for label in model.template_labels:
+                for parent, child in ((0, 1), (1, 3)):
+                    model.temporal_technosphere_exchanges[(label, parent, child)] = (
+                        TemporalExchange(
+                            distribution=6,
+                            loc=None,
+                            scale=None,
+                            offset_min=0,
+                            offset_max=0,
+                            offsets=(0,),
+                            weights=(1.0,),
+                            amount_source=amount_source,
+                        )
+                    )
+        direct = model.expand_temporal_exchanges(
+            year=2021, act_idx=0, amount=0.1 * amount
+        )
+        expected_market_supply = (-0.025 if legacy else 0.025) * amount
+        assert sum(row.get(1, 0) for row in direct.values()) == pytest.approx(
+            expected_market_supply
+        )
+        model.temporal_routing(
+            start_year=2021,
+            start_act_idx=2,
+            amount=amount,
+            max_depth=depth,
+            adaptive_relative_score_cutoff=None,
+            min_amount=0,
+            show_progress=False,
+            attribute_to_roots=attribute_to_roots,
+        )
+        # q=.1, waste-market supply=.025 and treatment supply=.05 per FU.
+        inventory = model.lci(show_progress=False, solver_mode=solver_mode)
+        total = float(inventory.sum().item())
+        expected = (0.34 if depth == 2 else 0.64) if legacy else 0.66
+        assert total == pytest.approx(expected * amount, rel=1e-12, abs=1e-14)
+        reference, audit = independent_graph_reference(
+            model, model.A[0].to_scipy_sparse().T.tocsc(), 2, amount
+        )
+        assert reference.sum() == pytest.approx(expected * amount, rel=1e-12, abs=1e-14)
+        assert audit["operator_conservation_passed"] is not legacy
+        waste_nodes = [d for n, d in model.graph.nodes(data=True) if n[-1] == 1]
+        assert sum(d["amount"] for d in waste_nodes) == pytest.approx(
+            expected_market_supply
+        )
 
 
 def test_stock_resource_hash_is_checked_on_warm_cache(

@@ -28,6 +28,15 @@ available scenario. Inventory and score storage cover the routed dates and
 biosphere support, including successive component shifts. Legacy packages keep
 their previous year-mapping behaviour.
 
+Stock packages also convert signed product requirements into activity scaling
+using the supplier's signed reference production. For example, a waste input of
+`-0.5` into a supplier with reference output `-2` requires `+0.25` units of
+treatment activity. A credit to a positive-reference supplier retains its
+negative sign. This corrects an error exposed by the real CCGT cooling-tower
+residue market; the old absolute denominator reversed its activity and transport
+burdens. Legacy packages retain the historical convention for reproducibility.
+The root functional-unit convention remains the same.
+
 ## Consumer and resource contract
 
 Load an explicitly corrected package with:
@@ -135,10 +144,71 @@ empirical lifetime validity or a completed temporal pilot. The check consistentl
 uses processed matrix coefficients rather than mixing dataset metadata with
 their lower-precision processed values.
 
-These checks establish software behaviour only. The five empirical pilots still
-need reviewed caller/supplier boundaries, cohort and service reconciliation,
-real-database legacy/corrected comparisons, sensitivity analysis and lifecycle
-checks. A shifted parent asset plus an unreviewed legacy component profile can
+The new signed-production regression has 64 cases, including 16 legacy controls.
+It checks non-unit negative reference outputs, signed functional units, port and
+matrix temporal amounts, both solver paths, root attribution and two routing
+depths. An independent analytical result is `0.66` for the corrected fixture;
+the legacy discrepancies are retained explicitly. Additional focused engine,
+inventory-storage, importer, lifecycle and distribution suites pass.
+
+## Real CCGT evidence
+
+Premise commit `e2989248` provides the EIA block audit, exact REMIND leaf-variable
+reader, seven annual reconstruction sensitivities and the scoped inventory
+exporter. Its companion `ccgt-pilot-method.md` documents the 91-block US-WECC
+boundary, observed 2022 output weights, USA relative-trajectory proxy, initial
+old-stock extension, future capacity closure, service weighting and unchanged
+common amortisation. Both IAM pathways have nine annual records per sensitivity;
+the local table contains 126 scenario/case/year records.
+
+`dev/stock_vintage/extract_local_inventory.py` reads the existing complete
+26,533-activity ecoinvent 3.12 cut-off system into a restricted local input.
+The actual premise exporter creates legacy and corrected packages at
+2022/2025/2030, with three scoped CCGT activities. Technology remains constant
+across these anchors to isolate timing and conservation. This is not an
+IAM-transformed background LCA or historical technology reconstruction.
+
+`dev/stock_vintage/check_ccgt_pilot.py` checks actual annual capital dates,
+internal zero shifts, repeated/reversed service requests and signed quantities.
+Real LCI checks pass for service year 2023 with annual interpolation and a warm
+cache, and 2030 with interpolation disabled. Quantities are proved independently
+through the graph identity `A x_expanded + f_frontier = f_service`; componentwise
+relative residuals are below `1.2e-16` in the corrected runs.
+
+All 9,847 exported biosphere rows agree with an independently assembled
+year-wise static calculation (maximum absolute discrepancy `2.22e-16` across
+the tested signed functional units). This comparison uses the same numerical
+backend while assembling demands and biosphere multiplication independently.
+A separate one-shot SuperLU reference is retained in the report: its differences
+are about `5.74e-9` per positive FU. The complete matrix is poorly conditioned,
+so comparing different sparse decompositions alone would mix numerical error
+with changed inventory quantities. The analytical regression also checks the
+independent verifier, and the graph identity prevents a wrong route from passing
+merely because both numerical accumulations use it.
+
+The complete inventory uses factorized storage. Its bounded native flow reducer
+avoids materialising the activity/flow/year/root tensor. Generic Xarray
+skip-NaN reduction attempted an impractically large sparse broadcast during this
+check; the verifier uses the same native reduction path as TRAILS' FaIR adapter.
+
+For a 2030 kWh, the capital-attributed fossil-CO2 total is approximately
+`3.83763e-4 kg` in both variants. Its corrected mean age is 23.4754 years;
+the legacy no-interpolation router confines it to 2022/2025/2030 (mean age
+7.8052 years). The latter includes calendar clamping and must not be interpreted
+as the raw legacy distribution's mean: the separately checked, unclamped
+construction pulses have a mean age of 16.9338 years. The legacy waste-market sign error is
+reported separately from this timing comparison.
+
+`dev/stock_vintage/report_ccgt_sensitivity.py` produces a local CSV and PNG/SVG/PDF
+figure from the two generated cohort reports. It separates observed capacity
+and output weighting and shows the lifetime, old-stock-tail and future-additions
+sensitivities. Raw inventory, IAM-derived series and generated packages stay
+outside version control.
+
+The CCGT bounded reference case now has real evidence for the three requirements;
+the wider pilot campaign and final promotion audit remain unfinished. Passenger
+cars, trucks, PV and water still need their empirical temporal comparisons and
+remaining lifecycle/component checks. A shifted parent asset plus an unreviewed legacy component profile can
 still duplicate the vintage shift. Likewise, a flat manufacture profile alone
 does not retain the service-year context needed to condition future retirement
 on an asset having survived to that service year. No pilot may be promoted until
