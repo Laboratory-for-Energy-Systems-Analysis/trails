@@ -13,6 +13,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import xml.etree.ElementTree as ET
 
 REQUIRED = {
     "ccgt-real-npi": [
@@ -77,6 +78,19 @@ def main():
     if any((p / ".git").exists() for p in (destination, *destination.parents)):
         raise ValueError("Restricted evidence must stay outside a Git checkout")
     selected, exports, evidence_checks = {}, {}, []
+    test_suites = []
+    for name in ("trails-routing.xml", "trails-integration.xml", "premise-pilots.xml"):
+        document = ET.parse(root / "validation" / name)
+        suites = list(document.iter("testsuite"))
+        tests = sum(int(s.get("tests", 0)) for s in suites)
+        failed = sum(
+            int(s.get("failures", 0)) + int(s.get("errors", 0)) for s in suites
+        )
+        if not tests or failed:
+            raise ValueError(f"Required regression suite incomplete or failed: {name}")
+        test_suites.append(
+            {"file": name, "tests": tests, "failures_and_errors": failed}
+        )
 
     def register(source, relative, expected=None):
         relative = Path(relative)
@@ -182,6 +196,10 @@ def main():
         "vehicle-sensitivity",
         "pv-endpoints",
         "parent-calendars",
+        "performance",
+        "compatibility",
+        "baseline-audit",
+        "validation",
     ):
         directory = root / name
         for path in sorted(directory.iterdir()):
@@ -191,12 +209,25 @@ def main():
                 ".png",
                 ".svg",
                 ".pdf",
+                ".xml",
             }:
                 register(path, Path("figures") / directory.name / path.name)
+
+    for name in (
+        "trails-routing-tests.log",
+        "trails-integration-tests.log",
+        "premise-pilot-tests.log",
+    ):
+        register(root / name, Path("validation") / name)
+    for name in ("synthetic-roundtrip", "lifecycle-roundtrip"):
+        for path in sorted((root / name).iterdir()):
+            if path.is_file() and path.suffix in {".json", ".zip"}:
+                register(path, Path("synthetic-fixtures") / name / path.name)
 
     repositories = {
         "premise": args.premise_repo.resolve(),
         "trails": Path(__file__).resolve().parents[2],
+        "trails_baseline": Path(__file__).resolve().parents[2],
     }
     revisions = {}
     for name, repository in repositories.items():
@@ -205,8 +236,13 @@ def main():
         )
         if status.strip():
             raise ValueError(f"Commit reviewed changes before archiving {name}")
+        revision = (
+            "b7d1bb78f0388ba3916270e6654353e01624807e"
+            if name == "trails_baseline"
+            else "HEAD"
+        )
         revisions[name] = subprocess.check_output(
-            ["git", "-C", str(repository), "rev-parse", "HEAD"], text=True
+            ["git", "-C", str(repository), "rev-parse", revision], text=True
         ).strip()
     environment_probe = (
         "import json,sys; from importlib.metadata import distributions; "
@@ -301,6 +337,7 @@ def main():
                 "environments": environments,
                 "files": records,
                 "corrected_lci_checks": evidence_checks,
+                "regression_suites": test_suites,
                 "limitations": "Archive checks conservation evidence, not empirical validity or completion of all methodological release requirements. Legacy failures remain diagnostic records.",
             },
             indent=2,

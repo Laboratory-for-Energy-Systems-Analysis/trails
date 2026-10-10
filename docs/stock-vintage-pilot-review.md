@@ -1,10 +1,9 @@
 # Review of the five bounded stock-vintage pilots
 
-Review in progress, 10 October 2026. Both implementation repositories use
-`feat/stock-vintage-pilots`. CCGT, PV and trucks have evidence for all three requirements.
-Passenger cars and water have passed their complete matrix rewrites and
-annual event checks; their corrected full-LCI comparisons are still running.
-The autonomous goal is not complete. No public defaults have changed.
+Reviewed 10 October 2026. Both implementation repositories use
+`feat/stock-vintage-pilots`. All five bounded pilots now have evidence for all
+three requirements, including full signed LCI. Final private evidence archiving
+remains in progress. No public defaults have changed.
 
 This review concerns opt-in **timing under the original common amortisation**.
 For each service-year exchange, the original coefficient is distributed over
@@ -67,9 +66,9 @@ reconstruction or an IAM-transformed background LCA.
 |---|---|---|---|
 | CCGT | Pass | Pass, all 9,847 biosphere rows | Annual interpolation and warm cache; exact parent dates |
 | PV | Pass; 510 port checks, 58 zero shifts | Pass, plus both 2030 waste-timing endpoints | Confirmed warm cache; direct occupation at service; component manufacture/end chronology |
-| Passenger BEV | Pass; 210 port checks, 30 zero shifts | Running | Confirmed warm cache; parent, battery, disposal and maintenance calendars checked |
+| Passenger BEV | Pass; 210 port checks, 30 zero shifts | Pass, all 9,847 biosphere rows | Confirmed warm cache; parent, battery, disposal and maintenance calendars checked |
 | Heavy truck | Pass; 30 port checks, six zero shifts | Pass, all 9,847 biosphere rows | Confirmed warm cache; parent/disposal and service-year maintenance checked |
-| Water | Pass; 340 port checks, 34 zero shifts | Running | Separate confirmed warm-cache pulse check; pipe/tank and disposal calendars checked |
+| Water | Pass; 340 port checks, 34 zero shifts | Pass, all 9,847 biosphere rows | Separate confirmed warm-cache pulse check; pipe/tank and disposal calendars checked |
 
 Full-LCI checks compare the summed biosphere inventory against an independently
 assembled year-wise calculation using the same numerical backend, and separately
@@ -111,14 +110,63 @@ legacy results also exhibit calendar clamping. These parent-only means exclude
 active battery/inverter timing, tank timing, disposal and background factory
 capital. The full lifecycle and sign checks remain necessary.
 
-## Remaining completion work
+## Regression, compatibility and scope review
 
-1. Finish and review the running corrected water and BEV full-LCI reports,
-   including both demand signs and legacy quantity/timing diagnostics.
-2. Update this decision table from the completed evidence; do not infer a pass
-   from a running process or a successful parent-calendar check.
-3. Verify and create the durable private evidence archive with both clean code
-   revisions, restricted inputs, outputs and environment versions.
-4. Complete the final cross-repository review and record the exact evidence
-   locations and remaining applicability limits. Promotion here means a bounded
-   opt-in pilot, not a public stock dataset or a change to defaults.
+The final suites pass **276 TRAILS tests** (194 routing/stock/lifecycle/score
+checks and 82 loader/LCI/cache/importer/distribution checks) and **123 premise
+tests** for all five generators, source curation, lifecycle rewrites, export and
+legacy temporal rules. The final audit added twelve adaptive cases and corrected
+static-score lookups outside the inventory years. The graph retains physical
+manufacture/disposal dates; only the screening-score lookup selects an inventory
+year. Existing full real LCI reports use fixed-depth routing, whose executed
+path is unchanged by this adaptive-only fix.
+
+An actual check with the preserved TRAILS `b7d1bb78` reader confirms that it loads
+the synthetic corrected package but ignores its annual resource: for 2021 it
+emits 0.05 at 2009 and 0.20 at 2020, instead of 0.10 at 2010 and 0.15 at 2021.
+The corrected reader produces the required result. Use the paired implementation
+code, including TRAILS `a3ef279` and premise `edc89b46` or their reviewed branch
+descendants; the private manifest pins the exact delivered revisions. There is
+no claim that an older released reader will reject incompatible metadata.
+
+The complete legacy-table audit records 987 rows, 964 unique identities and 23
+duplicate identities. All 317 legacy lognormal rows yield uniform weights,
+including the two with maximum zero. All 670 triangular rows have an independent
+asymmetric-CDF diagnostic with original/binned moments and retained mass.
+The original table and distribution implementation are byte-preserved relative
+to the reviewed baselines. Outside exact opt-in bindings, these rows retain
+legacy status; this is not scientific approval of the other asset groups.
+
+This delivers the bounded P0–P5 opt-in route in the original plan. The plan
+explicitly permits limited pilot coverage in P5. Native IAM cohorts were sought;
+the goal-authorised labelled reconstructions are used where unavailable. Full
+23-group scientific migration, contacting data providers, heterogeneous
+individual-lifetime allocation (P6), study/manuscript reassessment and default
+promotion (P7) are separate work. No publication, merge or provider contact is
+part of this result.
+
+## Evidence preservation and remaining completion work
+
+The 20-case subprocess benchmark compares legacy and corrected packages with
+annual interpolation, 2030 demand +1 and depth two. Each warm run confirms an
+actual cache load; cold means the matrix cache is disabled, not an empty OS disk
+cache. Corrected loading takes 5.91–6.54 seconds cold and 1.12–1.29 seconds warm;
+routing takes 0.60–1.12 seconds. Peak process RSS through loading/routing is
+2,089–2,246 MiB cold and 1,064–1,160 MiB warm. These are measured on this machine,
+not portable resource guarantees or full-LCI peak memory measurements.
+
+Corrected ZIPs are 66.3–67.4 MB; annual resources range from 33 kB (CCGT) to
+7.40 MB (water), uncompressed. Actual full signed verifier intervals range from
+minutes to about 152 minutes for water, including independent verification and
+concurrent load. Water streams about 9.6 billion entries per signed demand.
+That cost warrants bounded use and further performance work before a global
+rollout; the completed runs establish feasibility for the requested pilots.
+
+The local reports include twelve corrected full-LCI checks, all real legacy
+comparisons, complete parent calendars, sensitivity tables/figures, source pins,
+synthetic exporter fixtures, regression XML and actual reader compatibility.
+`archive_private_evidence.py` requires the full-LCI and regression checks to
+pass and verifies hashes before creating a new private directory outside Git.
+The final archive must also pin both clean code revisions, the preserved reader,
+restricted inputs and Python/dependency versions. Final sign-off awaits that
+copy and its independent hash/relocated-package checks.

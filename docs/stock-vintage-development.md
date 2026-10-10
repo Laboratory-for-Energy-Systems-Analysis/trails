@@ -252,7 +252,15 @@ pass. The actual BEV export adds 31 activities to the 26,533-activity source.
 Its full matrix identity passes with A/B relative residuals below
 `2.08e-13`/`3.01e-17`; 210 signed annual port checks and all 30 internal zero
 shifts pass. The annual cache has been built and its subsequent reload confirmed.
-Full 2023/2030 signed LCI and legacy comparisons remain in progress.
+Full signed LCI now passes in 2023 with confirmed warm-cache loading and in
+2030 without interpolation. All 9,847 biosphere rows agree with the independent
+calculation (maximum absolute error `2.85e-14`; operator relative residual
+`1.83e-16`). Chassis manufacture/disposal together retain the legacy parent
+selected-CO2 total `0.0101749154251 kg/km`. Battery manufacture and maintenance
+also retain their totals. Battery disposal differs from the legacy result
+because the opt-in path fixes signed reference production; the matrix rewrite
+still preserves the original source coefficients. This quantity correction is
+reported separately from stock timing.
 
 ## Real CCGT evidence
 
@@ -308,20 +316,17 @@ and output weighting and shows the lifetime, old-stock-tail and future-additions
 sensitivities. Raw inventory, IAM-derived series and generated packages stay
 outside version control.
 
-The CCGT bounded reference case now has real evidence for the three requirements;
-the wider pilot campaign and final promotion audit remain unfinished. Passenger
-cars, trucks, PV and water still need their empirical temporal comparisons and
-remaining lifecycle/component checks. A shifted parent asset plus an unreviewed legacy component profile can
-still duplicate the vintage shift. Likewise, a flat manufacture profile alone
-does not retain the service-year context needed to condition future retirement
-on an asset having survived to that service year. No pilot may be promoted until
-its relevant boundaries and event chronology have been demonstrated.
+All five bounded pilots now have real evidence for the three requirements.
+The final review and private archive make their scope explicit: shifted parent
+assets, active components and lifecycle ports use separately reviewed roles.
+A mean-only parameter or a parent shift alone would not establish those roles
+or condition retirement on survival through the service year.
 
 Local helper `dev/stock_vintage/audit_inventory.py` reads an existing Brightway
 database and writes only candidate identities and selected capital-exchange
 metadata. Raw licensed inventories and IAM inputs remain outside version control.
 
-## Water-network evidence in progress
+## Completed water-network evidence
 
 Premise commit `ef2b1720` adds the Quebec water pilot with separate pipe and
 storage cohorts. Its `water-pilot-method.md` records the source bins, missing
@@ -338,17 +343,20 @@ residual `5.18e-14` and biosphere residual `2.60e-17`. There are 340 signed annu
 pulse checks and 34 internal zero-shift bindings. The old raw network-construction
 distribution has mean age 35 years, independently of legacy calendar clamping.
 
-`check_water_pilot.py` records cache requests separately from confirmed cache
-loads. Full corrected temporal LCI checks remain in progress at this checkpoint.
-The first complete solve returned, but its all-flow activity reduction was
-killed during verification: even a reduced sparse cube can require enormous
-intermediate arrays across many retirement years and roots. The verifier now
-streams native inventory entries in bounded windows, accumulating every flow
-total and only four dated fossil-CO2 summaries. Its independent reference also
-keeps year/root demands sparse until each solve. Six analytical checks cover
-the operator proof and streaming with both storage backends and both signs;
-85 focused profile/verifier tests pass. The model and exported profiles did not
-change as a result of this verifier fix.
+`check_water_pilot.py` now passes full LCI for +1 and −2 demand in 2023 with
+annual interpolation and in 2030 without interpolation. All 9,847 flows agree
+with the independent year-wise reference, with maximum absolute error
+`7.60e-16` and operator relative residual `6.45e-16`. The four revised roles
+retain a combined selected fossil-CO2 burden of `5.61788661753e-5 kg/kg water`.
+A separate warm-cache check confirms all signed annual pulses and zero shifts;
+the original full 2023 run itself loaded cold.
+
+Verification streams roughly 9.6 billion native inventory entries per demand
+in bounded windows. This avoids the excessive intermediate allocation of an
+activity-reduced sparse cube. The model and exported profiles did not change as
+a result of that verifier correction. Full-LCI peak memory was not instrumented;
+loading/routing measurements and observed end-to-end verifier times are recorded
+separately by `benchmark_pilot_loading.py`.
 
 `report_water_sensitivity.py` writes 234 scenario/asset/year records and a
 PNG/SVG/PDF figure. Mean ages are labelled as service weighted, since one case
