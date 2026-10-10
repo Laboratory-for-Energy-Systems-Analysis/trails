@@ -151,6 +151,29 @@ depths. An independent analytical result is `0.66` for the corrected fixture;
 the legacy discrepancies are retained explicitly. Additional focused engine,
 inventory-storage, importer, lifecycle and distribution suites pass.
 
+## PV parent and component evidence
+
+The companion premise branch now constructs a bounded PV population of 363
+complete US-WECC EIA plants, preserving observed AC/DC capacity and annual net
+generation separately. Its fixed-crystalline classification is an explicit
+proxy for the source multi-Si ground-mounted inventory. Both pinned local REMIND
+scenarios generate eight cases over 2022–2030; these are regional reconstructions,
+not native IAM vintage outputs.
+
+Regular replacement generates the inverter actually serving the requested year.
+Manufacture is no later than service; disposal is the earlier of its next renewal
+or conditional parent retirement. The producer retains the already amortised
+quantity. Analytical integration over thirty equal annual services recovers one
+initial and one replacement inverter for a fifteen-year interval. Component
+scope tests also prevent lifted manufacture from reintroducing embedded disposal.
+
+`dev/stock_vintage/report_pv_sensitivity.py` writes a 144-row local CSV, input-hash
+manifest and PNG/SVG/PDF figure from the two cohort outputs. The figure explicitly
+distinguishes observed parent dates from assumed inverter dates. IAM-derived
+figures and tables remain restricted local evidence. Full real PV export/LCI,
+panel replacement/handling losses and the detailed waste/land-use boundary remain
+release work; these cohort results alone do not pass all three requirements.
+
 ## Real CCGT evidence
 
 Premise commit `e2989248` provides the EIA block audit, exact REMIND leaf-variable
