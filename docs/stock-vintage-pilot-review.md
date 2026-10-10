@@ -2,8 +2,8 @@
 
 Reviewed 10 October 2026. Both implementation repositories use
 `feat/stock-vintage-pilots`. All five bounded pilots now have evidence for all
-three requirements, including full signed LCI. Final private evidence archiving
-remains in progress. No public defaults have changed.
+three requirements, including full signed LCI. The private evidence archive and
+its independent verification are complete. No public defaults have changed.
 
 This review concerns opt-in **timing under the original common amortisation**.
 For each service-year exchange, the original coefficient is distributed over
@@ -145,7 +145,7 @@ individual-lifetime allocation (P6), study/manuscript reassessment and default
 promotion (P7) are separate work. No publication, merge or provider contact is
 part of this result.
 
-## Evidence preservation and remaining completion work
+## Evidence preservation and final sign-off
 
 The 20-case subprocess benchmark compares legacy and corrected packages with
 annual interpolation, 2030 demand +1 and depth two. Each warm run confirms an
@@ -167,6 +167,28 @@ comparisons, complete parent calendars, sensitivity tables/figures, source pins,
 synthetic exporter fixtures, regression XML and actual reader compatibility.
 `archive_private_evidence.py` requires the full-LCI and regression checks to
 pass and verifies hashes before creating a new private directory outside Git.
-The final archive must also pin both clean code revisions, the preserved reader,
-restricted inputs and Python/dependency versions. Final sign-off awaits that
-copy and its independent hash/relocated-package checks.
+The archive pins both clean code revisions, the preserved reader, restricted
+inputs and Python/dependency versions. It contains 163 verified artifacts
+(1,128,568,509 bytes), twelve corrected full-LCI reports and the 399 passing
+regression tests. Every recorded hash and size was checked independently after
+copying. Relocated BEV and water checks pass 210/340 signed annual cases and
+full rewrite equivalence; the relocated synthetic fixture passes eight complete
+lifecycle LCI cases.
+
+Local archive: `~/Library/Application Support/trails/stock-vintage-evidence/2026-10-10-pilots`.
+The sibling `2026-10-10-pilots-verification/verification.json` records the
+independent verification and smoke-report hashes. The archive manifest SHA-256
+is `c15467bdb209ece5c556248c16edc6257dae034dd121b9a6c935b4f5fe726231`.
+It pins premise `da7edd7ab87e644affad7fc879bf141d9cc8c0ba` and TRAILS
+`62eacddb764d876978165ccb2828fa07be7e508f`, plus preserved reader `b7d1bb78`.
+These snapshots precede documentation-only sign-off commits; executable code
+is unchanged. Reproduction uses the archived scripts, inputs and environment
+versions. Keep the archive and all restricted derived series local.
+
+**Decision:** the five specified bounded pilots are ready for review under their
+declared common-amortisation and proxy assumptions. No methodological or data
+gap blocks that bounded result. Exact native vintages, observed replacement
+histories, age-specific utilisation, tank volume/type and other documented
+empirical gaps limit broader application; they remain explicit rather than
+being presented as resolved observations. There is no remaining work required
+for this autonomous goal, and no default promotion or publication is implied.
