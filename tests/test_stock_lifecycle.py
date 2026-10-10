@@ -26,3 +26,16 @@ def test_manufacture_and_retirement_keep_calendar_beyond_matrix_horizon(
         interpolate_annual=interpolate_annual,
     )
     assert len(checks) == 8
+
+
+@pytest.mark.parametrize("adaptive_cutoff", [1e-4, 10.0])
+@pytest.mark.parametrize("interpolate_annual", [False, True])
+def test_adaptive_lifecycle_keeps_past_and_future_event_dates(
+    adaptive_cutoff, interpolate_annual
+):
+    checks = validate(
+        Path(__file__).parent / "data/stock_lifecycle",
+        interpolate_annual=interpolate_annual,
+        adaptive_cutoff=adaptive_cutoff,
+    )
+    assert len(checks) == 8

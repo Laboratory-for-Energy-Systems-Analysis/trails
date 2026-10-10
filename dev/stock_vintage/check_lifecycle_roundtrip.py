@@ -18,7 +18,12 @@ def identity(metadata):
 
 
 def validate(
-    directory, *, solver_mode="direct", attribute_to_roots=True, interpolate_annual=True
+    directory,
+    *,
+    solver_mode="direct",
+    attribute_to_roots=True,
+    interpolate_annual=True,
+    adaptive_cutoff=None,
 ):
     directory = Path(directory)
     expected = json.loads((directory / "expectations.json").read_text())
@@ -71,12 +76,24 @@ def validate(
                         np.isclose(actual[y], target[y], atol=1e-12, rtol=1e-12)
                         for y in actual
                     )
+                routing = {
+                    "max_depth": 4,
+                    "adaptive_relative_score_cutoff": None,
+                }
+                if adaptive_cutoff is not None:
+                    routing = {
+                        "max_depth": None,
+                        "adaptive_relative_score_cutoff": adaptive_cutoff,
+                        "adaptive_methods": [
+                            "CML v4.8 2016 no LT - climate change no LT - "
+                            "global warming potential (GWP100) no LT"
+                        ],
+                    }
                 model.temporal_routing(
                     start_year=year,
                     start_act_idx=caller,
                     amount=amount,
-                    max_depth=4,
-                    adaptive_relative_score_cutoff=None,
+                    **routing,
                     min_amount=0,
                     show_progress=False,
                     attribute_to_roots=attribute_to_roots,

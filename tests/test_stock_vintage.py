@@ -185,6 +185,47 @@ def test_router_and_lci_conserve_static_inventory_with_annual_profiles(stock_pac
             )
 
 
+@pytest.mark.parametrize("cutoff", [1e-4, 10.0])
+@pytest.mark.parametrize("amount", [1.0, -2.0])
+@pytest.mark.parametrize("interpolate_annual", [False, True])
+def test_adaptive_stock_routing_conserves_pruned_frontier(
+    stock_package, cutoff, amount, interpolate_annual
+):
+    with make_model(stock_package, interpolate_annual=interpolate_annual) as model:
+        a, b = model.A[0], model.B[0]
+        model.A = sparse.stack([a] * len(model.scenario_labels))
+        model.B = sparse.stack([b] * len(model.scenario_labels))
+        demand = np.zeros(a.shape[0])
+        demand[2] = amount
+        expected = b.to_scipy_sparse().T @ spsolve(
+            a.to_scipy_sparse().T.tocsc(), demand
+        )
+        model.temporal_routing(
+            start_year=2021,
+            start_act_idx=2,
+            amount=amount,
+            max_depth=None,
+            adaptive_methods=[
+                "CML v4.8 2016 no LT - climate change no LT - "
+                "global warming potential (GWP100) no LT"
+            ],
+            adaptive_relative_score_cutoff=cutoff,
+            min_amount=0,
+            attribute_to_roots=True,
+            show_progress=False,
+        )
+        car_years = {node[0] for node in model.graph if node[-1] == 0}
+        # The root expands before the default adaptive minimum depth. Even
+        # strongly pruned children therefore retain these first-edge dates.
+        assert car_years == {2010, 2021}
+        if cutoff > 1:
+            car_nodes = [d for n, d in model.graph.nodes(data=True) if n[-1] == 0]
+            assert all(d.get("frontier_amount") for d in car_nodes)
+        inventory = model.lci(show_progress=False, solver_mode="direct")
+        totals = inventory.sum(dim=[d for d in inventory.dims if d != "flow"]).data
+        np.testing.assert_allclose(totals.todense(), expected, rtol=1e-9, atol=1e-10)
+
+
 @pytest.mark.parametrize("solver_mode", ["direct", "bw2calc"])
 @pytest.mark.parametrize("attribute_to_roots", [False, True])
 @pytest.mark.parametrize("depth", [2, 3])

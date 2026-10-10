@@ -2653,12 +2653,16 @@ class Trails:
             """Return cached absolute static score potential for one unit."""
             if adaptive_scores is None:
                 return 0.0, ()
-            cache_key = (int(year), int(act_idx))
+            # Stock nodes retain physical event years, while static score
+            # tables only contain available inventory years. Map the lookup,
+            # not the graph node or its temporal profile.
+            scenario_year = self._map_year_to_scenario_year(int(year))
+            cache_key = (int(scenario_year), int(act_idx))
             cached = score_unit_cache.get(cache_key)
             if cached is not None:
                 return cached
             unit_max, unit_values = adaptive_scores.unit_score_potential(
-                year=int(year),
+                year=int(scenario_year),
                 activity=int(act_idx),
             )
             cached = (
@@ -2797,7 +2801,7 @@ class Trails:
             )
             adaptive_root_potential, _ = _activity_score_potential(
                 adaptive_scores,
-                year=start_year_int,
+                year=self._map_year_to_scenario_year(start_year_int),
                 activity=start_activity,
                 amount=start_amount,
             )

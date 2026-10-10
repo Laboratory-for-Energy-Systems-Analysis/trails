@@ -101,6 +101,13 @@ The JSON resource is reloaded and hashed even when inventory interpolation is
 loaded from cache. Temporal expansion caches use the requested calendar year for
 packages with annual profiles. Existing matrix caches retain their own identity.
 
+Adaptive routing looks up static screening scores at the selected inventory
+year while retaining physical years on graph nodes. Regression checks cover
+past manufacture, future disposal, a non-anchor service year, both demand signs
+and strong frontier pruning. Pruning preserves quantity through the matrix solve;
+timing below a stopped branch is no longer explicitly expanded. The first-edge
+stock and lifecycle dates remain visible under the default minimum depth.
+
 Importing a foreground activity replaces its package stock bindings for the
 affected templates. Its explicit temporal metadata then takes precedence.
 For stock-vintage packages, `cache_import=True` does not save modified matrices
