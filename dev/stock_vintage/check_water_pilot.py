@@ -361,6 +361,15 @@ def validate(
                     if corrected
                     else {capital: "embedded_network_capital"}
                 )
+                if not corrected:
+                    # Some callers also carry direct batteries, maintenance or
+                    # disposal. Keep those source roots in the legacy evidence
+                    # so their burden is not omitted from a component comparison.
+                    for row in evidence.get("legacy_role_suppliers", []):
+                        supplier = lookup[identity(row["supplier"])]
+                        if supplier in root_roles:
+                            raise ValueError("Duplicate legacy attribution root")
+                        root_roles[supplier] = row["role"]
                 totals, categories, streamed_entries = stream_inventory_totals(
                     model._inventory_builder,
                     flows,

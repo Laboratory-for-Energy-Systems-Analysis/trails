@@ -218,6 +218,14 @@ zero shifts pass. A subsequent annual-cache reload is confirmed. Full 2023
 warm-cache and 2030 no-interpolation LCIs and the legacy comparison are running;
 the third truck release requirement remains open.
 
+The companion BEV exporter now separates 17 parent disposal ports, battery
+manufacture/end and service-year maintenance. It scopes six event markets and
+preserves the negative reference production of used-battery treatment through a
+positive-unit timing adapter. `check_bev_pilot.py` uses the shared verifier;
+legacy comparisons also retain the direct battery and maintenance roots instead
+of omitting their attributed burdens. The 14 shared lifecycle/verifier tests
+pass. The actual BEV export is running; its full consumer evidence remains open.
+
 ## Real CCGT evidence
 
 Premise commit `e2989248` provides the EIA block audit, exact REMIND leaf-variable
