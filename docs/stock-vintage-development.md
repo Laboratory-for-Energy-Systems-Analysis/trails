@@ -182,9 +182,16 @@ year. Its analytical tests include both functional-unit signs and caller losses.
 
 The producer documents expected service-year panel maintenance, installation
 handling loss, and explicit factory/end-of-life polymer and mounting-packaging
-timing endpoints. Full temporal LCI, cache/no-interpolation, legacy and endpoint
-comparisons remain release work. There are 89 passing focused profile/verifier
-tests; the three PV requirements are not yet claimed complete.
+timing endpoints. Full LCI now passes for demand +1 and −2 in 2023 with annual
+interpolation and confirmed warm-cache loading, and in 2030 without interpolation.
+All 9,847 biosphere rows agree with the independent year-wise calculation within
+`1.78e-14` absolute error; the operator componentwise relative residual is below
+`2.57e-16`. Direct land occupation occurs at the requested year for both signs.
+Capital-attributed fossil CO2 remains `0.00855912127 kg/kWh`. Corrected 2030 parent
+mean age is 5.69750 years; legacy raw/clamped means are 13.50179/7.31900 years.
+The legacy negative-reference sign error is reported separately from timing.
+Endpoint comparisons remain release work. The previous focused profile/verifier
+suite passed 89 tests; the three PV requirements are not yet claimed complete.
 
 ## Real CCGT evidence
 
