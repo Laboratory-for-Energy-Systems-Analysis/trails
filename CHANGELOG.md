@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased v1.0 backport
+
+### Fixed
+
+- Sparse annual interpolation now handles exchanges that appear or disappear
+  between snapshots, including an empty anchor matrix. Check lookup positions
+  before indexing so missing coefficients remain zero. The weighted linear
+  interpolation rule and temporal routing behavior are unchanged.
+
 ## 1.0.0 - 2026-06-14
 
 ### Changed

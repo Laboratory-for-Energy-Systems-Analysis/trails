@@ -1286,8 +1286,10 @@ def _interp_slice_union_vectorized(
     v0u = np.zeros(ku.shape[0], dtype=np.float64)
     v1u = np.zeros(ku.shape[0], dtype=np.float64)
 
-    m0 = (pos0 < k0s.size) & (k0s[pos0] == ku)
-    m1 = (pos1 < k1s.size) & (k1s[pos1] == ku)
+    m0 = pos0 < k0s.size
+    m1 = pos1 < k1s.size
+    m0[m0] &= k0s[pos0[m0]] == ku[m0]
+    m1[m1] &= k1s[pos1[m1]] == ku[m1]
 
     v0u[m0] = v0s[pos0[m0]]
     v1u[m1] = v1s[pos1[m1]]
