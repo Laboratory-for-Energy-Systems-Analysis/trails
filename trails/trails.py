@@ -1822,15 +1822,29 @@ class Trails:
             return 1.0
         return float(vector[act])
 
-    def _production_amount_vector(self, t: int) -> np.ndarray:
-        """Return absolute production amounts for all activities in a scenario."""
+    def _child_production_amount(self, t: int, act_idx: int) -> float:
+        """Return signed reference production for a routed supplier.
+
+        A waste-treatment reference exchange can be negative. Dividing the
+        signed product requirement by that signed production keeps treatment
+        activity positive, while substitution of goods remains negative.
+        """
+        if self.A is None:
+            return 1.0
+        vector = self._production_amount_vector(int(t), signed=True)
+        act = int(act_idx)
+        return float(vector[act]) if 0 <= act < vector.size else 1.0
+
+    def _production_amount_vector(self, t: int, *, signed: bool = False) -> np.ndarray:
+        """Return reference production amounts, absolute unless requested signed."""
         if self.A is None:
             return np.ones(0, dtype=np.float64)
         t_int = int(t)
         vector_cache = getattr(self, "_production_amount_vector_cache", None)
         if vector_cache is None:
             vector_cache = self._production_amount_vector_cache = {}
-        cached_vector = vector_cache.get(t_int)
+        cache_key = (t_int, True) if signed else t_int
+        cached_vector = vector_cache.get(cache_key)
         if cached_vector is not None:
             return cached_vector
 
@@ -1844,26 +1858,27 @@ class Trails:
                 diag_mask = coords[0] == coords[1]
                 if np.any(diag_mask):
                     indices = coords[0, diag_mask].astype(np.intp, copy=False)
-                    values = np.abs(data[diag_mask])
+                    values = data[diag_mask] if signed else np.abs(data[diag_mask])
                     valid = (
                         (indices >= 0)
                         & (indices < n_activities)
                         & np.isfinite(values)
-                        & (values >= 1e-30)
+                        & (np.abs(values) >= 1e-30)
                     )
                     if np.any(valid):
                         production[indices[valid]] = values[valid]
         except Exception:
             pass
 
-        vector_cache[t_int] = production
+        vector_cache[cache_key] = production
 
-        # Keep the legacy scalar cache coherent for callers that inspect it.
-        cache = getattr(self, "_production_amount_cache", None)
-        if cache is None:
-            cache = self._production_amount_cache = {}
-        for act, amount in enumerate(production):
-            cache[(t_int, int(act))] = float(amount)
+        # The scalar cache follows the public reference-function magnitude.
+        if not signed:
+            cache = getattr(self, "_production_amount_cache", None)
+            if cache is None:
+                cache = self._production_amount_cache = {}
+            for act, amount in enumerate(production):
+                cache[(t_int, int(act))] = float(amount)
         return production
 
     def _activity_amount_from_product_demand(
@@ -1887,7 +1902,7 @@ class Trails:
         product_amount = self._child_amount(parent_amount, exchange_value)
         if product_amount == 0.0:
             return 0.0
-        return float(product_amount) / self._production_amount(t, product_index)
+        return float(product_amount) / self._child_production_amount(t, product_index)
 
     def _apply_temporal_distribution_to_demand(
         self,
@@ -2051,7 +2066,7 @@ class Trails:
                 )
 
             if tex is None or not use_temporal_distributions:
-                production_amount = self._production_amount(int(t), product_index)
+                production_amount = self._child_production_amount(int(t), product_index)
                 if production_amount == 0.0:
                     continue
                 scale = self._child_amount(1.0, exchange_value) / production_amount
@@ -2091,7 +2106,7 @@ class Trails:
                 )
                 continue
 
-            production_amount = self._production_amount(int(t), product_index)
+            production_amount = self._child_production_amount(int(t), product_index)
             if production_amount == 0.0:
                 continue
             scale = self._child_amount(1.0, exchange_value) / production_amount
@@ -2156,7 +2171,9 @@ class Trails:
                     if exchange_value == 0.0:
                         continue
                     product_amount = self._child_amount(1.0, exchange_value)
-                    production_amount = self._production_amount(int(t_eff), child_act)
+                    production_amount = self._child_production_amount(
+                        int(t_eff), child_act
+                    )
                     if production_amount == 0.0:
                         continue
                     child_amount = (

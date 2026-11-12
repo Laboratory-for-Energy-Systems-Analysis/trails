@@ -8,14 +8,15 @@ from trails.temporal_distributions import TemporalExchange
 from trails.trails import Trails
 
 
-@pytest.fixture
-def signed_model(example_package):
+@pytest.fixture(params=[1.0, -1.0], ids=["goods-reference", "waste-reference"])
+def signed_model(example_package, request):
     with Trails(example_package, interpolate_annual=False) as model:
         n = model.A.shape[1]
         assert n >= 3
         a = np.eye(n)
         # Non-unit production, a normal input, an avoided supplier, and a cycle.
         a[:3, :3] = [[2, -3, 4], [0, 5, -2], [0, -0.2, 4]]
+        a[2, 2] *= request.param
         model.A = sparse.COO.from_numpy(
             np.repeat(a[None, :, :], model.A.shape[0], axis=0)
         )
@@ -84,7 +85,7 @@ def test_signed_routing_matches_matrix_inventory(
 def test_signed_temporal_pulses_match_fast_and_regular_expansion(
     signed_model, source, parent
 ):
-    model, _ = signed_model
+    model, a_ref = signed_model
     a = model.A.todense()
     # The supplier becomes an input rather than a credit in the later matrix.
     a[model.scenario_index["2020"], 0, 2] = -8
@@ -101,10 +102,11 @@ def test_signed_temporal_pulses_match_fast_and_regular_expansion(
             weights=[0.25, 0.75],
         )
     }
+    reference_sign = np.sign(a_ref[2, 2])
     expected = {
         (2005, 1): parent * 3 / 5,
-        (2005, 2): -parent * 0.25,
-        (2020, 2): parent * (1.5 if source == "matrix" else -0.75),
+        (2005, 2): -parent * 0.25 / reference_sign,
+        (2020, 2): parent * (1.5 if source == "matrix" else -0.75) / reference_sign,
     }
     fast = model._expand_temporal_child_demands_fast(
         year=2005,
@@ -128,3 +130,31 @@ def test_signed_temporal_pulses_match_fast_and_regular_expansion(
         use_temporal_distributions=True,
     )
     assert again == pytest.approx({key: -value for key, value in expected.items()})
+
+
+@pytest.mark.parametrize("depth", [0, 1, 3])
+@pytest.mark.parametrize("demand", [2.0, -2.0])
+def test_reference_functional_unit_matches_signed_matrix(signed_model, depth, demand):
+    model, a = signed_model
+    model.temporal_routing(
+        start_year=2005,
+        start_act_idx=2,
+        amount=demand,
+        max_depth=depth,
+        attribute_to_roots=True,
+        show_progress=False,
+    )
+    model.lci(solver_mode="direct", attribute_to_roots=True, show_progress=False)
+    values = model.inventory.sum(
+        dim=[d for d in model.inventory.dims if d != "activity"]
+    ).data
+    if hasattr(values, "compute"):
+        values = values.compute()
+    if hasattr(values, "todense"):
+        values = values.todense()
+    fu = np.zeros(a.shape[0])
+    # The public amount denotes the reference function's magnitude. A waste
+    # treatment function therefore demands negative units of its waste product.
+    fu[2] = demand * np.sign(a[2, 2])
+    expected = np.linalg.solve(a.T, fu) * np.asarray(model.B[0].todense()).sum(axis=1)
+    np.testing.assert_allclose(values, expected, rtol=1e-6, atol=1e-8)
