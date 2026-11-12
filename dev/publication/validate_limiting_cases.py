@@ -59,6 +59,7 @@ def clear_internal_caches(trails: Trails) -> None:
         "_td_offsets_cache",
         "_A_row_cache",
         "_production_amount_cache",
+        "_production_amount_vector_cache",
         "_direct_bio_cache_by_year",
     ):
         cache = getattr(trails, name, None)
@@ -333,24 +334,30 @@ def manual_child_demands(
                 target_value = float(
                     dense_a_activity_product(trails, raw_year)[activity, product]
                 )
-                production = trails._production_amount(target_t, product)
+                production = float(
+                    dense_a_activity_product(trails, raw_year)[product, product]
+                )
+                # Independent reference-function demand, ready for a static solve.
                 child_amount = (
-                    float(supply_amount)
-                    * abs(target_value)
-                    / production
+                    -float(supply_amount)
+                    * target_value
+                    * np.sign(production)
                     * float(weight)
                 )
                 mapped_year = trails._map_year_to_scenario_year(raw_year)
                 out[int(mapped_year)][product] += child_amount
         else:
-            production = trails._production_amount(anchor_t, product)
-            child_amount_anchor = (
-                float(supply_amount) * abs(exchange_value) / production
-            )
+            production = float(a_anchor[product, product])
+            child_scaling_anchor = -float(supply_amount) * exchange_value / production
             for offset, weight in temporal_pulses(tex):
                 raw_year = int(base_year) + int(offset)
                 mapped_year = trails._map_year_to_scenario_year(raw_year)
-                out[int(mapped_year)][product] += child_amount_anchor * float(weight)
+                target_production = float(
+                    dense_a_activity_product(trails, raw_year)[product, product]
+                )
+                out[int(mapped_year)][product] += (
+                    child_scaling_anchor * abs(target_production) * float(weight)
+                )
 
     return {year: dict(mapping) for year, mapping in out.items()}
 
@@ -366,7 +373,11 @@ def manual_foreground_only_inventory(
     n_flows = int(trails.B.shape[2])
     out: dict[int, np.ndarray] = {}
     _, _, start_t = trails._get_scenario_context(start_year)
-    root_supply = float(amount) / trails._production_amount(start_t, root_activity)
+    root_supply = float(amount) / abs(
+        float(
+            dense_a_activity_product(trails, start_year)[root_activity, root_activity]
+        )
+    )
 
     manual_biosphere_for_activity(
         trails,
@@ -412,7 +423,7 @@ def patch_toy_anchor_target_system(trails: Trails, *, source: str) -> None:
             trails.scenario_index[label],
             ROOT_ACTIVITY,
             TOY_CHILD_ACTIVITY,
-        ] = value
+        ] = -value  # Consumption is negative in the technosphere matrix.
 
     b_data = np.zeros_like(np.asarray(trails.B.todense(), dtype=np.float64))
     b_data[:, TOY_CHILD_ACTIVITY, 0] = 1.0
@@ -613,8 +624,8 @@ def case_anchor_target_toy() -> dict[str, Any]:
         "case": "anchor_vs_target_toy_hand_calculation",
         "description": (
             "The example package is patched in memory to contain one foreground "
-            "exchange with coefficient values 10, 8, and 6 in years 2030, "
-            "2031, and 2033 and temporal weights 0.5, 0.3, and 0.2."
+            "input exchange with amounts 10, 8, and 6 in years 2030, "
+            "2031, and 2033 and temporal weights 0.5, 0.3, and 0.2. Input matrix coefficients are negative."
         ),
         "max_abs_diff": float(max_diff),
         "tolerance": ATOL,
