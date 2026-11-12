@@ -851,7 +851,11 @@ def _cases_from_routing_with_stats(
             continue
         activity = int(data.get("act_idx"))
         key = (year, activity)
-        frontier[key] = float(frontier.get(key, 0.0)) + frontier_amount
+        # Graph amounts scale activities. The static solve mapper expects
+        # reference-function magnitudes and applies the production sign itself.
+        t = _scenario_time_index(trails, year)
+        production = trails._production_amount(t, activity)
+        frontier[key] = float(frontier.get(key, 0.0)) + frontier_amount * production
 
     frontier_by_year = trails.frontier_to_demand_vectors(frontier)
     cases: list[YearCase] = []
