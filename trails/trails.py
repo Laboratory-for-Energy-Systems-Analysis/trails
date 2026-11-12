@@ -1020,45 +1020,44 @@ class Trails:
 
         return self.scores
 
-    def _inventory_offset_bounds(self) -> tuple[int, int]:
-        """inventory offset bounds.
-
-        :returns: Return value.
-        :rtype: tuple[int, int]"""
+    @staticmethod
+    def _exchange_offset_bounds(exchanges: dict | None) -> tuple[int, int]:
+        """Include explicit empirical offsets in conservative whole-year bounds."""
         min_offset = 0
         max_offset = 0
-        for exchanges in (
-            self.temporal_technosphere_exchanges,
-            self.temporal_biosphere_exchanges,
-        ):
-            if not exchanges:
+        for tex in (exchanges or {}).values():
+            offset_min = getattr(tex, "offset_min", None)
+            offset_max = getattr(tex, "offset_max", None)
+            if offset_min is not None:
+                min_offset = min(min_offset, int(offset_min))
+            if offset_max is not None:
+                max_offset = max(max_offset, int(offset_max))
+            offsets = getattr(tex, "offsets", None)
+            if offsets is None:
                 continue
-            for tex in exchanges.values():
-                offset_min = getattr(tex, "offset_min", None)
-                offset_max = getattr(tex, "offset_max", None)
-                if offset_min is not None:
-                    min_offset = min(min_offset, int(offset_min))
-                if offset_max is not None:
-                    max_offset = max(max_offset, int(offset_max))
+            try:
+                values = np.asarray(offsets, dtype=float)
+            except (TypeError, ValueError):
+                continue
+            values = values[np.isfinite(values)]
+            if values.size:
+                min_offset = min(min_offset, int(np.floor(values.min())))
+                max_offset = max(max_offset, int(np.ceil(values.max())))
         return min_offset, max_offset
+
+    def _inventory_offset_bounds(self) -> tuple[int, int]:
+        """Bound inventory years using technosphere and biosphere support."""
+        tech_min, tech_max = self._exchange_offset_bounds(
+            self.temporal_technosphere_exchanges
+        )
+        bio_min, bio_max = self._exchange_offset_bounds(
+            self.temporal_biosphere_exchanges
+        )
+        return min(tech_min, bio_min), max(tech_max, bio_max)
 
     def _biosphere_offset_bounds(self) -> tuple[int, int]:
-        """biosphere offset bounds.
-
-        :returns: Return value.
-        :rtype: tuple[int, int]"""
-        min_offset = 0
-        max_offset = 0
-        exchanges = self.temporal_biosphere_exchanges
-        if exchanges:
-            for tex in exchanges.values():
-                offset_min = getattr(tex, "offset_min", None)
-                offset_max = getattr(tex, "offset_max", None)
-                if offset_min is not None:
-                    min_offset = min(min_offset, int(offset_min))
-                if offset_max is not None:
-                    max_offset = max(max_offset, int(offset_max))
-        return min_offset, max_offset
+        """Bound biosphere years, including explicit empirical profiles."""
+        return self._exchange_offset_bounds(self.temporal_biosphere_exchanges)
 
     def _linearize_inventory_entries(
         self,
