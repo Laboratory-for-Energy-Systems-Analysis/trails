@@ -809,7 +809,12 @@ def _load_trails(package_path: Path) -> Trails:
     from datapackage import Package
     from trails import Trails
 
-    return Trails(Package(str(package_path)), interpolate_annual=True, debug=False)
+    return Trails(
+        Package(str(package_path)),
+        interpolate_annual=True,
+        debug=False,
+        ei_version="3.12",
+    )
 
 
 def _cases_from_routing_with_stats(
