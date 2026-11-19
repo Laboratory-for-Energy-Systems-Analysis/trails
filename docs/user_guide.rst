@@ -484,6 +484,12 @@ Notes:
   ``root activity`` dimension. Run ``lci()`` first.
 * ``scenario`` must match a scenario label present in the emissions CSV used by
   ``run_fair_delta_rf``.
+* Set ``inventory_treatment="subtract"`` when the background represents the
+  inventory's dated emissions and removals. This reports the baseline
+  response minus the response with the inventory removed. The default,
+  ``inventory_treatment="add"``, reports the response after adding the
+  inventory minus the baseline response. Choose a background and numerical
+  scaling that leave physically plausible emissions in both trajectories.
 * If ``config_name`` and ``config_names`` are omitted, TRAILS evaluates all
   available FaIR configurations and stores quantiles across the ensemble.
 
@@ -518,9 +524,10 @@ Fixed-window CO2 pulse equivalents
 
 ``run_fair_co2_pulse_equivalents`` expresses the integrated radiative forcing
 and temperature response of the full temporal inventory as the mass of a known
-CO2 pulse in the same background scenario. It runs the baseline, the baseline
-plus the inventory, and the baseline plus the reference pulse. Ratios are
-calculated for each FaIR configuration before reporting ensemble quantiles.
+CO2 pulse in the same background scenario. The inventory comparison follows
+``inventory_treatment`` as above. The reference pulse is added to the same
+baseline for either mode. Ratios are calculated for each FaIR configuration
+before reporting ensemble quantiles.
 
 .. code-block:: python
 
