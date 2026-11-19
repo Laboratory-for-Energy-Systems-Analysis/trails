@@ -241,11 +241,13 @@ def test_pulse_equivalents_reuses_selected_flow_reduction(
     assert delta.loc[2050, "CO2 FFI"] == pytest.approx(1.0e9)
 
 
+@pytest.mark.parametrize("treatment", ["add", "subtract"])
 def test_run_fair_co2_pulse_equivalents_summarizes_by_config(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, treatment: str,
 ) -> None:
     run_lock = Lock()
     run_state = {"calls": 0, "active": 0, "max_active": 0}
+    pulse_inputs = []
 
     def fake_load_emissions_csv(*args: Any, **kwargs: Any) -> pd.DataFrame:
         return pd.DataFrame(
@@ -281,6 +283,7 @@ def test_run_fair_co2_pulse_equivalents_summarizes_by_config(
             & (emissions_df["region"].str.lower() == "world")
         ]
         pulse = float(local.loc[local["variable"] == "CO2 FFI", "2050.5"].iloc[0])
+        pulse_inputs.append(pulse)
         config_multiplier = np.array([1.0, 2.0], dtype=float)
         years = np.array([2050.5, 2051.5], dtype=float)
         rf_vals = np.zeros((1, len(config_names), len(years), 1), dtype=float)
@@ -321,6 +324,7 @@ def test_run_fair_co2_pulse_equivalents_summarizes_by_config(
     result = run_fair_co2_pulse_equivalents(
         trails,
         scenario="s",
+        inventory_treatment=treatment,
         config_names=["c1", "c2"],
         reference_pulse_year=2050,
         window_start=2050,
@@ -337,5 +341,8 @@ def test_run_fair_co2_pulse_equivalents_summarizes_by_config(
     )
     assert indicator["integrated_rf"]["median"] == pytest.approx(1.0e9)
     assert trails.co2_pulse_equivalent is indicator
+    assert indicator["inventory_treatment"] == treatment
+    sign = 1 if treatment == "add" else -1
+    assert sorted(pulse_inputs) == pytest.approx(sorted([0, 0.001 * sign, 0.001]))
     assert run_state["calls"] == 3
     assert run_state["max_active"] == 2

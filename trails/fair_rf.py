@@ -1461,10 +1461,20 @@ def _inventory_delta_by_fair_species_for_trails(
     return delta_by_species, inv_years
 
 
+def _inventory_treatment_direction(inventory_treatment: str) -> int:
+    """Orient both the emissions perturbation and the reported response."""
+    if inventory_treatment == "add":
+        return 1
+    if inventory_treatment == "subtract":
+        return -1
+    raise ValueError("inventory_treatment must be 'add' or 'subtract'.")
+
+
 def run_fair_co2_pulse_equivalents(
     trails: Any,
     *,
     scenario: str,
+    inventory_treatment: str = "add",
     emissions_csv: str | Path = DEFAULT_EMISSIONS_CSV,
     mapping_yaml: str | Path = DEFAULT_MAPPING_YAML,
     exclude_aerosol_ozone_precursors: bool = False,
@@ -1485,14 +1495,21 @@ def run_fair_co2_pulse_equivalents(
 ) -> dict[str, Any]:
     """Run FaIR and calculate fixed-window CO2 pulse-equivalent indicators.
 
-    This performs three scenario-consistent FaIR runs: baseline, baseline plus
-    the Trails inventory perturbation, and baseline plus a reference CO2 pulse.
+    This runs FaIR for the baseline, the baseline with the selected inventory
+    perturbation, and the baseline plus a reference CO2 pulse. The reference
+    pulse is always added to keep the indicator normalisation comparable.
     Equivalents are calculated per FaIR configuration first, then summarized.
 
     :param trails: Trails object with a stored inventory.
     :type trails: Any
     :param scenario: FaIR background scenario.
     :type scenario: str
+    :param inventory_treatment: "add" compares baseline plus inventory
+        with baseline. "subtract" compares baseline with baseline minus
+        inventory and assumes the baseline includes the inventory's dated
+        emissions and removals. Supply a baseline and scaling settings that give
+        a plausible comparison trajectory.
+    :type inventory_treatment: str
     :param emissions_csv: Baseline emissions CSV.
     :type emissions_csv: str | Path
     :param mapping_yaml: Trails-flow to FaIR-species mapping.
@@ -1533,6 +1550,7 @@ def run_fair_co2_pulse_equivalents(
     :returns: Structured CO2 pulse-equivalent result.
     :rtype: dict[str, Any]
     """
+    direction = _inventory_treatment_direction(inventory_treatment)
     debug = bool(getattr(trails, "debug", False))
     if scale_factor is None:
         if scale_target_fraction <= 0:
@@ -1627,7 +1645,9 @@ def run_fair_co2_pulse_equivalents(
                 if ycol not in df_pert_local.columns:
                     continue
                 add = _convert_kg_to_unit(np.array([val]), unit)[0]
-                df_pert_local.loc[idx, ycol] = df_pert_local.loc[idx, ycol] + add
+                df_pert_local.loc[idx, ycol] = (
+                    df_pert_local.loc[idx, ycol] + direction * add
+                )
         return df_pert_local
 
     lca_emissions = _build_lca_perturbed_df(df)
@@ -1717,8 +1737,8 @@ def run_fair_co2_pulse_equivalents(
 
     time_dim = "timebounds" if "timebounds" in rf_base.dims else "time"
     years = np.asarray(rf_base.coords[time_dim].values, dtype=float)
-    dRF_lca = np.asarray((rf_lca - rf_base).values, dtype=float)
-    dT_lca = np.asarray((temp_lca - temp_base).values, dtype=float)
+    dRF_lca = direction * np.asarray((rf_lca - rf_base).values, dtype=float)
+    dT_lca = direction * np.asarray((temp_lca - temp_base).values, dtype=float)
     dRF_ref = np.asarray((rf_ref - rf_base).values, dtype=float)
     dT_ref = np.asarray((temp_ref - temp_base).values, dtype=float)
 
@@ -1744,6 +1764,7 @@ def run_fair_co2_pulse_equivalents(
     indicator_unit = "kg CO2 pulse-equivalent"
 
     indicator = {
+        "inventory_treatment": inventory_treatment,
         "reference_year": int(reference_pulse_year),
         "window_start": int(window_start),
         "window_end": int(window_end),
@@ -1792,6 +1813,7 @@ def run_fair_delta_rf(
     trails: Any,
     *,
     scenario: str,
+    inventory_treatment: str = "add",
     emissions_csv: str | Path = DEFAULT_EMISSIONS_CSV,
     mapping_yaml: str | Path = DEFAULT_MAPPING_YAML,
     exclude_aerosol_ozone_precursors: bool = False,
@@ -1819,6 +1841,12 @@ def run_fair_delta_rf(
     :type trails: Any
     :param scenario: Value for `scenario`.
     :type scenario: str
+    :param inventory_treatment: "add" compares baseline plus inventory
+        with baseline. "subtract" compares baseline with baseline minus
+        inventory and assumes the baseline includes the inventory's dated
+        emissions and removals. Supply a baseline and scaling settings that give
+        a plausible comparison trajectory.
+    :type inventory_treatment: str
     :param emissions_csv: Value for `emissions_csv`.
     :type emissions_csv: str | Path
     :param mapping_yaml: Value for `mapping_yaml`.
@@ -1866,6 +1894,7 @@ def run_fair_delta_rf(
     :returns: Return value.
     :rtype: xr.DataArray
     :raises ValueError: If an error occurs."""
+    direction = _inventory_treatment_direction(inventory_treatment)
     debug = bool(getattr(trails, "debug", False))
     if scaling_factor is not None:
         scale_factor = float(scaling_factor)
@@ -2095,7 +2124,9 @@ def run_fair_delta_rf(
                         continue
                     idx = rows.index[0]
                     add = _convert_kg_to_unit(np.array([val]), unit)[0]
-                    df_pert_local.loc[idx, ycol] = df_pert_local.loc[idx, ycol] + add
+                    df_pert_local.loc[idx, ycol] = (
+                        df_pert_local.loc[idx, ycol] + direction * add
+                    )
             return df_pert_local
         rows = df_pert_local[df_pert_local["variable"] == specie]
         if rows.empty:
@@ -2108,7 +2139,9 @@ def run_fair_delta_rf(
                 continue
             idx = rows.index[0]
             add = _convert_kg_to_unit(np.array([val]), unit)[0]
-            df_pert_local.loc[idx, ycol] = df_pert_local.loc[idx, ycol] + add
+            df_pert_local.loc[idx, ycol] = (
+                df_pert_local.loc[idx, ycol] + direction * add
+            )
         return df_pert_local
 
     if validate_emissions_delta:
@@ -2140,7 +2173,7 @@ def run_fair_delta_rf(
                 if has_half_years:
                     expected.index = expected.index + 0.5
                 expected = expected.reindex(year_vals, fill_value=0.0)
-                expected_kg = expected.to_numpy(dtype=float)
+                expected_kg = direction * expected.to_numpy(dtype=float)
                 abs_diff = np.abs(diff_kg - expected_kg)
                 denom = np.maximum(np.abs(expected_kg), 1e-12)
                 rel_diff = abs_diff / denom
@@ -2463,8 +2496,8 @@ def run_fair_delta_rf(
             temp_pert = f_pert.temperature.sel(
                 scenario=scenario, config=f_pert.configs[0]
             )
-        delta_forcing = forcing_pert - forcing_base
-        delta_temp = temp_pert - temp_base
+        delta_forcing = direction * (forcing_pert - forcing_base)
+        delta_temp = direction * (temp_pert - temp_base)
         if debug:
             try:
                 arr = np.asarray(delta_temp.values, dtype=float)
@@ -2615,8 +2648,8 @@ def run_fair_delta_rf(
             temp_pert = f_pert.temperature.sel(
                 scenario=scenario, config=f_pert.configs[0]
             )
-        delta_forcing = forcing_pert - forcing_base
-        delta_temp = temp_pert - temp_base
+        delta_forcing = direction * (forcing_pert - forcing_base)
+        delta_temp = direction * (temp_pert - temp_base)
         if debug:
             try:
                 arr = np.asarray(delta_temp.values, dtype=float)
@@ -2869,6 +2902,7 @@ def run_fair_delta_rf(
     trails.instant_radiative_forcing = xr.DataArray(
         rf_sparse,
         dims=("quantile", "year", "flow", "root activity"),
+        attrs={"inventory_treatment": inventory_treatment},
         coords={
             "quantile": np.array(quantiles, dtype=float),
             "year": year_coord,
@@ -2893,6 +2927,7 @@ def run_fair_delta_rf(
     trails.delta_temperature = xr.DataArray(
         temp_sparse,
         dims=("quantile", "year", "flow", "root activity"),
+        attrs={"inventory_treatment": inventory_treatment},
         coords={
             "quantile": np.array(quantiles, dtype=float),
             "year": year_coord,

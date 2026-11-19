@@ -60,9 +60,12 @@ def linear_fair(monkeypatch):
     )
     monkeypatch.setattr(rf, "load_emissions_csv", lambda *a, **k: baseline.copy())
 
+    perturbations = []
+
     def run(emissions, scenario, **kwargs):
         configs = kwargs.get("config_names") or ["test"]
         values = emissions[["2000.5", "2001.5", "2002.5"]].sum().to_numpy(float)
+        perturbations.append(values)
         response = np.repeat(np.cumsum(values)[None, None, :], len(configs), axis=1)
         coords = dict(
             scenario=[scenario], config=configs, timebounds=[2000.5, 2001.5, 2002.5]
@@ -78,13 +81,15 @@ def linear_fair(monkeypatch):
         )
 
     monkeypatch.setattr(rf, "_run_fair_emissions", run)
+    return perturbations
 
 
+@pytest.mark.parametrize("treatment", ["add", "subtract"])
 @pytest.mark.parametrize("per_species", [False, True])
 @pytest.mark.parametrize("name", ["Carbon dioxide, in air", "Carbon dioxide, fossil"])
 @pytest.mark.parametrize("amounts", [(5.0, 2.0), (-5.0, -2.0), (-5.0, 2.0)])
 def test_public_rf_and_temperature_paths_preserve_signed_inventory(
-    linear_fair, per_species, name, amounts
+    linear_fair, per_species, name, amounts, treatment
 ):
     uptake = name == "Carbon dioxide, in air"
     direction = -1.0 if uptake else 1.0
@@ -116,6 +121,7 @@ def test_public_rf_and_temperature_paths_preserve_signed_inventory(
     rf.run_fair_delta_rf(
         model,
         scenario="s",
+        inventory_treatment=treatment,
         config_names=["test"],
         per_species_runs=per_species,
         scale_factor=1.0,
@@ -124,7 +130,12 @@ def test_public_rf_and_temperature_paths_preserve_signed_inventory(
         validate_raise=True,
         show_progress=False,
     )
-    expected = np.cumsum([*amounts, 0.0]) * direction / 1e12
+    atmospheric_inventory = np.asarray([*amounts, 0.0]) * direction / 1e12
+    expected = np.cumsum(atmospheric_inventory)
+    applied = np.sum(linear_fair[1:], axis=0)
+    sign = 1 if treatment == "add" else -1
+    np.testing.assert_allclose(applied, sign * atmospheric_inventory, atol=0)
+    assert model.instant_radiative_forcing.attrs["inventory_treatment"] == treatment
     for attribute, scale in [
         ("instant_radiative_forcing", 1.0),
         ("delta_temperature", 2.0),
@@ -135,3 +146,11 @@ def test_public_rf_and_temperature_paths_preserve_signed_inventory(
             .data.todense()[0]
         )
         np.testing.assert_allclose(result, expected * scale, rtol=1e-10, atol=1e-24)
+
+
+@pytest.mark.parametrize(
+    "runner", [rf.run_fair_delta_rf, rf.run_fair_co2_pulse_equivalents]
+)
+def test_inventory_treatment_must_be_recognised(runner):
+    with pytest.raises(ValueError, match="inventory_treatment"):
+        runner(None, scenario="s", inventory_treatment="remove")
