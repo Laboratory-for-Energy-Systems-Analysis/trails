@@ -823,7 +823,7 @@ def test_fair_fast_mode_keeps_tiny_temperature_signal(
     )
 
     assert int(getattr(trails.delta_temperature.data, "nnz", 0)) > 0
-    assert float(trails.delta_temperature.sum().item()) != 0.0
+    assert trails.delta_temperature.sum().to_numpy().item() != 0.0
 
 
 def test_fair_fast_mode_allocates_negative_emissions(

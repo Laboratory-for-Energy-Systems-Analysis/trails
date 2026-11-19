@@ -547,7 +547,7 @@ def test_regular_depth_assessments_remain_available() -> None:
 
         assert trails.graph.number_of_nodes() == nodes
         assert trails.graph.number_of_edges() == edges
-        assert float(trails.scores.sum()) == pytest.approx(score, rel=1e-7)
+        assert trails.scores.sum().to_numpy().item() == pytest.approx(score, rel=1e-7)
 
 
 def test_adaptive_routing_prunes_low_potential_branches() -> None:
@@ -616,7 +616,7 @@ def test_adaptive_routing_prunes_low_potential_branches() -> None:
         float(data["adaptive_cutoff_potential"]) <= effective_cutoff
         for data in pruned_nodes
     )
-    assert float(adaptive.scores.sum()) == pytest.approx(
+    assert adaptive.scores.sum().to_numpy().item() == pytest.approx(
         0.15497121214866638,
         rel=1e-7,
     )
