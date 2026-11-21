@@ -40,6 +40,8 @@ class TemporalExchange:
     amount_source: str = "port"
     offsets: Optional[Sequence[int]] = None
     weights: Optional[Sequence[float]] = None
+    # "dated" sets the build year; "pass_through" keeps it on a dated route.
+    construction_timing: str = ""
 
 
 class TemporalDistribution:

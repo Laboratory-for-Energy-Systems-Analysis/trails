@@ -115,6 +115,7 @@ TEMPORAL_COLS = [
     "temporal_amount_source",
     "temporal_offsets",
     "temporal_weights",
+    "construction_timing",
 ]
 
 # For B you likely have "index of biosphere flow" instead of "index of product"
@@ -334,9 +335,10 @@ def _parse_temporal_exchange_row(
     :type row: Mapping[str, Any]
     :returns: Return value.
     :rtype: TemporalExchange | None"""
+    construction_timing = _parse_construction_timing(row.get("construction_timing"))
     dist_code = _parse_intish_or_none(row.get("temporal_distribution"))
     if dist_code is None:
-        return None
+        return _undistributed_construction(construction_timing)
 
     loc = _parse_float_or_none(row.get("temporal_loc"))
     scale = _parse_float_or_none(row.get("temporal_scale"))
@@ -360,7 +362,27 @@ def _parse_temporal_exchange_row(
         amount_source=amount_source,
         offsets=offsets,
         weights=weights,
+        construction_timing=construction_timing,
     )
+
+
+def _parse_construction_timing(value: object) -> str:
+    """Read an optional marker that applies only to construction routing."""
+    if value is None or pd.isna(value):
+        return ""
+    role = str(value).strip()
+    if role not in {"", "dated", "pass_through"}:
+        raise ValueError(f"Unknown construction_timing: {role!r}")
+    return role
+
+
+def _undistributed_construction(role: str) -> TemporalExchange | None:
+    if role == "dated":
+        raise ValueError("A dated construction exchange needs a time distribution.")
+    if role == "pass_through":
+        # An undelayed market-to-market edge still carries the date onward.
+        return TemporalExchange(1, 0.0, None, 0, 0, construction_timing=role)
+    return None
 
 
 def _parse_json_number_list(
@@ -642,6 +664,7 @@ def load_matrices_from_package(
         amount_source: Any,
         offsets: Any,
         weights: Any,
+        construction_timing: str = "",
     ) -> TemporalExchange | None:
         """parse td fields.
 
@@ -665,12 +688,12 @@ def load_matrices_from_package(
         :rtype: TemporalExchange | None
         :raises ValueError: If an error occurs."""
         # distribution required
-        if dist is None:
-            return None
+        if dist is None or pd.isna(dist) or dist == 0:
+            return _undistributed_construction(construction_timing)
         if isinstance(dist, str):
             s = dist.strip()
             if s == "":
-                return None
+                return _undistributed_construction(construction_timing)
             try:
                 dist_code = int(float(s))
             except Exception:
@@ -783,6 +806,7 @@ def load_matrices_from_package(
             amount_source=src,
             offsets=_parse_pulses(offsets, integer=True),
             weights=_parse_pulses(weights, integer=False),
+            construction_timing=construction_timing,
         )
 
     # ---------- Load all A_matrix.csv ----------
@@ -816,8 +840,13 @@ def load_matrices_from_package(
             max_product = max(max_product, int(prod.max()))
 
         # Temporal exchanges (A)
-        if "temporal_distribution" in df.columns:
-            td = df["temporal_distribution"].to_numpy(copy=False)
+        if "temporal_distribution" in df.columns or "construction_timing" in df:
+            td = (
+                df["temporal_distribution"].to_numpy(copy=False)
+                if "temporal_distribution" in df
+                else np.zeros(len(df))
+            )
+            roles = df["construction_timing"] if "construction_timing" in df else None
 
             # The typed reader represents blank distributions as NaN. Both
             # NaN and zero mean that no temporal distribution needs parsing.
@@ -825,6 +854,8 @@ def load_matrices_from_package(
                 mask_td = td != ""
             else:
                 mask_td = (td != 0) & ~pd.isna(td)
+            if roles is not None:
+                mask_td |= roles.notna().to_numpy()
 
             if mask_td.any():
                 act_td = df.loc[mask_td, "index of activity"].to_numpy(
@@ -833,7 +864,7 @@ def load_matrices_from_package(
                 prod_td = df.loc[mask_td, "index of product"].to_numpy(
                     np.int64, copy=False
                 )
-                dist_td = df.loc[mask_td, "temporal_distribution"].to_numpy(copy=False)
+                dist_td = td[mask_td]
 
                 loc_td = (
                     df.loc[mask_td, "temporal_loc"].to_numpy(copy=False)
@@ -871,6 +902,11 @@ def load_matrices_from_package(
                     else None
                 )
 
+                role_td = (
+                    roles.loc[mask_td].to_numpy(copy=False)
+                    if roles is not None
+                    else None
+                )
                 for irow in range(act_td.size):
                     tex = _parse_td_fields(
                         dist_td[irow],
@@ -881,6 +917,11 @@ def load_matrices_from_package(
                         None if src_td is None else src_td[irow],
                         None if offsets_td is None else offsets_td[irow],
                         None if weights_td is None else weights_td[irow],
+                        (
+                            ""
+                            if role_td is None
+                            else _parse_construction_timing(role_td[irow])
+                        ),
                     )
                     if tex is not None:
                         temporal_exchanges[

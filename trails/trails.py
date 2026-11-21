@@ -103,6 +103,7 @@ class _TechExpansionEntry:
     amount_source: str
     offsets: tuple[int, ...] = ()
     weights: tuple[float, ...] = ()
+    construction_dated: bool = False
 
 
 class Trails:
@@ -385,8 +386,12 @@ class Trails:
             tuple[Optional[TemporalExchange], list[tuple[int, float]]],
         ] = {}
         self._tech_expansion_template_cache: dict[
-            tuple[int, int, int, bool], tuple[_TechExpansionEntry, ...]
+            tuple[int, int, int, bool, bool], tuple[_TechExpansionEntry, ...]
         ] = {}
+        self._has_construction_timing = any(
+            getattr(entry, "construction_timing", "") == "dated"
+            for entry in (self.temporal_technosphere_exchanges or {}).values()
+        )
         self._scenario_year_map_cache: dict[int, int] = {}
         self._template_year_map_cache: dict[int, int] = {}
         self._static_activity_score_cache: dict[str, object] = {}
@@ -1686,6 +1691,8 @@ class Trails:
                     != tuple(getattr(tex1, "offsets", ()) or ())
                     or tuple(getattr(tex0, "weights", ()) or ())
                     != tuple(getattr(tex1, "weights", ()) or ())
+                    or getattr(tex0, "construction_timing", "")
+                    != getattr(tex1, "construction_timing", "")
                 ):
                     return tex0 if (year - y0) <= (y1 - year) else tex1
 
@@ -1713,6 +1720,7 @@ class Trails:
                     amount_source=getattr(tex0, "amount_source", "port"),
                     offsets=getattr(tex0, "offsets", None),
                     weights=getattr(tex0, "weights", None),
+                    construction_timing=getattr(tex0, "construction_timing", ""),
                 )
 
         return None
@@ -2018,6 +2026,7 @@ class Trails:
         act_idx: int,
         use_temporal_distributions: bool,
         debug: bool,
+        build_date_set: bool = False,
     ) -> tuple[_TechExpansionEntry, ...]:
         """Return cached child-expansion entries for one technosphere row."""
         if self.A is None:
@@ -2029,6 +2038,7 @@ class Trails:
             int(t),
             int(act_idx),
             bool(use_temporal_distributions),
+            build_date_set,
         )
         cached_template = self._tech_expansion_template_cache.get(cache_key)
         if cached_template is not None:
@@ -2064,7 +2074,9 @@ class Trails:
                     debug=debug,
                 )
 
-            if tex is None or not use_temporal_distributions:
+            role = getattr(tex, "construction_timing", "")
+            keep_date = build_date_set and role == "pass_through"
+            if tex is None or not use_temporal_distributions or keep_date:
                 production_amount = self._child_production_amount(int(t), product_index)
                 if production_amount == 0.0:
                     continue
@@ -2075,6 +2087,7 @@ class Trails:
                             child_act_idx=product_index,
                             scale=float(scale),
                             amount_source="none",
+                            construction_dated=keep_date,
                         )
                     )
                 continue
@@ -2101,6 +2114,7 @@ class Trails:
                         amount_source="matrix",
                         offsets=offsets,
                         weights=weights,
+                        construction_dated=role == "dated",
                     )
                 )
                 continue
@@ -2117,6 +2131,7 @@ class Trails:
                         amount_source="port",
                         offsets=offsets,
                         weights=weights,
+                        construction_dated=role == "dated",
                     )
                 )
 
@@ -2132,8 +2147,10 @@ class Trails:
         amount: float,
         use_temporal_distributions: bool = True,
         debug: bool = False,
-    ) -> dict[tuple[int, int], float]:
-        """Expand child demands as flat ``(year, activity)`` amounts."""
+        build_date_set: bool = False,
+        track_build_date: bool = False,
+    ) -> dict[tuple[int, int] | tuple[int, int, bool], float]:
+        """Expand child amounts, keeping dated and undated routes separate."""
         context = self._get_scenario_context(int(year))
         if context is None:
             return {}
@@ -2144,11 +2161,12 @@ class Trails:
             act_idx=int(act_idx),
             use_temporal_distributions=bool(use_temporal_distributions),
             debug=debug,
+            build_date_set=build_date_set,
         )
         if not entries:
             return {}
 
-        out: dict[tuple[int, int], float] = {}
+        out = {}
 
         year_int = int(year)
         act_int = int(act_idx)
@@ -2157,6 +2175,12 @@ class Trails:
         scenario_index_get = self.scenario_index.get
         for entry in entries:
             child_act = int(entry.child_act_idx)
+            suffix = (
+                (child_act, entry.construction_dated)
+                if track_build_date
+                else (child_act,)
+            )
+
             if entry.amount_source == "matrix":
                 for offset, weight in zip(entry.offsets, entry.weights):
                     if weight == 0.0:
@@ -2182,7 +2206,7 @@ class Trails:
                         * float(weight)
                     )
                     if child_amount != 0.0:
-                        key = (raw_year, child_act)
+                        key = (raw_year, *suffix)
                         out[key] = out_get(key, 0.0) + child_amount
                 continue
 
@@ -2190,7 +2214,7 @@ class Trails:
             if child_base_amount == 0.0:
                 continue
             if not entry.offsets:
-                key = (year_int, child_act)
+                key = (year_int, *suffix)
                 out[key] = out_get(key, 0.0) + child_base_amount
                 continue
             for offset, weight in zip(entry.offsets, entry.weights):
@@ -2199,7 +2223,7 @@ class Trails:
                 child_amount = child_base_amount * weight
                 if child_amount != 0.0:
                     raw_year = year_int + offset
-                    key = (raw_year, child_act)
+                    key = (raw_year, *suffix)
                     out[key] = out_get(key, 0.0) + child_amount
 
         return out
@@ -2768,7 +2792,10 @@ class Trails:
         debug_enabled = bool(self.debug)
         track_roots = bool(attribute_to_roots)
 
-        queue.append((start_year_int, start_activity, start_activity_amount, 0, None))
+        queue.append(
+            (start_year_int, start_activity, start_activity_amount, 0, None, False)
+        )
+        track_build_date = getattr(self, "_has_construction_timing", False)
 
         if show_progress:
             pbar = tqdm(
@@ -2784,7 +2811,7 @@ class Trails:
         max_processed_depth = 0
 
         while queue:
-            year, act, amt, depth, root_act = queue.popleft()
+            year, act, amt, depth, root_act, build_date_set = queue.popleft()
             year = map_year(year)
 
             if amt == 0.0:
@@ -2829,6 +2856,11 @@ class Trails:
                 amount=amt,
                 use_temporal_distributions=True,
                 debug=debug_enabled,
+                **(
+                    {"build_date_set": build_date_set, "track_build_date": True}
+                    if track_build_date
+                    else {}
+                ),
             )
 
             if not child_demands:
@@ -2846,7 +2878,9 @@ class Trails:
                 if track_roots:
                     _add_root_amount(node["direct_bio_roots"], root_act, amt, act)
 
-            for (child_year, child_act), child_amt in child_demands.items():
+            for child_key, child_amt in child_demands.items():
+                child_year, child_act = child_key[:2]
+                child_dated = child_key[2] if track_build_date else False
                 child_amt = float(child_amt)
                 if child_amt == 0.0:
                     continue
@@ -2930,6 +2964,7 @@ class Trails:
                         child_amt,
                         child_depth,
                         child_root,
+                        child_dated,
                     )
                 )
 
@@ -6658,7 +6693,12 @@ class Trails:
         # Traversal state
         # ------------------------------------------------------------------
         queue = deque()
-        queue.append((int(start_year), int(start_act_idx), float(amount), 0, (), None))
+        queue.append(
+            (int(start_year), int(start_act_idx), float(amount), 0, (), None, False)
+        )
+        track_build_date = use_temporal_distributions and getattr(
+            self, "_has_construction_timing", False
+        )
 
         frontier_total = defaultdict(float)  # (year, act) -> amt
         provenance_roots = defaultdict(
@@ -6674,7 +6714,7 @@ class Trails:
         bio_cache: dict[tuple[int, int], bool] = {}
 
         while queue:
-            year, act, amt, depth, path, root_act = queue.popleft()
+            year, act, amt, depth, path, root_act, build_date_set = queue.popleft()
 
             # ------------------------------------------------------------------
             # Ensure we always have a valid root for any non-root node.
@@ -6726,16 +6766,31 @@ class Trails:
                 continue
 
             # Expand this node (only if not cut)
-            child_demands = self.expand_temporal_exchanges(
-                year=year,
-                act_idx=act,
-                amount=amt,
-                use_temporal_distributions=use_temporal_distributions,
-                debug=debug,
-            )
+            if track_build_date:
+                child_edges = self._expand_temporal_child_demands_fast(
+                    year=year,
+                    act_idx=act,
+                    amount=amt,
+                    debug=debug,
+                    build_date_set=build_date_set,
+                    track_build_date=True,
+                )
+            else:
+                child_demands = self.expand_temporal_exchanges(
+                    year=year,
+                    act_idx=act,
+                    amount=amt,
+                    use_temporal_distributions=use_temporal_distributions,
+                    debug=debug,
+                )
+                child_edges = {
+                    (y, supplier, False): amount
+                    for y, mapping in child_demands.items()
+                    for supplier, amount in mapping.items()
+                }
 
             # Leaf: record it
-            if not child_demands:
+            if not child_edges:
                 self._record_frontier(
                     frontier_total,
                     provenance_roots,
@@ -6770,12 +6825,7 @@ class Trails:
                 # for this node (consistent with traversal).
                 if nodes_processed <= WARMUP_LIMIT:
                     # Count children that would actually be enqueued
-                    cnt = 0
-                    if child_demands:
-                        for _cy, _mapping in child_demands.items():
-                            for _ca, _camt in _mapping.items():
-                                cnt += 1
-                    branching_samples.append(cnt)
+                    branching_samples.append(len(child_edges))
 
                 # Once warm-up complete, set a total estimate
                 if nodes_processed == WARMUP_LIMIT:
@@ -6786,8 +6836,8 @@ class Trails:
                     pbar.refresh()
 
             # Enqueue children
-            for child_year, mapping in child_demands.items():
-                for child_act, child_amt in mapping.items():
+            for (child_year, child_act, child_dated), child_amt in child_edges.items():
+                if child_amt:
                     child_amt = float(child_amt)
 
                     # Preserve remainder monotonically: do not expand tiny contributions,
@@ -6828,6 +6878,7 @@ class Trails:
                             depth + 1,
                             child_path,
                             child_root,
+                            child_dated,
                         )
                     )
 

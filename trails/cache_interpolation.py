@@ -89,6 +89,7 @@ def _cache_key(
     except Exception:
         file_fingerprint = {}
     payload = {
+        "construction_timing_schema": 1,
         "descriptor": package_desc,
         "file_fingerprint": file_fingerprint,
         "value_dtype": value_dtype,

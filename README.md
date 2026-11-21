@@ -293,6 +293,11 @@ trails.temporal_routing(
 )
 ```
 
+When supplied by Premise, the optional `construction_timing` column in
+`A_matrix.csv` distinguishes the exchange that assigns a build date
+(`dated`) from links that pass it through (`pass_through`). A shared
+asset market keeps its usual timing when reached without a build date.
+
 Adaptive routing requires explicit regular ``adaptive_methods``. These screening
 methods are independent of the regular or EDGES methods later passed to
 ``lcia()``.
