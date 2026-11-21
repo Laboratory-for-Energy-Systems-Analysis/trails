@@ -298,6 +298,11 @@ When supplied by Premise, the optional `construction_timing` column in
 (`dated`) from links that pass it through (`pass_through`). A shared
 asset market keeps its usual timing when reached without a build date.
 
+Between two inventory years with explicit construction profiles, TRAILS
+interpolates the weights for each calendar build year. It keeps build years
+through the year of use and rescales their weights to sum to one. This uses
+the timing data already in the matrix CSVs.
+
 Adaptive routing requires explicit regular ``adaptive_methods``. These screening
 methods are independent of the regular or EDGES methods later passed to
 ``lcia()``.

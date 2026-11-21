@@ -116,3 +116,68 @@ def test_construction_date_only_passes_to_same_asset(
     assert frontier == {
         (y, i): amount for i, dates in expected.items() for y, amount in dates.items()
     }
+
+
+def test_interpolated_inventory_preserves_a_fixed_build_year(tmp_path):
+    # Snapshot resources can appear in either order in the data package.
+    model = make_construction_package(
+        tmp_path, {2050: (4, [-40], [1]), 2030: (2, [-20], [1])}
+    )
+    for year, amount in ((2035, 2.5), (2040, 3), (2030, 2), (2050, 4)):
+        model.temporal_routing(
+            start_year=year, start_act_idx=0, max_depth=3, show_progress=False
+        )
+        # Both the market and its supplier receive the full amount in 2010.
+        for activity in (2, 4):
+            dates = {
+                dst[0]: data["amount"]
+                for _, dst, data in model.graph.edges(data=True)
+                if dst[-1] == activity
+            }
+            assert dates == pytest.approx({2010: amount})
+        frontier, _ = model.temporal_traversal(year, 0, max_depth=3)
+        assert {(date, i) for date, i in frontier if i == 4} == {(2010, 4)}
+        assert frontier[2010, 4] == pytest.approx(amount)
+
+
+def test_interpolation_blends_build_years_and_excludes_future_construction(tmp_path):
+    model = make_construction_package(
+        tmp_path,
+        {
+            2030: (2, [-20, 0], [0.6, 0.4]),
+            2050: (4, [-40, -10, 0], [0.2, 0.4, 0.4]),
+        },
+    )
+    expected = [
+        (2040, {2010: 0.5, 2030: 0.25, 2040: 0.25}, 3),
+        (2035, {2010: 0.625, 2030: 0.375}, 2.5),
+        (2045, {2010: 3 / 7, 2030: 1 / 7, 2040: 3 / 7}, 3.5),
+    ]
+    for year, weights, amount in expected:
+        distribution = model.get_temporal_distribution(year, 0, 2)
+        assert {
+            year + offset: share
+            for offset, share in distribution.iter_offsets_and_weights()
+        } == pytest.approx(weights)
+        model.temporal_routing(
+            start_year=year, start_act_idx=0, max_depth=1, show_progress=False
+        )
+        assert {
+            dst[0]: data["amount"]
+            for _, dst, data in model.graph.edges(data=True)
+            if dst[-1] == 2
+        } == pytest.approx({date: amount * weight for date, weight in weights.items()})
+
+
+def test_ordinary_empirical_timing_keeps_its_relative_offsets(tmp_path):
+    model = make_construction_package(
+        tmp_path, {2030: (2, [-20], [1]), 2050: (4, [-40], [1])}, timing=""
+    )
+    model.temporal_routing(
+        start_year=2035, start_act_idx=0, max_depth=1, show_progress=False
+    )
+    assert {
+        dst[0]: data["amount"]
+        for _, dst, data in model.graph.edges(data=True)
+        if dst[-1] == 2
+    } == pytest.approx({2015: 2.5})

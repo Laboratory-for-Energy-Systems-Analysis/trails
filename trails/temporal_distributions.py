@@ -43,6 +43,17 @@ class TemporalExchange:
     # "dated" sets the build year; "pass_through" keeps it on a dated route.
     construction_timing: str = ""
 
+    @property
+    def has_build_year_weights(self) -> bool:
+        """Whether the exchange explicitly dates construction by build year."""
+        return (
+            self.construction_timing == "dated"
+            and self.distribution == 6
+            and self.offsets is not None
+            and self.weights is not None
+            and len(self.offsets) == len(self.weights) > 0
+        )
+
 
 class TemporalDistribution:
     """Turn a TemporalExchange into discrete (offset, weight) pairs."""

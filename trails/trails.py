@@ -1,6 +1,6 @@
 # trails.py
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import time
 import os
 from typing import Any, Dict, List, Optional, Callable
@@ -301,6 +301,8 @@ class Trails:
         self.template_years_int = np.array(
             [int(lbl) for lbl in self.template_labels], dtype=int
         )
+        # Snapshot resources need not be listed in chronological order.
+        self._template_years_chronological = np.sort(self.template_years_int)
 
         self.years_int = np.array([int(lbl) for lbl in self.scenario_labels], dtype=int)
         self.min_year = int(self.years_int.min())
@@ -1976,8 +1978,7 @@ class Trails:
         :type debug: bool
         :returns: Return value.
         :rtype: tuple[Optional[TemporalExchange], list[tuple[int, float]]]"""
-        y_tpl = self._map_year_to_template_year(year)
-        key = (int(y_tpl), int(act_idx), int(prod_idx))
+        key, _ = self._tech_timing_cache_key(year, act_idx, prod_idx)
         cached = self._tech_td_expanded_cache.get(key)
         if cached is not None:
             return cached
@@ -2032,9 +2033,15 @@ class Trails:
         if self.A is None:
             return ()
 
-        template_year = int(self._map_year_to_template_year(int(year)))
+        cache_year = (
+            int(year)
+            if use_temporal_distributions
+            and getattr(self, "_has_construction_timing", False)
+            and len(self.template_years_int) > 1
+            else self._map_year_to_template_year(year)
+        )
         cache_key = (
-            int(template_year),
+            cache_year,
             int(t),
             int(act_idx),
             bool(use_temporal_distributions),
@@ -2261,6 +2268,9 @@ class Trails:
         :type prod_idx: int
         :returns: Return value.
         :rtype: TemporalExchange | None"""
+        routed = self._get_tech_temporal_exchange(year, act_idx, prod_idx)
+        if routed is not None and routed.has_build_year_weights:
+            return routed
         return self._interpolate_temporal_exchange(
             year,
             act_idx,
@@ -2281,12 +2291,7 @@ class Trails:
         :type prod_idx: int
         :returns: Return value.
         :rtype: TemporalDistribution | None"""
-        tex = self._interpolate_temporal_exchange(
-            year,
-            act_idx,
-            prod_idx,
-            self.temporal_technosphere_exchanges,
-        )
+        tex = self.get_temporal_exchange(year, act_idx, prod_idx)
         if tex is None:
             return None
         return TemporalDistribution(tex)
@@ -3251,6 +3256,21 @@ class Trails:
 
         return demand
 
+    def _tech_timing_cache_key(
+        self, year: int, act_idx: int, prod_idx: int
+    ) -> tuple[tuple[int, int, int], int]:
+        """Cache dated construction by year of use and other timing by snapshot."""
+        template_year = self._map_year_to_template_year(year)
+        if year != template_year and getattr(self, "_has_construction_timing", False):
+            years = self._template_years_chronological
+            if years[0] < year < years[-1]:
+                exchange = self.temporal_technosphere_exchanges.get(
+                    (str(template_year), act_idx, prod_idx)
+                )
+                if exchange is not None and exchange.has_build_year_weights:
+                    return (int(year), act_idx, prod_idx), template_year
+        return (template_year, act_idx, prod_idx), template_year
+
     def _get_tech_temporal_exchange(
         self, year: int, act_idx: int, prod_idx: int
     ) -> Optional[TemporalExchange]:
@@ -3267,13 +3287,68 @@ class Trails:
         if not self.temporal_technosphere_exchanges:
             return None
 
-        y_tpl = self._map_year_to_template_year(year)
-        key = (int(y_tpl), int(act_idx), int(prod_idx))
+        key, template_year = self._tech_timing_cache_key(year, act_idx, prod_idx)
         if key in self._tech_td_cache:
             return self._tech_td_cache[key]
-        tex = self.temporal_technosphere_exchanges.get((str(y_tpl), key[1], key[2]))
+        exchanges = self.temporal_technosphere_exchanges
+        tex = exchanges.get((str(template_year), act_idx, prod_idx))
+        if key[0] != template_year:
+            # Blend only the two inventories surrounding the requested year.
+            years = self._template_years_chronological
+            pos = int(np.searchsorted(years, year))
+            earlier_year, later_year = int(years[pos - 1]), int(years[pos])
+            earlier = exchanges.get((str(earlier_year), act_idx, prod_idx))
+            later = exchanges.get((str(later_year), act_idx, prod_idx))
+            if earlier is not None and later is not None:
+                tex = (
+                    self._interpolate_construction_weights(
+                        year, earlier_year, earlier, later_year, later
+                    )
+                    or tex
+                )
         self._tech_td_cache[key] = tex
         return tex
+
+    def _interpolate_construction_weights(
+        self,
+        year: int,
+        earlier_year: int,
+        earlier: TemporalExchange,
+        later_year: int,
+        later: TemporalExchange,
+    ) -> TemporalExchange | None:
+        """Blend empirical construction weights by calendar build year."""
+        if (
+            not earlier.has_build_year_weights
+            or not later.has_build_year_weights
+            or earlier.amount_source != later.amount_source
+        ):
+            return None
+
+        later_share = (year - earlier_year) / (later_year - earlier_year)
+        weights_by_year: dict[int, float] = defaultdict(float)
+        for snapshot, exchange, share in (
+            (earlier_year, earlier, 1 - later_share),
+            (later_year, later, later_share),
+        ):
+            # Reuse normalized profiles when several exchanges share a fleet.
+            for offset, weight in self._get_td_offsets(tex=exchange, debug=False):
+                build_year = snapshot + offset
+                if build_year <= year:
+                    weights_by_year[build_year] += share * weight
+
+        total = sum(weights_by_year.values())
+        if total <= 0:
+            return None
+        build_years = sorted(weights_by_year)
+        offsets = [build_year - year for build_year in build_years]
+        return replace(
+            earlier,
+            offsets=offsets,
+            weights=[weights_by_year[build_year] / total for build_year in build_years],
+            offset_min=offsets[0],
+            offset_max=offsets[-1],
+        )
 
     def _get_bio_temporal_exchange(
         self, year: int, act_idx: int, flow_idx: int
